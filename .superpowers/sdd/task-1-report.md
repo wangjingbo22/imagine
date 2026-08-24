@@ -16,14 +16,19 @@
   3. start/end-date mismatch;
   4. Trip-day/date mismatch;
   5. nonzero day index;
-  6. equal time-window bounds (the `end <= start` boundary); and
-  7. daily budget above total budget.
+  6. equal time-window bounds;
+  7. reversed time-window bounds;
+  8. daily budget above total budget;
+  9. invalid preference hardness; and
+  10. normalized must-visit/avoid-place preference conflict.
 - Every V1 case asserts HTTP 422, `TRIP_SCHEMA_INVALID`, the exact public path
   and error code, then verifies a 404 `TRIP_NOT_FOUND` retrieval so a rejected
   V1 cannot persist Trip state.
-- An invalid V2 multi-participant regression which creates and executes a valid
-  V1, then requires the rejected V2 to leave V1 as CURRENT, Trip status as
-  `EXECUTING`, and `proposedPlans` empty.
+- Parameterized invalid V2 regressions for a multi-participant snapshot and an
+  invalid-preference-hardness snapshot. Each isolated case creates and executes
+  a valid V1, captures its state before the invalid V2 submission, and requires
+  its complete CURRENT plan, `EXECUTING` status, and empty candidate list to
+  remain unchanged afterward.
 
 ## RED verification
 
@@ -33,14 +38,15 @@ Command run:
 & 'C:\Users\lenovo\Desktop\实训\2026lindashixun12zu\.venv\Scripts\python.exe' -m pytest -q tests/test_plan_versions.py -k 'single_day_snapshot or invalid_v2_snapshot'
 ```
 
-Result: exit 1; `8 failed, 6 deselected in 1.06s`.
+Result: exit 1; `12 failed, 6 deselected in 1.38s`.
 
-- All seven V1 cases failed at the intended HTTP-contract assertion because the
+- All ten V1 cases failed at the intended HTTP-contract assertion because the
   current wide `Trip` snapshot model accepted each payload and returned 200,
   rather than a 422 schema error.
-- The V2 case established V1 successfully, then received 409 rather than 422:
-  it reached the existing persistence/state guard (`TRIP_SNAPSHOT_IMMUTABLE`)
-  instead of being rejected at the snapshot schema boundary.
+- Both V2 cases established V1 and read the expected `CURRENT`/`EXECUTING`
+  state successfully, then received 409 rather than 422. They reached the
+  existing persistence/state guard (`TRIP_SNAPSHOT_IMMUTABLE`) instead of being
+  rejected at the snapshot schema boundary.
 
 These failures demonstrate the intended T014 defect, not a test syntax or
 fixture failure.
@@ -57,4 +63,6 @@ fixture failure.
 
 ## Commit
 
-Commit message: `test: expose T014 plan snapshot bypass`.
+Initial RED-test commit: `test: expose T014 plan snapshot bypass`.
+
+Matrix-completion commit message: `test: complete T014 snapshot policy matrix`.

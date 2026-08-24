@@ -300,9 +300,24 @@ async def test_plan_http_rejects_path_payload_trip_mismatch(tmp_path: Path) -> N
             "invalid_time_window",
         ),
         (
+            "reversed_time_window",
+            "tripSnapshot.days[0].timeWindow.end",
+            "invalid_time_window",
+        ),
+        (
             "daily_budget_exceeds_total",
             "tripSnapshot.days[0].dailyBudgetCents",
             "budget_exceeded",
+        ),
+        (
+            "invalid_preference_hardness",
+            "tripSnapshot.participants[0].preferences[0].isHard",
+            "invalid_preference_hardness",
+        ),
+        (
+            "normalized_preference_conflict",
+            "tripSnapshot.participants[0].preferences[1].value",
+            "preference_conflict",
         ),
     ],
 )
@@ -335,8 +350,27 @@ async def test_single_day_snapshot_rejects_invalid_v1_without_persistence(
         plan_day["dayIndex"] = 1  # type: ignore[index]
     elif invalid_case == "equal_time_window":
         snapshot_day["timeWindow"]["end"] = "09:00:00"  # type: ignore[index]
+    elif invalid_case == "reversed_time_window":
+        snapshot_day["timeWindow"]["end"] = "08:59:59"  # type: ignore[index]
     elif invalid_case == "daily_budget_exceeds_total":
         snapshot_day["dailyBudgetCents"] = 35_001  # type: ignore[index]
+    elif invalid_case == "invalid_preference_hardness":
+        snapshot["participants"][0]["preferences"][0]["isHard"] = True  # type: ignore[index]
+    elif invalid_case == "normalized_preference_conflict":
+        snapshot["participants"][0]["preferences"] = [  # type: ignore[index]
+            {
+                "type": "MUST_VISIT",
+                "value": " 故宫 ",
+                "weight": 5,
+                "isHard": True,
+            },
+            {
+                "type": "AVOID_PLACE",
+                "value": "故宫",
+                "weight": 5,
+                "isHard": True,
+            },
+        ]
     else:
         raise AssertionError(f"Unhandled invalid snapshot case: {invalid_case}")
 
@@ -354,8 +388,22 @@ async def test_single_day_snapshot_rejects_invalid_v1_without_persistence(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("invalid_case", "expected_path", "expected_code"),
+    [
+        ("multiple_participants", "tripSnapshot.participants", "too_long"),
+        (
+            "invalid_preference_hardness",
+            "tripSnapshot.participants[0].preferences[0].isHard",
+            "invalid_preference_hardness",
+        ),
+    ],
+)
 async def test_invalid_v2_snapshot_preserves_current_v1_execution_state(
     tmp_path: Path,
+    invalid_case: str,
+    expected_path: str,
+    expected_code: str,
 ) -> None:
     app = create_app(
         service=UnusedLocationService(),  # type: ignore[arg-type]
@@ -368,9 +416,16 @@ async def test_invalid_v2_snapshot_preserves_current_v1_execution_state(
     v2["version"] = 2
     v2["parentId"] = v1["planId"]
     v2["reason"] = "DELAY"
-    v2["tripSnapshot"]["participants"].append(  # type: ignore[index]
-        copy.deepcopy(v2["tripSnapshot"]["participants"][0])  # type: ignore[index]
-    )
+    if invalid_case == "multiple_participants":
+        v2["tripSnapshot"]["participants"].append(  # type: ignore[index]
+            copy.deepcopy(v2["tripSnapshot"]["participants"][0])  # type: ignore[index]
+        )
+    elif invalid_case == "invalid_preference_hardness":
+        v2["tripSnapshot"]["participants"][0]["preferences"][0][  # type: ignore[index]
+            "isHard"
+        ] = True
+    else:
+        raise AssertionError(f"Unhandled invalid V2 snapshot case: {invalid_case}")
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -382,16 +437,22 @@ async def test_invalid_v2_snapshot_preserves_current_v1_execution_state(
             f"/api/v1/trips/{trip_id}/plan-versions/{v1['planId']}/confirm"
         )
         started_v1 = await client.post(f"/api/v1/trips/{trip_id}/execution/start")
-        rejected_v2, restored = await post_proposal_and_restore_state(client, v2)
+        state_before = await client.get(f"/api/v1/trips/{trip_id}")
+        rejected_v2, state_after = await post_proposal_and_restore_state(client, v2)
 
     assert registered_v1.status_code == confirmed_v1.status_code == started_v1.status_code == 200
+    assert state_before.status_code == 200
+    before = state_before.json()["data"]
+    assert before["tripStatus"] == "EXECUTING"
+    assert before["currentPlan"]["planId"] == v1["planId"]
+    assert before["proposedPlans"] == []
     assert rejected_v2.status_code == 422
     body = rejected_v2.json()
     assert body["code"] == "TRIP_SCHEMA_INVALID"
-    assert body["errors"][0]["path"] == "tripSnapshot.participants"
-    assert body["errors"][0]["code"] == "too_long"
-    assert restored.status_code == 200
-    state = restored.json()["data"]
-    assert state["tripStatus"] == "EXECUTING"
-    assert state["currentPlan"]["planId"] == v1["planId"]
-    assert state["proposedPlans"] == []
+    assert body["errors"][0]["path"] == expected_path
+    assert body["errors"][0]["code"] == expected_code
+    assert state_after.status_code == 200
+    after = state_after.json()["data"]
+    assert after["tripStatus"] == "EXECUTING"
+    assert after["currentPlan"] == before["currentPlan"]
+    assert after["proposedPlans"] == []
