@@ -16,6 +16,7 @@ from pydantic import (
     ValidationInfo,
     alias_generators,
     field_validator,
+    model_validator,
 )
 from pydantic_core import PydanticCustomError
 
@@ -210,7 +211,7 @@ def _normalized_preference(value: str) -> str:
 
 
 def validate_single_day_policy(
-    trip: CreateSingleDayTrip,
+    trip: CreateSingleDayTrip | PlanReviewTripSnapshot,
 ) -> list[ValidationIssue]:
     """Validate cross-field rules that JSON Schema cannot express alone."""
 
@@ -301,6 +302,27 @@ def validate_single_day_policy(
     return issues
 
 
+class PlanReviewTripSnapshot(Trip):
+    """A single-day Trip snapshot admitted to Plan review."""
+
+    mode: Literal[TripMode.SINGLE]
+    status: Literal[TripStatus.PLAN_REVIEW]
+    participants: list[Participant] = Field(min_length=1, max_length=1)
+    days: list[TripDayInput] = Field(min_length=1, max_length=1)
+
+    @model_validator(mode="after")
+    def validate_single_day_snapshot_policy(self) -> "PlanReviewTripSnapshot":
+        policy_issues = validate_single_day_policy(self)
+        if policy_issues:
+            issue = policy_issues[0]
+            raise PydanticCustomError(
+                issue.code,
+                issue.message,
+                {"public_path": f"tripSnapshot.{issue.path}"},
+            )
+        return self
+
+
 def validate_trip_json(raw: str | bytes) -> CreateSingleDayTrip:
     """Parse and validate one complete normalized Trip JSON payload."""
 
@@ -323,6 +345,7 @@ __all__ = [
     "GeoPoint",
     "NapWindow",
     "Participant",
+    "PlanReviewTripSnapshot",
     "Preference",
     "PreferenceType",
     "ProviderConfig",

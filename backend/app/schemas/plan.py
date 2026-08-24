@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints, UUID4, model_validator
 
-from .trip import ContractModel, Trip, TripStatus
+from .trip import ContractModel, PlanReviewTripSnapshot, TripStatus
 
 
 NonBlankText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -119,7 +119,7 @@ class PlanSourceSnapshot(ContractModel):
 class ProposedPlanVersion(ContractModel):
     schema_version: Literal["1.0"]
     plan_id: UUID4
-    trip_snapshot: Trip
+    trip_snapshot: PlanReviewTripSnapshot
     version: Literal[1, 2]
     parent_id: UUID4 | None = None
     reason: PlanVersionReason
@@ -130,9 +130,6 @@ class ProposedPlanVersion(ContractModel):
 
     @model_validator(mode="after")
     def validate_version_snapshot(self) -> "ProposedPlanVersion":
-        if self.trip_snapshot.status is not TripStatus.PLAN_REVIEW:
-            raise ValueError("tripSnapshot.status must be PLAN_REVIEW")
-
         if self.version == 1:
             if self.parent_id is not None:
                 raise ValueError("Plan V1 parentId must be null")

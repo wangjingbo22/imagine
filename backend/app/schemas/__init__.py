@@ -9,12 +9,14 @@ from .plan import (
     ProposedPlanVersion,
     TripPlanState,
 )
+from .trip import PlanReviewTripSnapshot
 
 __all__ = [
     "PlanVersion",
     "PlanVersionDiff",
     "PlanVersionReason",
     "PlanVersionStatus",
+    "PlanReviewTripSnapshot",
     "PlanV2DecisionResult",
     "ProposedPlanVersion",
     "TripPlanState",
