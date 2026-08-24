@@ -60,6 +60,7 @@
 - Modify: `backend/app/schemas/plan.py`
 - Modify: `backend/app/schemas/validation_error.py`
 - Modify: `backend/app/schemas/__init__.py`
+- Modify: `tests/test_plan_versions.py`
 
 - [ ] Generalize only the type annotation of `validate_single_day_policy` from
   `CreateSingleDayTrip` to `CreateSingleDayTrip | PlanReviewTripSnapshot`;
