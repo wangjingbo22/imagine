@@ -195,6 +195,13 @@ Schema 校验失败沿用人工确认结构：
 - `PLAN_TRIP_MISMATCH`：路径 Trip 与 Plan 不匹配（HTTP 409）。
 - `TRIP_NOT_FOUND`、`PLAN_VERSION_NOT_FOUND`：资源不存在（HTTP 404）。
 
+### 10.4 T014 snapshot boundary
+
+- `tripSnapshot` MUST be a single-person, single-day `PLAN_REVIEW` snapshot.
+- Invalid V1/V2 snapshots return HTTP 422 `TRIP_SCHEMA_INVALID` with stable
+  field path/code; rejected V1 writes no Trip state, while rejected V2 preserves
+  the full CURRENT V1 and `EXECUTING` state.
+
 ## 11. PBI-05-C V1/V2 Diff 与接受拒绝（Schema 1.0）
 
 本节契约已由张琪于 2026-08-24 确认。
