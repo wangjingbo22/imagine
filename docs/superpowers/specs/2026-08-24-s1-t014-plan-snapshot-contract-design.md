@@ -58,7 +58,7 @@ the wrong lifecycle state.
 
 ### Dedicated Plan-review subtype with shared policy (selected)
 
-Add `PlanReviewTripSnapshot(Trip)` with enum-preserving
+Add `PlanReviewTripSnapshot(Trip)` in the Trip schema module with enum-preserving
 `mode = TripMode.SINGLE`, `status = TripStatus.PLAN_REVIEW`, and exactly one
 participant/day. Its model validator
 calls the existing T001 cross-field policy. `ProposedPlanVersion` then uses this
@@ -76,7 +76,8 @@ shares one implementation for the cross-field rules.
 | `startDate != endDate` | `tripSnapshot.endDate` | `date_mismatch` |
 | `days[0].date != startDate` | `tripSnapshot.days[0].date` | `date_mismatch` |
 | `days[0].dayIndex != 0` | `tripSnapshot.days[0].dayIndex` | `invalid_day_index` |
-| `timeWindow.end <= start` | `tripSnapshot.days[0].timeWindow.end` | `invalid_time_window` |
+| `timeWindow.end == start` | `tripSnapshot.days[0].timeWindow.end` | `invalid_time_window` |
+| `timeWindow.end < start` | `tripSnapshot.days[0].timeWindow.end` | `invalid_time_window` |
 | `dailyBudgetCents > totalBudgetCents` | `tripSnapshot.days[0].dailyBudgetCents` | `budget_exceeded` |
 | Preference `isHard` contradicts its type | `tripSnapshot.participants[0].preferences[i].isHard` | `invalid_preference_hardness` |
 | Same normalized place is both must-visit and avoid | `tripSnapshot.participants[0].preferences[i].value` | `preference_conflict` |
@@ -117,7 +118,7 @@ ability to return its complete issue list.
 
 ## Acceptance and Test Strategy
 
-- A parameterized HTTP contract test covers all nine invalid-snapshot cases,
+- A parameterized HTTP contract test covers all ten invalid-snapshot cases,
   checks the exact error path/code, and verifies `GET /trips/{tripId}` remains
   `TRIP_NOT_FOUND` after each rejected V1.
 - V2 regression cases start from a valid CURRENT V1 in `EXECUTING`, reject both
@@ -129,6 +130,11 @@ ability to return its complete issue list.
   backward compatible.
 - Full Python tests, frontend lint/build, and `git diff --check` must pass before
   the branch is offered for review.
+
+The repository has no published production database or migration chain at this
+stage. Existing valid Sprint fixtures restore unchanged. Any local row that was
+previously admitted only because of this defect is intentionally rejected on
+recovery and should be discarded or migrated rather than silently trusted.
 
 ## Review Boundary
 

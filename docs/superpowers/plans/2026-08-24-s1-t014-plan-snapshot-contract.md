@@ -36,7 +36,7 @@
 
 - [ ] Add a small async helper that posts a proposal and restores the Trip state.
 - [ ] Add parameterized invalid V1 cases for participant count, Trip-day count,
-  end-date mismatch, day-date mismatch, nonzero day index, reversed/equal time
+  end-date mismatch, day-date mismatch, nonzero day index, reversed and equal time
   window, daily budget above total budget, invalid preference hardness, and a
   normalized must-visit/avoid preference conflict.
 - [ ] Assert HTTP 422, `TRIP_SCHEMA_INVALID`, exact error path/code, and a
@@ -62,10 +62,12 @@
 - Modify: `backend/app/schemas/__init__.py`
 
 - [ ] Generalize only the type annotation of `validate_single_day_policy` from
-  `CreateSingleDayTrip` to `Trip`; preserve its behavior and issue ordering.
+  `CreateSingleDayTrip` to `CreateSingleDayTrip | PlanReviewTripSnapshot`;
+  preserve its behavior and issue ordering.
 - [ ] Add `PlanReviewTripSnapshot(Trip)` with
   `Literal[TripMode.SINGLE]` mode, `Literal[TripStatus.PLAN_REVIEW]` status, and
-  one-item participant/day bounds; assert parsed values retain enum types.
+  one-item participant/day bounds in `trip.py`; assert parsed values retain enum
+  types.
 - [ ] Run the shared policy in an after-model validator. Raise the first issue as
   `PydanticCustomError(issue.code, issue.message, {"public_path": ...})`,
   prefixing the T001 path with `tripSnapshot.`.
