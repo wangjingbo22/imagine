@@ -49,7 +49,7 @@ export function AgentProcessPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const navigationState = location.state as { tripId?: string; draft?: TripDraftInput } | null
-  const tripId = navigationState?.tripId ?? 'trip-demo-2026'
+  const tripId = navigationState?.tripId ?? crypto.randomUUID()
   const draft = navigationState?.draft
   const [completedSteps, setCompletedSteps] = useState(0)
   const [isPlanReady, setIsPlanReady] = useState(false)
@@ -74,11 +74,11 @@ export function AgentProcessPage() {
     }
 
     const redirectTimer = window.setTimeout(
-      () => navigate('/workspace', { state: { draft } }),
+      () => navigate(`/workspace?tripId=${tripId}`, { state: { draft, tripId } }),
       1200,
     )
     return () => window.clearTimeout(redirectTimer)
-  }, [draft, isPlanReady, navigate])
+  }, [draft, isPlanReady, navigate, tripId])
 
   const progress = useMemo(
     () => Math.round((completedSteps / processSteps.length) * 100),
@@ -167,7 +167,7 @@ export function AgentProcessPage() {
             <button
               className="button button--primary"
               disabled={!isPlanReady}
-              onClick={() => navigate('/workspace', { state: { draft } })}
+              onClick={() => navigate(`/workspace?tripId=${tripId}`, { state: { draft, tripId } })}
               type="button"
             >
               查看推荐方案 <ArrowRight size={18} />

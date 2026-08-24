@@ -108,7 +108,7 @@
   每项必须保留稳定的 `ruleId`、`routeSegment`、`observed` 与 `suggestion`。
 - Schema 错误使用 `TRIP_SCHEMA_INVALID`；歧义确认使用
   `TRIP_CONFIRMATION_REQUIRED`，两者均返回字段级 `errors[]`。
-- 当前尚未登记正式 HTTP URL。自然语言解析、城市查询、计划、执行、媒体与总结接口均保持 Mock，等待责任人补充契约。
+- Trip 创建 HTTP URL 尚未登记；城市查询与 Plan V1 状态接口分别见第 9、10 节。自然语言解析、媒体与总结接口继续保持 Mock。
 - 前端对齐说明见 `frontend/src/api/API.md`。
 
 ## 9. PBI-02-A 城市地点、路线与可信来源（Schema 1.0）
@@ -162,3 +162,35 @@ Schema 校验失败沿用人工确认结构：
 - Key 不得出现在响应、日志、缓存键、缓存值或 Git 文件中。
 - 查询接口只读；相同城市与相同参数生成稳定缓存摘要。
 - 高德错误必须转换为本项目错误码，不向前端暴露内部异常堆栈。
+
+## 10. PBI-04-B Plan V1 确认与状态守卫（Schema 1.0）
+
+本节契约已由张琪于 2026-08-24 确认，用于本地前后端联调。
+
+### 10.1 路由
+
+- `POST /api/v1/trips/{tripId}/plan-versions`：登记通过确定性校验的 `PROPOSED` Plan V1。请求体必须包含不可变的 `tripSnapshot`、`days`、`metrics`、`constraintsSnapshot` 和 `sourcesSnapshot`。
+- `POST /api/v1/trips/{tripId}/plan-versions/{planId}/confirm`：原子地将该版本从 `PROPOSED` 改为唯一 `CURRENT`，同时将 Trip 从 `PLAN_REVIEW` 改为 `CONFIRMED`。
+- `POST /api/v1/trips/{tripId}/execution/start`：仅在存在 `CURRENT` 版本且 Trip 为 `CONFIRMED` 时迁移到 `EXECUTING`。
+- `GET /api/v1/trips/{tripId}`：恢复 Trip 状态、当前/候选 PlanVersion 和原始快照。
+
+成功响应沿用 `{ "code": 200, "message": "success", "data": ... }`。Schema 校验失败沿用 `TRIP_SCHEMA_INVALID` 字段级结构。
+
+### 10.2 状态与不变量
+
+- `PlanVersion.status`：`PROPOSED | CURRENT | REJECTED | SUPERSEDED`。
+- 初始确认链路：`Trip.PLAN_REVIEW + PlanVersion.PROPOSED -> Trip.CONFIRMED + PlanVersion.CURRENT -> Trip.EXECUTING`。
+- 同一 Trip 最多一个 `CURRENT`，由数据库部分唯一索引和事务共同保证。
+- 已保存 PlanVersion 不允许原地替换快照；相同 `planId` 和完全相同请求可幂等重放。
+- `days` 当前固定单日；每天 3—4 个任务，`order` 必须从 1 连续递增。
+- 任务金额、步行距离、预算缓冲必须与 `metrics` 精确相等；所有硬约束必须为 `PASS`。
+- 未确认的 `PROPOSED` 绝不能进入执行状态，大模型也不得直接写状态。
+
+### 10.3 错误码
+
+- `PLAN_NOT_CONFIRMED`：没有 `CURRENT` 版本，不允许开始执行（HTTP 409）。
+- `PLAN_STATE_TRANSITION_INVALID`：非法 Trip/PlanVersion 状态迁移（HTTP 409）。
+- `PLAN_VERSION_IMMUTABLE`、`TRIP_SNAPSHOT_IMMUTABLE`：尝试原地更换已保存快照（HTTP 409）。
+- `PLAN_CURRENT_CONFLICT`、`PLAN_VERSION_CONFLICT`：唯一 CURRENT 或版本号冲突（HTTP 409）。
+- `PLAN_TRIP_MISMATCH`：路径 Trip 与 Plan 不匹配（HTTP 409）。
+- `TRIP_NOT_FOUND`、`PLAN_VERSION_NOT_FOUND`：资源不存在（HTTP 404）。

@@ -2,15 +2,16 @@
 
 ## 1. 权威来源
 
-当前已经由后端确认并实现的契约包括 **S1-T001 Trip Schema** 与
-**S1-T003 AssistanceProfile**：
+当前已经确认并实现的契约包括 **S1-T001 Trip Schema**、
+**S1-T003 AssistanceProfile**、PBI-02-A 城市查询，以及
+**PBI-04-B Plan V1 确认与状态守卫**：
 
 - Python 模型：`backend/app/schemas/trip.py`
 - JSON Schema：`backend/schemas/trip.schema.json`
 - 字段级错误：`backend/app/schemas/validation_error.py`
 - 设计说明：`docs/superpowers/specs/2026-08-24-s1-t001-trip-schema-design.md`
 
-本文件、前端 TypeScript 类型和 Mock 必须服从上述文件。后端尚未登记的 HTTP URL 不视为正式接口。
+本文件、前端 TypeScript 类型和 Mock 必须服从上述文件。未在 `.agent/api_contracts.md` 登记的 HTTP URL 不视为正式接口。
 
 ## 2. 当前范围
 
@@ -23,16 +24,16 @@ S1-T001 与 S1-T003 当前确认：
 - 严格 Schema 校验和字段级错误
 - 四类可序列化的关怀 Profile
 
-当前 Schema **不包含**：
+Trip Schema 本身**不包含**：
 
 - 自然语言解析接口
-- 城市搜索或 CityContext 解析接口
-- 计划生成与执行接口
+- 城市搜索或 CityContext 解析结果
+- PlanVersion、计划生成或执行状态
 - 途中反馈接口
 - 照片或视频接口
 - 旅行总结接口
 
-这些能力仍可使用前端 Mock 演示，但在后端负责人登记 URL 和 DTO 前不得当作正式接口调用。
+其中已经在第 8 节登记的城市解析与 Plan V1 状态接口可正式调用；其余能力继续使用前端 Mock，未登记 URL 和 DTO 前不得当作正式接口调用。
 
 ## 3. CreateSingleDayTrip
 
@@ -247,15 +248,26 @@ src/api/tripContract.ts
 - `tripApi.submitNormalizedTrip(path, payload)` 只用于后端负责人确认 URL 后接入
 - 不应再默认使用 `/api/v1/trips/drafts`
 
-## 8. 待后端确认的接口
+## 8. Plan V1 正式接口
+
+设置 `VITE_USE_PLAN_VERSION_API=true` 后，下列调用使用本地 FastAPI，而其他未登记能力仍可保持 Mock：
+
+- `tripApi.resolveCity()` → `POST /api/v1/cities/resolve`
+- `tripApi.registerPlanVersion()` → `POST /api/v1/trips/{tripId}/plan-versions`
+- `tripApi.confirmPlan()` → `POST /api/v1/trips/{tripId}/plan-versions/{planId}/confirm`
+- `tripApi.startExecution()` → `POST /api/v1/trips/{tripId}/execution/start`
+- `tripApi.getTrip()` → `GET /api/v1/trips/{tripId}`
+
+前端地址栏保留 `tripId`。刷新时恢复 `CURRENT` 或 `PROPOSED`；确认按钮严格按“登记候选 → 确认 CURRENT → 开始执行”的顺序调用。PlanVersion DTO 定义在 `src/domain/trip.ts`，字段名保持 camelCase，不翻译代码契约。
+
+## 9. 待后端确认的接口
 
 以下是前端功能需求，不是已确认契约：
 
 - 自然语言解析与歧义确认
-- 城市 Provider 查询
 - Trip 创建/保存
 - AssistanceProfile 确认
-- 计划生成与持续反馈
+- 计划自动生成与持续反馈
 - 执行事件
 - 照片与视频上传
 - 旅行总结

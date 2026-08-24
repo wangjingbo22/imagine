@@ -86,6 +86,18 @@ export interface CityContext {
   providerConfig: ProviderConfig
 }
 
+export interface CityResolution {
+  cityContext: CityContext
+  adCode?: string | null
+  formattedAddress?: string | null
+  provenance: {
+    provider: 'AMAP'
+    sourceStatus: 'ONLINE' | 'VERIFIED_CACHE' | 'USER_CONFIRMED' | 'ESTIMATED' | 'UNKNOWN'
+    fetchedAt: string
+    isStale: boolean
+  }
+}
+
 export interface Preference {
   type: PreferenceType
   value: string
@@ -127,6 +139,10 @@ export interface CreateSingleDayTrip {
   totalBudgetCents: number
   participants: [Participant]
   days: [TripDayInput]
+}
+
+export interface PlanTripSnapshot extends Omit<CreateSingleDayTrip, 'status'> {
+  status: 'PLAN_REVIEW'
 }
 
 export interface ValidationIssue {
@@ -181,6 +197,69 @@ export interface RouteRiskResult {
 export interface RouteRiskReport {
   status: ValidationStatus
   results: RouteRiskResult[]
+}
+
+export type PlanVersionStatus = 'PROPOSED' | 'CURRENT' | 'REJECTED' | 'SUPERSEDED'
+
+export interface PlanVersionProposal {
+  schemaVersion: '1.0'
+  planId: string
+  tripSnapshot: PlanTripSnapshot
+  version: 1
+  parentId: null
+  reason: 'INITIAL_PLAN'
+  metrics: {
+    totalCostCents: number
+    bufferCents: number
+    totalWalkMeters: number
+    transferCount: number
+    validationStatus: 'PASS'
+  }
+  days: [{
+    dayIndex: 0
+    date: string
+    tasks: Array<{
+      taskId: string
+      order: number
+      title: string
+      category: string
+      timeRange: string
+      durationMinutes: number
+      transport: string
+      costCents: number
+      walkMeters: number
+      note: string
+    }>
+  }]
+  constraintsSnapshot: Array<{
+    ruleId: string
+    scope: string
+    hardness: 'HARD' | 'SOFT'
+    status: 'PASS' | 'WARNING' | 'FAIL' | 'NEEDS_CONFIRMATION'
+    description: string
+    details: Record<string, string>
+  }>
+  sourcesSnapshot: Array<{
+    provider: string
+    sourceStatus: 'ONLINE' | 'VERIFIED_CACHE' | 'USER_CONFIRMED' | 'ESTIMATED' | 'UNKNOWN'
+    fetchedAt: string
+    isStale: boolean
+    referenceId: string | null
+  }>
+}
+
+export interface StoredPlanVersion extends PlanVersionProposal {
+  status: PlanVersionStatus
+  createdAt: string
+  confirmedAt: string | null
+}
+
+export interface TripPlanState {
+  tripId: string
+  tripStatus: TripStatus
+  currentPlan: StoredPlanVersion | null
+  proposedPlans: StoredPlanVersion[]
+  events: Array<Record<string, unknown>>
 }
 
 export interface ExecutionEventInput {

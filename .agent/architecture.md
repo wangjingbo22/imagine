@@ -27,6 +27,15 @@
 - 基础设施层：封装高德 Web 服务和 SQLite 缓存。
 - 本模块不负责行程规划、预算决策、PlanVersion 状态机或 LangGraph 核心编排。
 
+### 2.2 PBI-04-B Plan V1 模块边界
+
+- 表现层：只提交方案候选、显式确认和开始执行命令；刷新时按 `tripId` 恢复状态，不直接操作 SQLite。
+- 应用层：`PlanVersionService` 统一转换存储冲突和状态错误，不允许页面绕过用例入口。
+- 领域层：`plan_guard.py` 维护 Trip 与 PlanVersion 的合法迁移；`plan.py` 维护不可变快照及金额、步行、任务顺序和硬约束不变量。
+- 基础设施层：SQLite 在同一事务内更新 Trip/PlanVersion，并用部分唯一索引保证每个 Trip 最多一个 `CURRENT`。
+- 当前持久化文件默认是 `data/plan_versions.sqlite3`，可用 `PLAN_VERSION_DB_PATH` 覆盖。
+- LangGraph/LLM 只能提出 `PROPOSED` 数据，不具备确认或直接改写状态的权限。
+
 ## 3. 通用分层规范
 
 ### 3.1 表现层

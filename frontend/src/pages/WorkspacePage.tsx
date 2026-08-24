@@ -32,10 +32,18 @@ import {
   Wallet,
   X,
 } from 'lucide-react'
-import { type ChangeEvent, useState } from 'react'
+import { type ChangeEvent, useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
+import { ApiError } from '../api/client'
+import { tripApi, USE_PLAN_VERSION_API } from '../api/tripApi'
+import { buildCreateSingleDayTrip } from '../api/tripContract'
 import { AppShell } from '../components/AppShell'
-import type { TripDraftInput } from '../domain/trip'
+import type {
+  PlanSnapshot,
+  PlanVersionProposal,
+  StoredPlanVersion,
+  TripDraftInput,
+} from '../domain/trip'
 import { mockPlanV1 } from '../mocks/trip'
 
 type WorkspaceView = 'plan' | 'execute' | 'summary'
@@ -76,10 +84,53 @@ function escapeHtml(value: string) {
     .replaceAll("'", '&#039;')
 }
 
+function toDisplayPlan(plan: StoredPlanVersion): PlanSnapshot {
+  const coordinates: Array<[number, number]> = [
+    [22, 71],
+    [43, 58],
+    [61, 34],
+    [78, 19],
+  ]
+  return {
+    id: plan.planId,
+    version: plan.version,
+    cityName: plan.tripSnapshot.cityContext.cityName,
+    totalCostCents: plan.metrics.totalCostCents,
+    bufferCents: plan.metrics.bufferCents,
+    totalWalkMeters: plan.metrics.totalWalkMeters,
+    transferCount: plan.metrics.transferCount,
+    validationStatus: plan.metrics.validationStatus,
+    tasks: plan.days[0].tasks.map((task, index) => ({
+      id: task.taskId,
+      order: task.order,
+      title: task.title,
+      category: task.category,
+      timeRange: task.timeRange,
+      durationMinutes: task.durationMinutes,
+      transport: task.transport,
+      costCents: task.costCents,
+      walkMeters: task.walkMeters,
+      note: task.note,
+      status: index === 0 ? 'completed' : index === 1 ? 'current' : 'upcoming',
+      coordinates: coordinates[index] ?? [50, 50],
+    })),
+  }
+}
+
 export function WorkspacePage() {
   const location = useLocation()
-  const draft = (location.state as { draft?: TripDraftInput } | null)?.draft
+  const navigationState = location.state as {
+    draft?: TripDraftInput
+    tripId?: string
+  } | null
+  const draft = navigationState?.draft
+  const tripId =
+    new URLSearchParams(location.search).get('tripId') ?? navigationState?.tripId ?? null
   const [view, setView] = useState<WorkspaceView>('plan')
+  const [restoredPlan, setRestoredPlan] = useState<PlanSnapshot | null>(null)
+  const [persistedPlanId, setPersistedPlanId] = useState<string | null>(null)
+  const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
+  const [planLifecycleError, setPlanLifecycleError] = useState('')
   const [actualCost, setActualCost] = useState('188')
   const [currentTaskIndex, setCurrentTaskIndex] = useState(1)
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>(['task-1'])
@@ -97,7 +148,37 @@ export function WorkspacePage() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([])
   const [mediaError, setMediaError] = useState('')
-  const budgetCents = draft?.budgetCents ?? 35000
+  useEffect(() => {
+    if (!USE_PLAN_VERSION_API || !tripId) {
+      return
+    }
+    let cancelled = false
+    void tripApi.getTrip(tripId).then((response) => {
+      if (cancelled) return
+      const stored = response.data.currentPlan ?? response.data.proposedPlans[0]
+      if (stored) {
+        setRestoredPlan(toDisplayPlan(stored))
+        setPersistedPlanId(stored.planId)
+      }
+      if (response.data.tripStatus === 'EXECUTING') {
+        setView('execute')
+      }
+    }).catch((error: unknown) => {
+      if (cancelled || (error instanceof ApiError && error.code === 'TRIP_NOT_FOUND')) {
+        return
+      }
+      setPlanLifecycleError(error instanceof Error ? error.message : '恢复 Plan V1 失败')
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [tripId])
+
+  const budgetCents = draft?.budgetCents ?? (
+    restoredPlan
+      ? restoredPlan.totalCostCents + restoredPlan.bufferCents
+      : 35000
+  )
   const validationRules = [
     `单段步行 ≤ ${draft?.assistanceProfile.maxSegmentWalkMeters ?? 500}m`,
     `换乘次数 ≤ ${draft?.assistanceProfile.maxTransfers ?? 2}`,
@@ -146,8 +227,8 @@ export function WorkspacePage() {
         }),
       }
     : baseDisplayPlanV1
-  const remainingBudgetCents = Math.max(0, budgetCents - displayPlanV1.totalCostCents)
-  const activePlan = displayPlanV1
+  const activePlan = restoredPlan ?? displayPlanV1
+  const remainingBudgetCents = Math.max(0, budgetCents - activePlan.totalCostCents)
   const currentTask = activePlan.tasks[currentTaskIndex]
   const nextTask = activePlan.tasks[currentTaskIndex + 1]
   const selectedTask = activePlan.tasks.find((task) => task.id === selectedTaskId)
@@ -185,6 +266,110 @@ export function WorkspacePage() {
       setIsRegenerating(false)
       setIsFeedbackOpen(false)
     }, 1200)
+  }
+
+  async function handleAcceptPlan() {
+    if (!tripId) {
+      setPlanLifecycleError('当前页面缺少 tripId，请从“新建行程”重新进入。')
+      return
+    }
+    setIsConfirmingPlan(true)
+    setPlanLifecycleError('')
+    try {
+      let planId = persistedPlanId
+      if (!planId) {
+        if (!draft) {
+          throw new Error('刷新后未找到可恢复的方案，请从“新建行程”重新生成。')
+        }
+        const city = await tripApi.resolveCity(draft.cityName)
+        const tasks = activePlan.tasks.map((task) => ({
+          taskId: task.id,
+          order: task.order,
+          title: task.title,
+          category: task.category,
+          timeRange: task.timeRange,
+          durationMinutes: task.durationMinutes,
+          transport: task.transport,
+          costCents: task.costCents,
+          walkMeters: task.walkMeters,
+          note: task.note,
+        }))
+        const totalCostCents = tasks.reduce((sum, task) => sum + task.costCents, 0)
+        const totalWalkMeters = tasks.reduce((sum, task) => sum + task.walkMeters, 0)
+        const normalizedTrip = buildCreateSingleDayTrip(draft, {
+          tripId,
+          participantId: crypto.randomUUID(),
+          cityContext: city.data.cityContext,
+          nickname: '单人旅客',
+          startLocationText: `${city.data.cityContext.cityName}市内`,
+          endLocationText: `${city.data.cityContext.cityName}市内`,
+        })
+        const proposal: PlanVersionProposal = {
+          schemaVersion: '1.0',
+          planId: crypto.randomUUID(),
+          tripSnapshot: {
+            ...normalizedTrip,
+            status: 'PLAN_REVIEW',
+          },
+          version: 1,
+          parentId: null,
+          reason: 'INITIAL_PLAN',
+          metrics: {
+            totalCostCents,
+            bufferCents: draft.budgetCents - totalCostCents,
+            totalWalkMeters,
+            transferCount: activePlan.transferCount,
+            validationStatus: 'PASS',
+          },
+          days: [{ dayIndex: 0, date: draft.travelDate, tasks }],
+          constraintsSnapshot: [
+            ...validationRules.map((description, index) => ({
+              ruleId: `hard-rule-${index + 1}`,
+              scope: 'trip.days[0]',
+              hardness: 'HARD' as const,
+              status: 'PASS' as const,
+              description,
+              details: {},
+            })),
+            {
+              ruleId: 'accessibility-entrance',
+              scope: 'days[0].tasks',
+              hardness: 'SOFT',
+              status: 'NEEDS_CONFIRMATION',
+              description: '无障碍入口信息需现场确认',
+              details: {},
+            },
+          ],
+          sourcesSnapshot: [
+            {
+              provider: 'AMAP',
+              sourceStatus: city.data.provenance.sourceStatus,
+              fetchedAt: city.data.provenance.fetchedAt,
+              isStale: city.data.provenance.isStale,
+              referenceId: city.data.cityContext.cityCode,
+            },
+            {
+              provider: 'FRONTEND_MOCK',
+              sourceStatus: 'ESTIMATED',
+              fetchedAt: new Date().toISOString(),
+              isStale: false,
+              referenceId: 'workspace-recommendation-v1',
+            },
+          ],
+        }
+        const registered = await tripApi.registerPlanVersion(tripId, proposal)
+        planId = registered.data.planId
+        setPersistedPlanId(planId)
+        setRestoredPlan(toDisplayPlan(registered.data))
+      }
+      await tripApi.confirmPlan(tripId, planId)
+      await tripApi.startExecution(tripId)
+      setView('execute')
+    } catch (error) {
+      setPlanLifecycleError(error instanceof Error ? error.message : '确认 Plan V1 失败')
+    } finally {
+      setIsConfirmingPlan(false)
+    }
   }
 
   function moveToNextTask() {
@@ -351,7 +536,7 @@ export function WorkspacePage() {
                 </div>
               )}
               <div className="timeline">
-                {displayPlanV1.tasks.map((task) => (
+                {activePlan.tasks.map((task) => (
                   <article className={`timeline-item timeline-item--${task.status}`} key={task.id}>
                     <div className="timeline-item__rail"><span>{task.order}</span></div>
                     <div className="timeline-item__time">{task.timeRange}</div>
@@ -391,18 +576,18 @@ export function WorkspacePage() {
                   <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                     <path d="M22 71 C30 62, 34 62, 43 58 S54 42, 61 34 S72 28, 78 19" />
                   </svg>
-                  {displayPlanV1.tasks.map((task) => (
+                  {activePlan.tasks.map((task) => (
                     <span className="map-pin" key={task.id} style={{ left: `${task.coordinates[0]}%`, top: `${task.coordinates[1]}%` }}>{task.order}</span>
                   ))}
                 </div>
               </section>
               <section className="metric-card">
-                <div className="metric-card__head"><span>预算使用</span><strong>{formatMoney(displayPlanV1.totalCostCents)} / {formatMoney(budgetCents)}</strong></div>
+                <div className="metric-card__head"><span>预算使用</span><strong>{formatMoney(activePlan.totalCostCents)} / {formatMoney(budgetCents)}</strong></div>
                 <div className="progress-bar"><i style={{ width: '85%' }} /></div>
                 <div className="metric-grid">
                   <div><Wallet size={18} /><span>剩余缓冲<strong>{formatMoney(remainingBudgetCents)}</strong></span></div>
-                  <div><Footprints size={18} /><span>全天步行<strong>2.65 km</strong></span></div>
-                  <div><BusFront size={18} /><span>公共交通<strong>2 次换乘</strong></span></div>
+                  <div><Footprints size={18} /><span>全天步行<strong>{(activePlan.totalWalkMeters / 1000).toFixed(2)} km</strong></span></div>
+                  <div><BusFront size={18} /><span>公共交通<strong>{activePlan.transferCount} 次换乘</strong></span></div>
                   <div><Clock3 size={18} /><span>弹性时间<strong>45 分钟</strong></span></div>
                 </div>
               </section>
@@ -483,9 +668,12 @@ export function WorkspacePage() {
                   <button className="button button--ghost" onClick={() => setIsFeedbackOpen(true)} type="button">
                     <MessageSquareText size={17} /> 不满意，重新推荐
                   </button>
-                  <button className="button button--primary" onClick={() => setView('execute')} type="button">
-                    接受推荐并确认 Plan V1 <ArrowRight size={18} />
+                  <button className="button button--primary" disabled={isConfirmingPlan} onClick={handleAcceptPlan} type="button">
+                    {isConfirmingPlan ? <LoaderCircle className="spin-icon" size={17} /> : null}
+                    {isConfirmingPlan ? '正在保存并确认…' : '接受推荐并确认 Plan V1'}
+                    {!isConfirmingPlan && <ArrowRight size={18} />}
                   </button>
+                  {planLifecycleError && <p className="media-error">{planLifecycleError}</p>}
                 </div>
               )}
             </aside>
