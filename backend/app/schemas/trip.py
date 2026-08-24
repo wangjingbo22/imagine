@@ -2,14 +2,16 @@ from __future__ import annotations
 
 from datetime import date, time
 from enum import Enum
+import re
 from typing import Annotated, Literal
 from unicodedata import normalize
-from uuid import UUID
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
+    UUID4,
     ValidationError,
     alias_generators,
 )
@@ -19,6 +21,41 @@ from .validation_error import (
     ValidationIssue,
     issues_from_pydantic,
 )
+from pydantic_core import PydanticCustomError
+
+
+_SECOND_PRECISION_TIME = re.compile(r"^\d{2}:\d{2}:\d{2}$")
+
+
+def _validate_second_precision_time(value: object) -> object:
+    """Reject fractional-second and timezone-bearing time values at the boundary."""
+
+    if isinstance(value, str):
+        if not _SECOND_PRECISION_TIME.fullmatch(value):
+            raise PydanticCustomError(
+                "time_format",
+                "Time must use HH:mm:ss without fractional seconds or timezone offsets",
+            )
+        try:
+            return time.fromisoformat(value)
+        except ValueError as exc:
+            raise PydanticCustomError(
+                "time_parsing",
+                "Input should be a valid time in HH:mm:ss format",
+            ) from exc
+
+    if isinstance(value, time):
+        if value.microsecond or value.tzinfo is not None:
+            raise PydanticCustomError(
+                "time_format",
+                "Time must use HH:mm:ss without fractional seconds or timezone offsets",
+            )
+        return value
+
+    return value
+
+
+SecondPrecisionTime = Annotated[time, BeforeValidator(_validate_second_precision_time)]
 
 
 class ContractModel(BaseModel):
@@ -79,7 +116,7 @@ class Preference(ContractModel):
 
 
 class Participant(ContractModel):
-    participant_id: UUID
+    participant_id: UUID4
     nickname: Annotated[str, Field(min_length=1, max_length=40)]
     budget_cap_cents: Annotated[int, Field(ge=0)]
     preferences: list[Preference] = Field(default_factory=list)
@@ -87,8 +124,8 @@ class Participant(ContractModel):
 
 
 class TimeWindow(ContractModel):
-    start: time
-    end: time
+    start: SecondPrecisionTime
+    end: SecondPrecisionTime
 
 
 class TripDayInput(ContractModel):
@@ -102,7 +139,7 @@ class TripDayInput(ContractModel):
 
 class Trip(ContractModel):
     schema_version: Literal["1.0"]
-    trip_id: UUID
+    trip_id: UUID4
     mode: TripMode
     status: TripStatus
     city_context: CityContext
@@ -202,7 +239,7 @@ def validate_single_day_policy(
                 avoid_place[normalized_value] = preference_index
 
         for value in sorted(must_visit.keys() & avoid_place.keys()):
-            conflict_index = avoid_place[value]
+            conflict_index = max(must_visit[value], avoid_place[value])
             issues.append(
                 ValidationIssue(
                     path=(
