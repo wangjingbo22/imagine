@@ -1,8 +1,8 @@
 # S1-T014 Plan Snapshot Contract Design
 
-**Date:** 2026-08-24  
-**Owner:** 陈梓元  
-**Traceability:** PBI-04-B / AC-04-B / S1-T014  
+**Date:** 2026-08-24
+**Owner:** 陈梓元
+**Traceability:** PBI-04-B / AC-04-B / S1-T014
 **Dependency:** S1-T013
 
 ## Context and Defect
