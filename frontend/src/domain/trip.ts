@@ -2,6 +2,20 @@ export type AssistanceMode = 'standard' | 'family' | 'low-mobility' | 'assisted'
 
 export type PlanTaskStatus = 'completed' | 'current' | 'upcoming' | 'removed'
 
+export type TripMode = 'SINGLE'
+
+export type TripStatus =
+  | 'DRAFT'
+  | 'CONSTRAINT_CONFIRMED'
+  | 'PLANNING'
+  | 'PLAN_REVIEW'
+  | 'CONFIRMED'
+  | 'EXECUTING'
+  | 'REPLAN_REVIEW'
+  | 'COMPLETED'
+
+export type PreferenceType = 'INTEREST' | 'MUST_VISIT' | 'AVOID_PLACE'
+
 export interface ApiResponse<T> {
   code: number
   message: string
@@ -24,6 +38,81 @@ export interface TripDraftInput {
     restIntervalMinutes: number
   }
   naturalLanguageRequest: string
+}
+
+export interface GeoPoint {
+  longitude: number
+  latitude: number
+}
+
+export interface ProviderConfig {
+  provider: 'AMAP'
+  coordinateSystem: 'GCJ02'
+}
+
+export interface CityContext {
+  countryCode: 'CN'
+  cityCode: string
+  cityName: string
+  center: GeoPoint
+  providerConfig: ProviderConfig
+}
+
+export interface Preference {
+  type: PreferenceType
+  value: string
+  weight: 1 | 2 | 3 | 4 | 5
+  isHard: boolean
+}
+
+export interface Participant {
+  participantId: string
+  nickname: string
+  budgetCapCents: number
+  preferences?: Preference[]
+  assistanceProfile?: null
+}
+
+export interface TimeWindow {
+  start: string
+  end: string
+}
+
+export interface TripDayInput {
+  dayIndex: 0
+  date: string
+  dailyBudgetCents: number
+  startLocationText: string
+  endLocationText: string
+  timeWindow: TimeWindow
+}
+
+export interface CreateSingleDayTrip {
+  schemaVersion: '1.0'
+  tripId: string
+  mode: TripMode
+  status: 'DRAFT'
+  cityContext: CityContext
+  startDate: string
+  endDate: string
+  currency: 'CNY'
+  totalBudgetCents: number
+  participants: [Participant]
+  days: [TripDayInput]
+}
+
+export interface ValidationIssue {
+  path: string
+  code: string
+  message: string
+  context?: Record<string, string>
+  candidates?: string[]
+}
+
+export interface TripSchemaErrorResponse {
+  code: 'TRIP_SCHEMA_INVALID' | 'TRIP_CONFIRMATION_REQUIRED'
+  schemaVersion: '1.0'
+  errors: ValidationIssue[]
 }
 
 export interface PlanTask {

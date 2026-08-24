@@ -97,16 +97,12 @@
 
 ## 8. 行知旅伴 Sprint 1 接口登记
 
-- 项目采用 `/api/v1` REST 接口和本文第 2 节统一响应格式。
-- 金额统一使用整数分；时间统一使用 ISO 8601 或明确的 `HH:mm` 行程时间字段。
-- 前端 Sprint 1 已登记以下接口：
-  - `POST /api/v1/trips/drafts`
-  - `PUT /api/v1/trips/{tripId}/constraints`
-  - `POST /api/v1/trips/{tripId}/plans`
-  - `POST /api/v1/trips/{tripId}/plans/{planId}/confirm`
-  - `GET /api/v1/trips/{tripId}`
-  - `POST /api/v1/trips/{tripId}/events`
-  - `POST /api/v1/trips/{tripId}/plan-feedback`
-  - `POST /api/v1/trips/{tripId}/tasks/{taskId}/media`
-  - `GET /api/v1/trips/{tripId}/summary`
-- 详细请求、响应、错误码、幂等和状态约束见 `doc/frontend_api_contract.md`。
+- 当前权威契约为 `backend/app/schemas/trip.py` 导出的 S1-T001
+  `CreateSingleDayTrip`。
+- 外部 JSON 使用 camelCase，严格禁止额外字段。
+- 金额统一使用非负整数分；日期使用 `YYYY-MM-DD`；时间严格使用
+  `HH:mm:ss`。
+- Schema 错误使用 `TRIP_SCHEMA_INVALID`；歧义确认使用
+  `TRIP_CONFIRMATION_REQUIRED`，两者均返回字段级 `errors[]`。
+- 当前尚未登记正式 HTTP URL。自然语言解析、城市查询、计划、执行、媒体与总结接口均保持 Mock，等待责任人补充契约。
+- 前端对齐说明见 `frontend/src/api/API.md`。

@@ -1,348 +1,249 @@
-# 行知旅伴前后端 API 对接文档
+# 行知旅伴前端接口契约
 
-## 1. 基本约定
+## 1. 权威来源
 
-- API 前缀：`/api/v1`
-- 请求格式：`application/json`
-- 金额单位：整数分，例如 `35000` 表示 `350.00 元`
-- 日期格式：`YYYY-MM-DD`
-- 时间格式：`HH:mm`
-- 前端请求入口：`src/api/tripApi.ts`
-- 通用请求封装：`src/api/client.ts`
+当前已经由后端确认并实现的契约只有 **S1-T001 Trip Schema**：
 
-### 环境变量
+- Python 模型：`backend/app/schemas/trip.py`
+- JSON Schema：`backend/schemas/trip.schema.json`
+- 字段级错误：`backend/app/schemas/validation_error.py`
+- 设计说明：`docs/superpowers/specs/2026-08-24-s1-t001-trip-schema-design.md`
 
-```env
-VITE_API_BASE_URL=http://localhost:8000
-VITE_USE_MOCK_API=false
-```
+本文件、前端 TypeScript 类型和 Mock 必须服从上述文件。后端尚未登记的 HTTP URL 不视为正式接口。
 
-开发前端页面但暂不连接后端时：
+## 2. 当前范围
 
-```env
-VITE_USE_MOCK_API=true
-```
+S1-T001 只确认：
 
-## 2. 统一响应格式
+- 单人模式
+- 单日行程
+- `DRAFT` 状态
+- 完整且已经规范化的 Trip JSON
+- 严格 Schema 校验和字段级错误
 
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {}
-}
-```
+当前 Schema **不包含**：
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `code` | `number` | 业务状态码，成功固定为 `200` |
-| `message` | `string` | 可展示或用于定位问题的结果说明 |
-| `data` | `object` | 实际业务数据 |
+- 自然语言解析接口
+- 城市搜索或 CityContext 解析接口
+- AssistanceProfile 对象
+- 计划生成与执行接口
+- 途中反馈接口
+- 照片或视频接口
+- 旅行总结接口
 
-### 通用错误码
+这些能力仍可使用前端 Mock 演示，但在后端负责人登记 URL 和 DTO 前不得当作正式接口调用。
 
-| code | 含义 |
-| --- | --- |
-| `400` | 请求参数错误 |
-| `401` | 未登录或凭证失效 |
-| `403` | 无权访问 |
-| `404` | 行程、计划或任务不存在 |
-| `409` | 状态转换或幂等冲突 |
-| `422` | 业务规则或硬约束校验失败 |
-| `500` | 服务内部错误 |
+## 3. CreateSingleDayTrip
 
-失败时不得返回 `code: 200` 或虚假的成功数据。
-
-## 3. 创建行程草稿
-
-```http
-POST /api/v1/trips/drafts
-```
-
-### 请求体
+前端类型：`src/domain/trip.ts` 中的 `CreateSingleDayTrip`。
 
 ```json
 {
-  "cityName": "北京",
-  "travelDate": "2026-08-26",
-  "startTime": "09:00",
-  "endTime": "20:00",
-  "budgetCents": 35000,
-  "interests": ["历史文化", "特色餐饮"],
-  "mustVisit": ["中国国家博物馆"],
-  "avoidPlaces": ["排队过久的网红店"],
-  "assistanceMode": "low-mobility",
-  "assistanceProfile": {
-    "maxSegmentWalkMeters": 500,
-    "maxTransfers": 2,
-    "restIntervalMinutes": 90
+  "schemaVersion": "1.0",
+  "tripId": "00000000-0000-4000-8000-000000000001",
+  "mode": "SINGLE",
+  "status": "DRAFT",
+  "cityContext": {
+    "countryCode": "CN",
+    "cityCode": "110000",
+    "cityName": "北京市",
+    "center": {
+      "longitude": 116.407387,
+      "latitude": 39.904179
+    },
+    "providerConfig": {
+      "provider": "AMAP",
+      "coordinateSystem": "GCJ02"
+    }
   },
-  "naturalLanguageRequest": "希望少走路，晚上八点前结束"
-}
-```
-
-`assistanceMode` 可选值：
-
-- `standard`
-- `family`
-- `low-mobility`
-- `assisted`
-
-### 成功响应
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "tripId": "trip_01",
-    "status": "DRAFT",
-    "draft": {},
-    "ambiguities": []
-  }
-}
-```
-
-## 4. 确认关怀约束
-
-```http
-PUT /api/v1/trips/{tripId}/constraints
-```
-
-请求体为用户最终确认的 `assistanceProfile` 和约束字段。
-
-成功后行程状态变为：
-
-```text
-CONSTRAINT_CONFIRMED
-```
-
-修改已确认字段后应重新回到 `DRAFT`，不可直接沿用旧计划。
-
-## 5. 生成候选计划
-
-```http
-POST /api/v1/trips/{tripId}/plans
-```
-
-首次生成时请求体可以为空。用户要求重新推荐时提交：
-
-```json
-{
-  "previousPlanId": "proposal_01",
-  "feedbackTags": ["想少走路", "预算再低一些"],
-  "feedbackText": "希望下午安排室内景点，减少打车费用"
-}
-```
-
-重新推荐只生成新的 `PROPOSED` 候选方案，不得创建或覆盖 `CURRENT` 版本。
-
-### 成功响应 data
-
-```json
-{
-  "id": "plan_v1",
-  "version": 1,
-  "cityName": "北京",
-  "totalCostCents": 29800,
-  "bufferCents": 5200,
-  "totalWalkMeters": 2650,
-  "transferCount": 2,
-  "validationStatus": "PASS",
-  "tasks": [
+  "startDate": "2026-09-05",
+  "endDate": "2026-09-05",
+  "currency": "CNY",
+  "totalBudgetCents": 35000,
+  "participants": [
     {
-      "id": "task_1",
-      "order": 1,
-      "title": "中国国家博物馆",
-      "category": "历史文化",
-      "timeRange": "09:40 — 11:40",
-      "durationMinutes": 120,
-      "transport": "地铁 8 号线 · 38 分钟",
-      "costCents": 600,
-      "walkMeters": 420,
-      "note": "无障碍入口信息待确认",
-      "status": "upcoming",
-      "coordinates": [116.397, 39.903]
+      "participantId": "10000000-0000-4000-8000-000000000001",
+      "nickname": "单人旅客",
+      "budgetCapCents": 35000,
+      "preferences": [
+        {
+          "type": "INTEREST",
+          "value": "历史",
+          "weight": 4,
+          "isHard": false
+        },
+        {
+          "type": "MUST_VISIT",
+          "value": "中国国家博物馆",
+          "weight": 5,
+          "isHard": true
+        }
+      ],
+      "assistanceProfile": null
+    }
+  ],
+  "days": [
+    {
+      "dayIndex": 0,
+      "date": "2026-09-05",
+      "dailyBudgetCents": 32000,
+      "startLocationText": "北京林业大学",
+      "endLocationText": "北京林业大学",
+      "timeWindow": {
+        "start": "09:00:00",
+        "end": "20:00:00"
+      }
     }
   ]
 }
 ```
 
-只有 `validationStatus: "PASS"` 的计划才允许用户确认。
+## 4. 字段规则
 
-## 6. 确认 Plan V1
+### 顶层
 
-```http
-POST /api/v1/trips/{tripId}/plans/{planId}/confirm
-```
-
-成功响应：
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "tripId": "trip_01",
-    "planId": "plan_v1",
-    "status": "CURRENT"
-  }
-}
-```
-
-同一行程只能存在一个 `CURRENT` 版本。
-
-## 7. 查询行程及刷新恢复
-
-```http
-GET /api/v1/trips/{tripId}
-```
-
-返回内容至少包括：
-
-- 行程草稿与已确认约束
-- 当前 PlanVersion
-- 历史 PlanVersion
-- 任务执行状态
-- ExecutionEvent 列表
-
-前端刷新页面后通过该接口恢复状态。
-
-## 8. 创建执行事件
-
-```http
-POST /api/v1/trips/{tripId}/events
-```
-
-### 请求体
-
-```json
-{
-  "taskId": "task_2",
-  "eventType": "EXPENSE",
-  "amountCents": 18800,
-  "idempotencyKey": "trip_01-task_2-expense-1"
-}
-```
-
-`eventType` 可选值：
-
-- `START`
-- `COMPLETE`
-- `SKIP`
-- `EXPENSE`
-
-相同的 `idempotencyKey` 不得重复创建事件或重复扣减预算。
-
-## 9. 持续反馈并更新当前计划
-
-```http
-POST /api/v1/trips/{tripId}/plan-feedback
-```
-
-### 请求体
-
-```json
-{
-  "taskId": "task_2",
-  "feedback": "有点累了，希望减少后面的步行",
-  "eventId": "event_08"
-}
-```
-
-要求：
-
-- 已完成和已跳过任务保持不变
-- 只调整尚未执行的后续任务
-- 更新后的当前计划必须重新通过硬约束校验
-- 不创建 Plan V2，不要求用户处理版本接受/拒绝
-- 每次调整需记录反馈、时间和受影响任务
-
-无可行调整时返回 `422`，并说明冲突规则及可放宽项。
-
-## 10. 上传任务照片或视频
-
-```http
-POST /api/v1/trips/{tripId}/tasks/{taskId}/media
-```
-
-- 请求格式：`multipart/form-data`
-- 字段：
-  - `file`：图片或视频文件
-  - `mediaType`：`photo | video`
-  - `caption`：可选说明
-- 图片建议限制：5MB
-- 视频建议限制：30MB
-
-成功响应应返回：
-
-```json
-{
-  "mediaId": "media_01",
-  "taskId": "task_2",
-  "mediaType": "photo",
-  "url": "https://example.com/media/media_01.jpg",
-  "createdAt": "2026-08-26T12:45:00+08:00"
-}
-```
-
-还应提供删除素材接口：
-
-```http
-DELETE /api/v1/trips/{tripId}/media/{mediaId}
-```
-
-## 11. 获取旅行总结
-
-```http
-GET /api/v1/trips/{tripId}/summary
-```
-
-### 成功响应 data
-
-```json
-{
-  "plannedCostCents": 29800,
-  "actualCostCents": 34300,
-  "completedTasks": 3,
-  "totalTasks": 4,
-  "planAdjustmentCount": 2,
-  "media": []
-}
-```
-
-还应返回任务完成/跳过记录、途中反馈、计划调整记录和任务媒体。
-
-前端的“导出旅行总结”会将总结数据和已加载的媒体生成 HTML 文件。
-
-## 12. 联调步骤
-
-1. 后端按本文实现接口并启动服务。
-2. 复制 `.env.example` 为 `.env.local`。
-3. 设置后端地址：
-
-   ```env
-   VITE_API_BASE_URL=http://localhost:8000
-   VITE_USE_MOCK_API=false
-   ```
-
-4. 重启前端开发服务器。
-5. 按以下顺序联调：
-   - 创建草稿
-   - 确认约束
-   - 生成并确认 Plan V1
-   - 创建执行事件
-   - 持续提交途中反馈并更新当前计划
-   - 上传任务照片或视频
-   - 获取总结
-
-## 13. 前端文件对应关系
-
-| 文件 | 用途 |
+| 字段 | 规则 |
 | --- | --- |
-| `src/domain/trip.ts` | 请求与响应 TypeScript 类型 |
-| `src/api/client.ts` | Fetch、统一响应和错误处理 |
-| `src/api/tripApi.ts` | 具体接口方法及 Mock 切换 |
-| `src/mocks/trip.ts` | 前端演示数据 |
+| `schemaVersion` | 固定为 `"1.0"` |
+| `tripId` | UUID4 |
+| `mode` | 当前固定为 `"SINGLE"` |
+| `status` | 创建入口固定为 `"DRAFT"` |
+| `currency` | 固定为 `"CNY"` |
+| `totalBudgetCents` | 非负整数，单位为分 |
+| `participants` | 当前必须且只能有 1 项 |
+| `days` | 当前必须且只能有 1 项 |
 
-新增或修改字段时，必须同步更新本文、TypeScript 类型和后端 Schema。
+### CityContext
+
+- `countryCode` 固定为 `CN`
+- `cityCode` 是 Provider 分配的不透明字符串，不由前端猜测
+- `provider` 固定为 `AMAP`
+- `coordinateSystem` 固定为 `GCJ02`
+- 地图密钥不得进入 Trip
+
+### Preference
+
+| type | weight | isHard |
+| --- | --- | --- |
+| `INTEREST` | `1..5` | `false` |
+| `MUST_VISIT` | `1..5` | `true` |
+| `AVOID_PLACE` | `1..5` | `true` |
+
+同一个地点不能同时为 `MUST_VISIT` 和 `AVOID_PLACE`。
+
+### 日期和时间
+
+- `startDate == endDate == days[0].date`
+- `dayIndex` 固定为 `0`
+- 时间必须使用 `HH:mm:ss`
+- 不接受毫秒、时区后缀和跨午夜时间窗
+- `timeWindow.end` 必须晚于 `timeWindow.start`
+
+### AssistanceProfile
+
+S1-T001 当前只允许：
+
+```json
+{
+  "assistanceProfile": null
+}
+```
+
+前端表单中的步行、换乘和休息字段暂时保留在 UI 草稿中，等待 T003 扩展后再写入正式 Trip。
+
+## 5. UI 草稿与正式 Trip 的区别
+
+`TripDraftInput` 是前端页面输入模型，不是后端正式 Schema。
+
+转换流程：
+
+```text
+用户表单
+  -> TripDraftInput
+  -> 自然语言/城市解析（后端尚未登记）
+  -> 获得 CityContext、UUID、起终点
+  -> buildCreateSingleDayTrip()
+  -> CreateSingleDayTrip
+  -> 后端 Schema 校验
+```
+
+转换工具位于：
+
+```text
+src/api/tripContract.ts
+```
+
+它负责：
+
+- 将 `HH:mm` 转换为 `HH:mm:ss`
+- 将兴趣转换为 `INTEREST`
+- 将必去地点转换为 `MUST_VISIT`
+- 将避开地点转换为 `AVOID_PLACE`
+- 填充固定枚举、单日结构和预算
+- 将 `assistanceProfile` 固定为 `null`
+
+## 6. Schema 错误
+
+正式错误不是通用的 `{ code: 422, message, data }` 包装，而是：
+
+```json
+{
+  "code": "TRIP_SCHEMA_INVALID",
+  "schemaVersion": "1.0",
+  "errors": [
+    {
+      "path": "days[0].timeWindow.end",
+      "code": "missing",
+      "message": "Field required"
+    }
+  ]
+}
+```
+
+需要用户确认歧义时：
+
+```json
+{
+  "code": "TRIP_CONFIRMATION_REQUIRED",
+  "schemaVersion": "1.0",
+  "errors": [
+    {
+      "path": "days[0].date",
+      "code": "ambiguous_value",
+      "message": "“下周六”需确认具体日期",
+      "context": {
+        "referenceDate": "2026-08-24"
+      },
+      "candidates": ["2026-08-29", "2026-09-05"]
+    }
+  ]
+}
+```
+
+`src/api/client.ts` 已支持解析这两类错误，并通过 `ApiError.issues` 暴露字段级问题。
+
+## 7. HTTP 路由状态
+
+后端当前尚未在本分支实现或登记 Trip 创建 HTTP URL。
+
+因此：
+
+- `tripApi.createDraft()` 仅允许 Mock 模式
+- 关闭 Mock 后调用会抛出 `TRIP_DRAFT_ENDPOINT_UNREGISTERED`
+- `tripApi.submitNormalizedTrip(path, payload)` 只用于后端负责人确认 URL 后接入
+- 不应再默认使用 `/api/v1/trips/drafts`
+
+## 8. 待后端确认的接口
+
+以下是前端功能需求，不是已确认契约：
+
+- 自然语言解析与歧义确认
+- 城市 Provider 查询
+- Trip 创建/保存
+- AssistanceProfile 确认
+- 计划生成与持续反馈
+- 执行事件
+- 照片与视频上传
+- 旅行总结
+
+每个接口必须由负责人补充 URL、请求 DTO、响应 DTO、状态转换和错误码后，才能从 Mock 切换为真实请求。
