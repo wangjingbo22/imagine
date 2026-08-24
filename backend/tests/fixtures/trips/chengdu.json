@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "1.0",
+  "tripId": "00000000-0000-4000-8000-000000000003",
+  "mode": "SINGLE",
+  "status": "DRAFT",
+  "cityContext": {
+    "countryCode": "CN",
+    "cityCode": "510100",
+    "cityName": "成都市",
+    "center": {
+      "longitude": 104.066541,
+      "latitude": 30.572269
+    },
+    "providerConfig": {
+      "provider": "AMAP",
+      "coordinateSystem": "GCJ02"
+    }
+  },
+  "startDate": "2026-09-07",
+  "endDate": "2026-09-07",
+  "currency": "CNY",
+  "totalBudgetCents": 30000,
+  "participants": [
+    {
+      "participantId": "10000000-0000-4000-8000-000000000003",
+      "nickname": "单人旅客",
+      "budgetCapCents": 30000,
+      "preferences": [
+        {
+          "type": "INTEREST",
+          "value": "历史",
+          "weight": 4,
+          "isHard": false
+        },
+        {
+          "type": "INTEREST",
+          "value": "美食",
+          "weight": 4,
+          "isHard": false
+        }
+      ],
+      "assistanceProfile": null
+    }
+  ],
+  "days": [
+    {
+      "dayIndex": 0,
+      "date": "2026-09-07",
+      "dailyBudgetCents": 28000,
+      "startLocationText": "天府广场",
+      "endLocationText": "天府广场",
+      "timeWindow": {
+        "start": "10:00:00",
+        "end": "20:00:00"
+      }
+    }
+  ]
+}
