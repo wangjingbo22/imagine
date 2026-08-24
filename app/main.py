@@ -3,16 +3,20 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.api.routes import router
+from app.api.plan_routes import router as plan_router
 from app.application.amap_service import AmapLocationService
+from app.application.plan_service import PlanVersionService
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.domain.models import ErrorResponse
 from app.infrastructure.amap import AmapClient
 from app.infrastructure.cache import SqliteProviderCache
+from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.schemas.validation_error import TripSchemaError, issues_from_pydantic
 
 
@@ -101,6 +105,7 @@ def create_app(
     *,
     settings: Settings | None = None,
     service: AmapLocationService | None = None,
+    plan_service: PlanVersionService | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     managed_client: AmapClient | None = None
@@ -118,6 +123,11 @@ def create_app(
             route_ttl_seconds=resolved_settings.amap_route_cache_ttl_seconds,
         )
 
+    if plan_service is None:
+        plan_service = PlanVersionService(
+            SqlitePlanVersionRepository(resolved_settings.plan_version_db_path)
+        )
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
@@ -125,8 +135,8 @@ def create_app(
             await managed_client.close()
 
     app = FastAPI(
-        title="行知旅伴——城市地点、路线与可信来源",
-        description="张琪负责的 PBI-02-A：高德城市适配、地点检索、路线规划和同城缓存隔离。",
+        title="行知旅伴——张琪 Sprint 1 接口",
+        description="城市地点与可信来源，以及 PlanVersion 确认、V1/V2 Diff、接受拒绝和执行状态守卫。",
         version="1.0.0",
         lifespan=lifespan,
         docs_url=None,
@@ -134,11 +144,24 @@ def create_app(
             {
                 "name": "城市地点、路线与可信来源",
                 "description": "地点、路线、价格事实、可信来源和城市隔离缓存。",
-            }
+            },
+            {
+                "name": "PlanVersion 状态与 Diff",
+                "description": "登记不可变候选、确认唯一 CURRENT、查看 V1/V2 Diff，并原子接受或拒绝 V2。",
+            },
         ],
     )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type"],
+    )
     app.state.location_service = service
+    app.state.plan_version_service = plan_service
     app.include_router(router)
+    app.include_router(plan_router)
 
     @app.get("/docs", include_in_schema=False)
     async def chinese_api_docs() -> HTMLResponse:
@@ -180,6 +203,13 @@ def create_app(
             normalized_errors.append({**item, "loc": location})
         body = TripSchemaError(issues_from_pydantic(normalized_errors)).as_dict()
         return JSONResponse(status_code=422, content=body)
+
+    @app.exception_handler(TripSchemaError)
+    async def handle_trip_schema_error(
+        _: Request,
+        error: TripSchemaError,
+    ) -> JSONResponse:
+        return JSONResponse(status_code=422, content=error.as_dict())
 
     return app
 

@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     amap_cache_db_path: Path = Path("data/amap_cache.sqlite3")
     amap_place_cache_ttl_seconds: int = Field(default=86_400, ge=60)
     amap_route_cache_ttl_seconds: int = Field(default=1_800, ge=60)
+    plan_version_db_path: Path = Path("data/plan_versions.sqlite3")
 
 
 @lru_cache
