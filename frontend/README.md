@@ -24,4 +24,4 @@ npm run build
 npm run lint
 ```
 
-接口契约见 `../doc/frontend_api_contract.md`。
+接口契约见 `src/api/API.md`，项目级登记见 `../doc/frontend_api_contract.md`。
