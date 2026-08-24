@@ -1,0 +1,355 @@
+:root {
+  --ease-apple: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-soft: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-reveal] {
+  opacity: 0;
+  transform: translate3d(0, 28px, 0);
+  filter: blur(8px);
+  transition:
+    opacity 0.9s var(--ease-apple),
+    transform 1s var(--ease-apple),
+    filter 0.9s var(--ease-apple);
+  transition-delay: var(--reveal-delay, 0ms);
+  will-change: opacity, transform, filter;
+}
+
+[data-reveal='hero-copy'] {
+  transform: translate3d(0, 36px, 0) scale(0.985);
+}
+
+[data-reveal='hero-visual'] {
+  transform: translate3d(38px, 24px, 0) scale(0.965);
+}
+
+[data-reveal='side'] {
+  transform: translate3d(-32px, 0, 0);
+}
+
+[data-reveal='panel'] {
+  transform: translate3d(32px, 0, 0) scale(0.99);
+}
+
+[data-reveal='card'] {
+  transform: translate3d(0, 34px, 0) scale(0.975);
+}
+
+[data-reveal].is-revealed {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+  filter: blur(0);
+}
+
+.motion-enter {
+  animation: contentEnter 0.72s var(--ease-apple) both;
+}
+
+.topbar {
+  animation: navDrop 0.65s var(--ease-apple) both;
+}
+
+.hero-content .eyebrow {
+  animation: detailFade 0.7s 0.18s var(--ease-apple) both;
+}
+
+.hero-content h1 {
+  animation: headlineReveal 1s 0.08s var(--ease-apple) both;
+}
+
+.hero-copy {
+  animation: detailFade 0.85s 0.25s var(--ease-apple) both;
+}
+
+.hero-actions,
+.hero-proof {
+  animation: detailFade 0.85s 0.38s var(--ease-apple) both;
+}
+
+.floating-card--plan {
+  animation: planFloat 7s ease-in-out infinite;
+}
+
+.floating-card--agent {
+  animation: smallFloat 5.5s 0.7s ease-in-out infinite;
+}
+
+.floating-card--care {
+  animation: smallFloat 6.2s 1.4s ease-in-out infinite reverse;
+}
+
+.orbit--one {
+  animation: orbitDrift 18s linear infinite;
+}
+
+.orbit--two {
+  animation: orbitDrift 14s linear infinite reverse;
+}
+
+.aurora {
+  animation: auroraBreath 8s ease-in-out infinite alternate;
+}
+
+.mode-card,
+.timeline-item__card,
+.map-card,
+.metric-card,
+.validation-card,
+.explanation-card,
+.source-card,
+.execution-web__main,
+.execution-web__side > section,
+.summary-metrics article {
+  transition:
+    transform 0.45s var(--ease-soft),
+    box-shadow 0.45s var(--ease-soft),
+    border-color 0.35s ease;
+}
+
+.mode-card:hover {
+  transform: translateY(-9px) scale(1.008);
+}
+
+.timeline-item__card:hover,
+.map-card:hover,
+.metric-card:hover,
+.validation-card:hover,
+.explanation-card:hover,
+.source-card:hover,
+.execution-web__side > section:hover,
+.summary-metrics article:hover {
+  transform: translateY(-4px);
+  border-color: #cad8ef;
+  box-shadow: 0 20px 45px rgba(37, 51, 77, 0.11);
+}
+
+.button {
+  transition:
+    transform 0.35s var(--ease-soft),
+    box-shadow 0.35s var(--ease-soft),
+    background-color 0.25s ease,
+    opacity 0.25s ease;
+}
+
+.button:active {
+  transform: scale(0.975);
+}
+
+.workspace-tabs button {
+  transition:
+    color 0.28s ease,
+    background-color 0.38s var(--ease-soft),
+    transform 0.28s var(--ease-soft);
+}
+
+.workspace-tabs button:hover:not(.is-active) {
+  color: var(--web-ink);
+  background: #f3f6fa;
+}
+
+.workspace-tabs button:active {
+  transform: scale(0.97);
+}
+
+.progress-bar i,
+.agent-progress-track i,
+.phone-progress i {
+  transition: width 0.75s var(--ease-apple);
+}
+
+.agent-step.is-active {
+  animation: activeStepPulse 1.8s ease-in-out infinite;
+}
+
+.map-pin,
+.current-task-map__pin {
+  animation: pinPulse 2.6s ease-in-out infinite;
+}
+
+.current-task-map__route {
+  animation: routeDash 12s linear infinite;
+}
+
+.summary-icon {
+  animation: summaryPop 0.85s 0.15s var(--ease-apple) both;
+}
+
+.summary-metrics article {
+  animation: metricRise 0.7s var(--ease-apple) both;
+}
+
+.summary-metrics article:nth-child(2) {
+  animation-delay: 0.08s;
+}
+
+.summary-metrics article:nth-child(3) {
+  animation-delay: 0.16s;
+}
+
+.summary-metrics article:nth-child(4) {
+  animation-delay: 0.24s;
+}
+
+@keyframes navDrop {
+  from {
+    opacity: 0;
+    transform: translateY(-14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes headlineReveal {
+  from {
+    opacity: 0;
+    transform: translateY(34px);
+    filter: blur(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes detailFade {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes contentEnter {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.992);
+    filter: blur(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes planFloat {
+  0%,
+  100% {
+    transform: rotateY(-5deg) rotateX(2deg) translateY(0);
+  }
+  50% {
+    transform: rotateY(-3deg) rotateX(1deg) translateY(-12px);
+  }
+}
+
+@keyframes smallFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-9px);
+  }
+}
+
+@keyframes orbitDrift {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes auroraBreath {
+  from {
+    opacity: 0.4;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 0.8;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes activeStepPulse {
+  0%,
+  100% {
+    transform: translateX(5px);
+  }
+  50% {
+    transform: translateX(9px);
+  }
+}
+
+@keyframes pinPulse {
+  0%,
+  100% {
+    box-shadow: 0 10px 24px rgba(37, 99, 235, 0.18);
+  }
+  50% {
+    box-shadow:
+      0 12px 28px rgba(37, 99, 235, 0.25),
+      0 0 0 10px rgba(37, 99, 235, 0.07);
+  }
+}
+
+@keyframes routeDash {
+  to {
+    stroke-dashoffset: -80;
+  }
+}
+
+@keyframes summaryPop {
+  from {
+    opacity: 0;
+    transform: scale(0.72) rotate(-8deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+
+@keyframes metricRise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal],
+  [data-reveal].is-revealed,
+  .motion-enter,
+  .topbar,
+  .hero-content .eyebrow,
+  .hero-content h1,
+  .hero-copy,
+  .hero-actions,
+  .hero-proof,
+  .floating-card--plan,
+  .floating-card--agent,
+  .floating-card--care,
+  .orbit,
+  .aurora,
+  .agent-step.is-active,
+  .map-pin,
+  .current-task-map__pin,
+  .current-task-map__route,
+  .summary-icon,
+  .summary-metrics article {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}

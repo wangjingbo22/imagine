@@ -1,0 +1,281 @@
+import {
+  ArrowRight,
+  Baby,
+  CalendarDays,
+  Check,
+  ChevronLeft,
+  Clock3,
+  HeartPulse,
+  MapPin,
+  PersonStanding,
+  Plus,
+  Sparkles,
+  UserRound,
+  Wallet,
+  X,
+} from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { tripApi } from '../api/tripApi'
+import { AppShell } from '../components/AppShell'
+import type { AssistanceMode } from '../domain/trip'
+
+const assistanceOptions: Array<{
+  value: AssistanceMode
+  label: string
+  description: string
+  icon: typeof UserRound
+}> = [
+  { value: 'standard', label: '普通出行', description: '按常规节奏规划', icon: UserRound },
+  { value: 'family', label: '亲子同行', description: '关注午休与用餐', icon: Baby },
+  { value: 'low-mobility', label: '低体力', description: '减少步行和换乘', icon: HeartPulse },
+  { value: 'assisted', label: '行动辅助', description: '规避已知阶梯路线', icon: PersonStanding },
+]
+
+const interestOptions = ['历史文化', '特色餐饮', '城市漫步', '摄影', '自然风景', '博物馆']
+
+export function PlannerPage() {
+  const navigate = useNavigate()
+  const [assistanceMode, setAssistanceMode] = useState<AssistanceMode>('low-mobility')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
+  const [cityName, setCityName] = useState('北京')
+  const [travelDate, setTravelDate] = useState('2026-08-26')
+  const [startTime, setStartTime] = useState('09:00')
+  const [endTime, setEndTime] = useState('20:00')
+  const [budget, setBudget] = useState('350')
+  const [interests, setInterests] = useState(['历史文化', '特色餐饮', '城市漫步'])
+  const [mustVisitInput, setMustVisitInput] = useState('中国国家博物馆')
+  const [avoidInput, setAvoidInput] = useState('排队过久的网红店')
+  const [maxSegmentWalkMeters, setMaxSegmentWalkMeters] = useState('500')
+  const [maxTransfers, setMaxTransfers] = useState('2')
+  const [restIntervalMinutes, setRestIntervalMinutes] = useState('90')
+  const [isEditingConstraints, setIsEditingConstraints] = useState(false)
+  const [request, setRequest] = useState(
+    '我一个人在北京玩一天，喜欢历史和特色餐饮，希望少走路，晚上 8 点前结束。',
+  )
+
+  const selectedMode = useMemo(
+    () => assistanceOptions.find((item) => item.value === assistanceMode),
+    [assistanceMode],
+  )
+
+  const isFormValid =
+    cityName.trim().length > 0 &&
+    travelDate.length > 0 &&
+    startTime.length > 0 &&
+    endTime.length > 0 &&
+    Number(budget) > 0 &&
+    interests.length > 0
+
+  function toggleInterest(interest: string) {
+    setInterests((current) =>
+      current.includes(interest)
+        ? current.filter((item) => item !== interest)
+        : [...current, interest],
+    )
+  }
+
+  async function handleSubmit() {
+    if (!isFormValid) {
+      setSubmitError('请完整填写城市、日期、时间、预算，并至少选择一个兴趣。')
+      return
+    }
+
+    setSubmitError('')
+    setIsSubmitting(true)
+    try {
+      const draft = {
+        cityName: cityName.trim(),
+        travelDate,
+        startTime,
+        endTime,
+        budgetCents: Math.round(Number(budget) * 100),
+        interests,
+        mustVisit: mustVisitInput.trim() ? [mustVisitInput.trim()] : [],
+        avoidPlaces: avoidInput.trim() ? [avoidInput.trim()] : [],
+        assistanceMode,
+        assistanceProfile: {
+          maxSegmentWalkMeters: Number(maxSegmentWalkMeters),
+          maxTransfers: Number(maxTransfers),
+          restIntervalMinutes: Number(restIntervalMinutes),
+        },
+        naturalLanguageRequest: request,
+      }
+      const response = await tripApi.createDraft(draft)
+      navigate('/generating', { state: { tripId: response.data.tripId, draft } })
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : '创建行程失败，请稍后重试。')
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <AppShell compact>
+      <main className="planner-layout">
+        <aside className="planner-sidebar" data-reveal="side">
+          <div>
+            <span className="eyebrow eyebrow--dark"><Sparkles size={14} /> 新建行程</span>
+            <h1>先说说，你想要怎样的一天？</h1>
+            <p>不用担心遗漏，Agent 会把自然语言整理成可以逐项确认的约束。</p>
+          </div>
+          <ol className="step-list">
+            {['基本行程', '预算时间', '关怀需求', '兴趣限制', '确认生成'].map((step, index) => (
+              <li className={index < 3 ? 'is-complete' : index === 3 ? 'is-current' : ''} key={step}>
+                <span>{index < 3 ? <Check size={15} /> : index + 1}</span>
+                <div><strong>{step}</strong><small>{index === 3 ? '正在填写' : index < 3 ? '已完成' : '下一步'}</small></div>
+              </li>
+            ))}
+          </ol>
+          <div className="privacy-note">
+            <HeartPulse size={18} />
+            <span>关怀需求只用于本次路线校验，不用于给你贴标签。</span>
+          </div>
+        </aside>
+
+        <section className="planner-panel" data-reveal="panel">
+          <div className="planner-panel__header">
+            <div>
+              <span className="section-kicker">EDITABLE TRIP DRAFT</span>
+              <h2>把偏好和限制告诉 Agent</h2>
+            </div>
+            <span className="save-state"><span className="status-dot" /> 已自动保存</span>
+          </div>
+
+          <div className="form-section">
+            <label className="field-label" htmlFor="trip-request">自然语言描述</label>
+            <div className="smart-textarea">
+              <textarea id="trip-request" maxLength={300} value={request} onChange={(event) => setRequest(event.target.value)} />
+              <div className="smart-textarea__footer">
+                <span><Sparkles size={15} /> Agent 将识别城市、兴趣和硬约束</span>
+                <span>{request.length}/300</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="form-grid">
+            <label className="input-card">
+              <span><MapPin size={18} /> 目标城市</span>
+              <input value={cityName} onChange={(event) => setCityName(event.target.value)} />
+              <small>提交后解析 cityCode 与中心坐标</small>
+            </label>
+            <label className="input-card">
+              <span><CalendarDays size={18} /> 出行日期</span>
+              <input type="date" value={travelDate} onChange={(event) => setTravelDate(event.target.value)} />
+              <small>当前版本规划单日行程</small>
+            </label>
+            <div className="input-card">
+              <span><Clock3 size={18} /> 可用时间</span>
+              <div className="time-input-row">
+                <input aria-label="开始时间" type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} />
+                <span>至</span>
+                <input aria-label="结束时间" type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} />
+              </div>
+              <small>Agent 将校验任务是否位于时间窗内</small>
+            </div>
+            <label className="input-card">
+              <span><Wallet size={18} /> 总预算</span>
+              <div className="money-input"><b>¥</b><input min="1" type="number" value={budget} onChange={(event) => setBudget(event.target.value)} /></div>
+              <small>建议保留 15% 缓冲</small>
+            </label>
+          </div>
+
+          <div className="form-section">
+            <div className="field-heading">
+              <div><label className="field-label">兴趣与地点限制</label><small>点击标签可选择或取消</small></div>
+              <span className="verified-chip"><Plus size={13} /> 至少选择 1 项</span>
+            </div>
+            <div className="interest-options">
+              {interestOptions.map((interest) => (
+                <button
+                  className={interests.includes(interest) ? 'interest-chip is-selected' : 'interest-chip'}
+                  key={interest}
+                  onClick={() => toggleInterest(interest)}
+                  type="button"
+                >
+                  {interests.includes(interest) && <Check size={13} />}
+                  {interest}
+                </button>
+              ))}
+            </div>
+            <div className="restriction-grid">
+              <label>
+                <span>必去地点</span>
+                <div><MapPin size={16} /><input value={mustVisitInput} onChange={(event) => setMustVisitInput(event.target.value)} placeholder="例如：中国国家博物馆" /></div>
+              </label>
+              <label>
+                <span>希望避开</span>
+                <div><X size={16} /><input value={avoidInput} onChange={(event) => setAvoidInput(event.target.value)} placeholder="例如：排队过久的餐厅" /></div>
+              </label>
+            </div>
+          </div>
+
+          <div className="form-section">
+            <div className="field-heading">
+              <div><label className="field-label">关怀出行模式</label><small>会转换为可验证约束</small></div>
+              <span className="verified-chip"><Check size={13} /> 可随时修改</span>
+            </div>
+            <div className="assistance-grid">
+              {assistanceOptions.map(({ value, label, description, icon: Icon }) => (
+                <button
+                  className={assistanceMode === value ? 'assistance-card is-selected' : 'assistance-card'}
+                  key={value}
+                  onClick={() => setAssistanceMode(value)}
+                  type="button"
+                >
+                  <span><Icon size={21} /></span>
+                  <strong>{label}</strong>
+                  <small>{description}</small>
+                  {assistanceMode === value && <i><Check size={12} /></i>}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="constraint-summary">
+            <div>
+              <span className="constraint-summary__icon"><HeartPulse size={20} /></span>
+              <div>
+                <strong>{selectedMode?.label}约束已准备</strong>
+                <p>单段步行不超过 {maxSegmentWalkMeters} 米 · 最多 {maxTransfers} 次换乘 · 每 {restIntervalMinutes} 分钟安排休息</p>
+              </div>
+            </div>
+            <button onClick={() => setIsEditingConstraints((current) => !current)} type="button">
+              {isEditingConstraints ? '收起细节' : '编辑细节'}
+            </button>
+          </div>
+
+          {isEditingConstraints && (
+            <div className="constraint-editor motion-enter">
+              <label>
+                <span>单段步行上限</span>
+                <div><input min="100" step="50" type="number" value={maxSegmentWalkMeters} onChange={(event) => setMaxSegmentWalkMeters(event.target.value)} /><b>米</b></div>
+              </label>
+              <label>
+                <span>最多换乘次数</span>
+                <div><input min="0" max="8" type="number" value={maxTransfers} onChange={(event) => setMaxTransfers(event.target.value)} /><b>次</b></div>
+              </label>
+              <label>
+                <span>休息间隔</span>
+                <div><input min="30" step="15" type="number" value={restIntervalMinutes} onChange={(event) => setRestIntervalMinutes(event.target.value)} /><b>分钟</b></div>
+              </label>
+            </div>
+          )}
+
+          <div className="planner-actions">
+            <button className="button button--ghost" onClick={() => navigate('/')} type="button">
+              <ChevronLeft size={18} /> 返回首页
+            </button>
+            <div className="planner-actions__submit">
+              {submitError && <span className="form-error">{submitError}</span>}
+              <button className="button button--primary" disabled={isSubmitting || !isFormValid} onClick={handleSubmit} type="button">
+                {isSubmitting ? '正在理解需求…' : '确认并生成方案'}
+                {!isSubmitting && <ArrowRight size={18} />}
+              </button>
+            </div>
+          </div>
+        </section>
+      </main>
+    </AppShell>
+  )
+}

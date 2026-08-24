@@ -94,3 +94,19 @@
 - 分页、筛选、排序参数规范
 - 文件上传下载规范
 - WebSocket / 流式输出 / Agent 状态更新协议
+
+## 8. 行知旅伴 Sprint 1 接口登记
+
+- 项目采用 `/api/v1` REST 接口和本文第 2 节统一响应格式。
+- 金额统一使用整数分；时间统一使用 ISO 8601 或明确的 `HH:mm` 行程时间字段。
+- 前端 Sprint 1 已登记以下接口：
+  - `POST /api/v1/trips/drafts`
+  - `PUT /api/v1/trips/{tripId}/constraints`
+  - `POST /api/v1/trips/{tripId}/plans`
+  - `POST /api/v1/trips/{tripId}/plans/{planId}/confirm`
+  - `GET /api/v1/trips/{tripId}`
+  - `POST /api/v1/trips/{tripId}/events`
+  - `POST /api/v1/trips/{tripId}/replans`
+  - `POST /api/v1/trips/{tripId}/plans/{planId}/decision`
+  - `GET /api/v1/trips/{tripId}/summary`
+- 详细请求、响应、错误码、幂等和状态约束见 `doc/frontend_api_contract.md`。
