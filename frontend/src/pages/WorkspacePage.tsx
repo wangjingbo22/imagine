@@ -13,11 +13,13 @@ import {
   Layers3,
   Map,
   MapPin,
+  MessageSquareText,
   Navigation,
   ReceiptText,
   RefreshCw,
   Route,
   ShieldCheck,
+  Send,
   Sparkles,
   Telescope,
   Utensils,
@@ -39,6 +41,14 @@ const views: Array<{ value: WorkspaceView; label: string }> = [
   { value: 'summary', label: '旅行总结' },
 ]
 
+const recommendationFeedbackOptions = [
+  '想少走路',
+  '预算再低一些',
+  '减少换乘',
+  '增加文化景点',
+  '调整用餐安排',
+]
+
 function formatMoney(cents: number) {
   return `¥${Math.round(cents / 100)}`
 }
@@ -54,8 +64,13 @@ export function WorkspacePage() {
   const [skippedTaskIds, setSkippedTaskIds] = useState<string[]>([])
   const [replanExpenseDeltaCents, setReplanExpenseDeltaCents] = useState<number | null>(null)
   const [actualSpentCents, setActualSpentCents] = useState(600)
+  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false)
+  const [recommendationFeedback, setRecommendationFeedback] = useState('')
+  const [selectedFeedbackOptions, setSelectedFeedbackOptions] = useState<string[]>([])
+  const [recommendationRound, setRecommendationRound] = useState(1)
+  const [isRegenerating, setIsRegenerating] = useState(false)
+  const [appliedFeedback, setAppliedFeedback] = useState<string[]>([])
   const budgetCents = draft?.budgetCents ?? 35000
-  const remainingBudgetCents = Math.max(0, budgetCents - mockPlanV1.totalCostCents)
   const validationRules = [
     `单段步行 ≤ ${draft?.assistanceProfile.maxSegmentWalkMeters ?? 500}m`,
     `换乘次数 ≤ ${draft?.assistanceProfile.maxTransfers ?? 2}`,
@@ -70,13 +85,41 @@ export function WorkspacePage() {
         `${draft.cityName}历史街区漫步`,
       ]
     : undefined
-  const displayPlanV1 = customCityTitles
+  const baseDisplayPlanV1 = customCityTitles
     ? {
         ...mockPlanV1,
         cityName: draft?.cityName ?? mockPlanV1.cityName,
         tasks: mockPlanV1.tasks.map((task, index) => ({ ...task, title: customCityTitles[index] })),
       }
     : mockPlanV1
+  const displayPlanV1 = recommendationRound > 1
+    ? {
+        ...baseDisplayPlanV1,
+        totalCostCents: Math.max(0, baseDisplayPlanV1.totalCostCents - 3200),
+        totalWalkMeters: Math.max(0, baseDisplayPlanV1.totalWalkMeters - 620),
+        tasks: baseDisplayPlanV1.tasks.map((task, index) => {
+          if (index === 2) {
+            return {
+              ...task,
+              title: `${draft?.cityName ?? '北京'}城市艺术馆`,
+              costCents: 1500,
+              walkMeters: 320,
+              note: '根据反馈减少步行并增加室内文化体验',
+            }
+          }
+          if (index === 3) {
+            return {
+              ...task,
+              costCents: Math.max(0, task.costCents - 4300),
+              walkMeters: Math.max(300, task.walkMeters - 220),
+              note: '根据反馈降低预算并减少路线绕行',
+            }
+          }
+          return task
+        }),
+      }
+    : baseDisplayPlanV1
+  const remainingBudgetCents = Math.max(0, budgetCents - displayPlanV1.totalCostCents)
   const displayPlanV2 = {
     ...mockPlanV2,
     cityName: draft?.cityName ?? mockPlanV2.cityName,
@@ -93,7 +136,7 @@ export function WorkspacePage() {
   const actualExpenseCents = Math.max(0, Number(actualCost) || 0) * 100
   const expenseDeltaCents = actualExpenseCents - (currentTask?.costCents ?? 0)
   const effectiveReplanDeltaCents = replanExpenseDeltaCents ?? expenseDeltaCents
-  const projectedCostCents = mockPlanV1.totalCostCents + effectiveReplanDeltaCents
+  const projectedCostCents = displayPlanV1.totalCostCents + effectiveReplanDeltaCents
   const projectedBufferCents = budgetCents - projectedCostCents
   const expenseDifferenceLabel =
     expenseDeltaCents === 0
@@ -104,6 +147,30 @@ export function WorkspacePage() {
   )
   const isJourneyComplete =
     completedTaskIds.length + skippedTaskIds.length >= activePlan.tasks.length
+
+  function toggleRecommendationFeedback(option: string) {
+    setSelectedFeedbackOptions((current) =>
+      current.includes(option)
+        ? current.filter((item) => item !== option)
+        : [...current, option],
+    )
+  }
+
+  function handleRegenerateRecommendation() {
+    if (selectedFeedbackOptions.length === 0 && recommendationFeedback.trim().length === 0) {
+      return
+    }
+    setIsRegenerating(true)
+    window.setTimeout(() => {
+      setRecommendationRound((current) => current + 1)
+      setAppliedFeedback([
+        ...selectedFeedbackOptions,
+        ...(recommendationFeedback.trim() ? [recommendationFeedback.trim()] : []),
+      ])
+      setIsRegenerating(false)
+      setIsFeedbackOpen(false)
+    }, 1200)
+  }
 
   function moveToNextTask() {
     const nextIndex = currentTaskIndex + 1
@@ -190,9 +257,15 @@ export function WorkspacePage() {
           <div className="workspace-grid motion-enter">
             <section className="timeline-panel">
               <div className="panel-heading">
-                <div><span className="section-kicker">PLAN V1</span><h2>今天的路线</h2></div>
+                <div><span className="section-kicker">RECOMMENDATION #{recommendationRound}</span><h2>今天的路线</h2></div>
                 <button className="mini-action" type="button">按时间 <ChevronDown size={15} /></button>
               </div>
+              {recommendationRound > 1 && (
+                <div className="recommendation-updated">
+                  <CheckCircle2 size={17} />
+                  <span><strong>已根据反馈重新推荐</strong><small>{appliedFeedback.join(' · ')}</small></span>
+                </div>
+              )}
               <div className="timeline">
                 {displayPlanV1.tasks.map((task) => (
                   <article className={`timeline-item timeline-item--${task.status}`} key={task.id}>
@@ -277,9 +350,57 @@ export function WorkspacePage() {
                 <div><CircleDollarSign size={15} /><span>价格参考</span><strong>估算区间</strong></div>
                 <div><MapPin size={15} /><span>无障碍设施</span><strong className="needs-confirmation">待确认</strong></div>
               </section>
-              <button className="button button--primary button--block" onClick={() => setView('execute')} type="button">
-                确认 Plan V1 并开始旅程 <ArrowRight size={18} />
-              </button>
+              {isFeedbackOpen ? (
+                <section className="recommendation-feedback motion-enter">
+                  <div className="recommendation-feedback__head">
+                    <span><MessageSquareText size={18} /> 告诉 Agent 哪里不合适</span>
+                    <button onClick={() => setIsFeedbackOpen(false)} type="button"><X size={16} /></button>
+                  </div>
+                  <div className="recommendation-feedback__options">
+                    {recommendationFeedbackOptions.map((option) => (
+                      <button
+                        className={selectedFeedbackOptions.includes(option) ? 'is-selected' : ''}
+                        key={option}
+                        onClick={() => toggleRecommendationFeedback(option)}
+                        type="button"
+                      >
+                        {selectedFeedbackOptions.includes(option) && <Check size={12} />}
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    maxLength={200}
+                    onChange={(event) => setRecommendationFeedback(event.target.value)}
+                    placeholder="也可以具体说明，例如：希望下午安排室内景点，减少打车费用……"
+                    value={recommendationFeedback}
+                  />
+                  <div className="recommendation-feedback__actions">
+                    <small>{recommendationFeedback.length}/200</small>
+                    <button
+                      className="button button--primary"
+                      disabled={
+                        isRegenerating ||
+                        (selectedFeedbackOptions.length === 0 && recommendationFeedback.trim().length === 0)
+                      }
+                      onClick={handleRegenerateRecommendation}
+                      type="button"
+                    >
+                      {isRegenerating ? <LoaderCircle className="spin-icon" size={16} /> : <Send size={16} />}
+                      {isRegenerating ? '正在重新推荐…' : '提交反馈并重新推荐'}
+                    </button>
+                  </div>
+                </section>
+              ) : (
+                <div className="plan-decision-actions">
+                  <button className="button button--ghost" onClick={() => setIsFeedbackOpen(true)} type="button">
+                    <MessageSquareText size={17} /> 不满意，重新推荐
+                  </button>
+                  <button className="button button--primary" onClick={() => setView('execute')} type="button">
+                    接受推荐并确认 Plan V1 <ArrowRight size={18} />
+                  </button>
+                </div>
+              )}
             </aside>
           </div>
         )}

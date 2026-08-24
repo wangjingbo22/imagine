@@ -200,6 +200,10 @@
   animation-delay: 0.24s;
 }
 
+.spin-icon {
+  animation: spin 1s linear infinite;
+}
+
 @keyframes navDrop {
   from {
     opacity: 0;

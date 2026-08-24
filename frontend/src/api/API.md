@@ -125,6 +125,18 @@ CONSTRAINT_CONFIRMED
 POST /api/v1/trips/{tripId}/plans
 ```
 
+首次生成时请求体可以为空。用户要求重新推荐时提交：
+
+```json
+{
+  "previousPlanId": "proposal_01",
+  "feedbackTags": ["想少走路", "预算再低一些"],
+  "feedbackText": "希望下午安排室内景点，减少打车费用"
+}
+```
+
+重新推荐只生成新的 `PROPOSED` 候选方案，不得创建或覆盖 `CURRENT` 版本。
+
 ### 成功响应 data
 
 ```json
