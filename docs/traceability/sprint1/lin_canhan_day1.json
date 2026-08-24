@@ -4,7 +4,8 @@
   "sprint": "Sprint 1",
   "scope": "DAY_1_ONLY",
   "compatibilityBaseline": {
-    "teamHead": "0a72d88",
+    "teamHead": "3de6d5c446538b27f1ec558d8081821b8362ca21",
+    "wjbFrontendCommit": "3894c5993cf2fa229d350199eb64cbf59022bdda",
     "upstreamTask": "S1-T001",
     "upstreamLineageCommit": "22eeaae29e141da68c4a6adc6c3efb9fa28690ad",
     "finalSourceCommit": "e487fa29228181d219226ccd3b24ee76420b38a7",
@@ -22,7 +23,9 @@
       "consumedBy": ["S1-T004", "S1-T007"],
       "codeFiles": [
         "backend/app/schemas/trip.py",
-        "backend/app/schemas/assistance.py"
+        "backend/app/schemas/assistance.py",
+        "frontend/src/domain/trip.ts",
+        "frontend/src/api/tripContract.ts"
       ],
       "testFiles": [
         "backend/tests/test_assistance_profile_schema.py",
@@ -38,7 +41,8 @@
         "four-profile-presets-serialize",
         "single-participant",
         "trip-status-draft",
-        "t001-null-profile-backward-compatible"
+        "t001-null-profile-backward-compatible",
+        "frontend-four-profile-mapping"
       ]
     },
     {
@@ -74,7 +78,8 @@
       "consumedBy": ["S1-T010", "S1-T011"],
       "codeFiles": [
         "backend/app/services/route_risk/models.py",
-        "backend/app/services/route_risk/evaluator.py"
+        "backend/app/services/route_risk/evaluator.py",
+        "frontend/src/domain/trip.ts"
       ],
       "testFiles": [
         "backend/tests/test_route_risk.py"
@@ -92,7 +97,8 @@
         "rest-interval-fail-with-segment-and-rule",
         "ordinary-profile-no-demographic-false-positive",
         "unknown-stair-evidence-needs-confirmation",
-        "unsupported-hard-route-rule-fails-closed"
+        "unsupported-hard-route-rule-fails-closed",
+        "frontend-risk-status-contract"
       ]
     }
   ],
@@ -114,11 +120,11 @@
     }
   ],
   "localVerification": {
-    "command": "python -m pytest -q",
-    "result": "66 passed"
+    "command": "python -m pytest -q; npm run build; npm run lint",
+    "result": "78 passed; frontend build passed; frontend lint passed"
   },
   "externalEvidence": {
-    "commit": null,
+    "commit": "41131d194642ad2f78cc98a6ea1aeaea6a0fc559",
     "pullRequest": null,
     "buildId": null,
     "qaSignoff": null,
