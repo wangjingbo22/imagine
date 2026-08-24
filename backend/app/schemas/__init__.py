@@ -1,7 +1,10 @@
 """Validated application schemas."""
 
 from .plan import (
+    PlanV2DecisionResult,
     PlanVersion,
+    PlanVersionDiff,
+    PlanVersionReason,
     PlanVersionStatus,
     ProposedPlanVersion,
     TripPlanState,
@@ -9,7 +12,10 @@ from .plan import (
 
 __all__ = [
     "PlanVersion",
+    "PlanVersionDiff",
+    "PlanVersionReason",
     "PlanVersionStatus",
+    "PlanV2DecisionResult",
     "ProposedPlanVersion",
     "TripPlanState",
 ]

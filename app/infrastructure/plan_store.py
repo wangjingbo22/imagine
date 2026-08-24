@@ -12,10 +12,14 @@ from app.domain.plan_guard import (
     require_plan_transition,
     require_trip_transition,
 )
+from app.domain.plan_diff import calculate_plan_diff
 from app.schemas.plan import (
     ExecutionStartResult,
     PlanTransitionResult,
+    PlanV2Decision,
+    PlanV2DecisionResult,
     PlanVersion,
+    PlanVersionDiff,
     PlanVersionStatus,
     ProposedPlanVersion,
     TripPlanState,
@@ -152,46 +156,79 @@ class SqlitePlanVersionRepository:
                     "SELECT * FROM trips WHERE trip_id = ?",
                     (trip_id,),
                 ).fetchone()
-                if trip is None:
-                    connection.execute(
+                if proposal.version == 1:
+                    if trip is None:
+                        connection.execute(
+                            """
+                            INSERT INTO trips (
+                                trip_id, trip_status, trip_snapshot_json,
+                                created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?)
+                            """,
+                            (
+                                trip_id,
+                                TripStatus.PLAN_REVIEW.value,
+                                trip_snapshot_json,
+                                now,
+                                now,
+                            ),
+                        )
+                    else:
+                        if trip["trip_snapshot_json"] != trip_snapshot_json:
+                            raise PlanStoreError(
+                                "TRIP_SNAPSHOT_IMMUTABLE",
+                                "同一 tripId 的规划输入快照不允许被替换",
+                            )
+                        if TripStatus(trip["trip_status"]) is not TripStatus.PLAN_REVIEW:
+                            raise PlanStoreError(
+                                "PLAN_STATE_TRANSITION_INVALID",
+                                f"当前 Trip 状态 {trip['trip_status']} 不允许登记 Plan V1 候选",
+                            )
+
+                    current = connection.execute(
                         """
-                        INSERT INTO trips (
-                            trip_id, trip_status, trip_snapshot_json,
-                            created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?)
+                        SELECT plan_id FROM plan_versions
+                        WHERE trip_id = ? AND status = 'CURRENT'
                         """,
-                        (
-                            trip_id,
-                            TripStatus.PLAN_REVIEW.value,
-                            trip_snapshot_json,
-                            now,
-                            now,
-                        ),
-                    )
+                        (trip_id,),
+                    ).fetchone()
+                    if current is not None:
+                        raise PlanStoreError(
+                            "PLAN_CURRENT_CONFLICT",
+                            "同一 Trip 已存在 CURRENT 版本",
+                        )
                 else:
+                    if trip is None:
+                        raise PlanStoreError("TRIP_NOT_FOUND", "未找到 Trip")
                     if trip["trip_snapshot_json"] != trip_snapshot_json:
                         raise PlanStoreError(
                             "TRIP_SNAPSHOT_IMMUTABLE",
-                            "同一 tripId 的规划输入快照不允许被替换",
+                            "Plan V2 必须沿用同一 Trip 的规划输入快照",
                         )
-                    if TripStatus(trip["trip_status"]) is not TripStatus.PLAN_REVIEW:
+                    if TripStatus(trip["trip_status"]) is not TripStatus.EXECUTING:
                         raise PlanStoreError(
                             "PLAN_STATE_TRANSITION_INVALID",
-                            f"当前 Trip 状态 {trip['trip_status']} 不允许登记 Plan V1 候选",
+                            f"当前 Trip 状态 {trip['trip_status']} 不允许登记 Plan V2 候选",
                         )
-
-                current = connection.execute(
-                    """
-                    SELECT plan_id FROM plan_versions
-                    WHERE trip_id = ? AND status = 'CURRENT'
-                    """,
-                    (trip_id,),
-                ).fetchone()
-                if current is not None:
-                    raise PlanStoreError(
-                        "PLAN_CURRENT_CONFLICT",
-                        "同一 Trip 已存在 CURRENT 版本",
-                    )
+                    parent = connection.execute(
+                        "SELECT * FROM plan_versions WHERE plan_id = ?",
+                        (str(proposal.parent_id),),
+                    ).fetchone()
+                    if parent is None:
+                        raise PlanStoreError(
+                            "PLAN_PARENT_NOT_FOUND",
+                            "未找到 Plan V2 的 parentId",
+                        )
+                    if parent["trip_id"] != trip_id:
+                        raise PlanStoreError(
+                            "PLAN_TRIP_MISMATCH",
+                            "Plan V2 的 parentId 不属于同一 Trip",
+                        )
+                    if PlanVersionStatus(parent["status"]) is not PlanVersionStatus.CURRENT:
+                        raise PlanStoreError(
+                            "PLAN_PARENT_NOT_CURRENT",
+                            "Plan V2 的 parentId 必须指向当前 CURRENT",
+                        )
 
                 connection.execute(
                     """
@@ -202,6 +239,15 @@ class SqlitePlanVersionRepository:
                     """,
                     (plan_id, trip_id, proposal.version, snapshot_json, now),
                 )
+                if proposal.version == 2:
+                    connection.execute(
+                        """
+                        UPDATE trips
+                        SET trip_status = 'REPLAN_REVIEW', updated_at = ?
+                        WHERE trip_id = ? AND trip_status = 'EXECUTING'
+                        """,
+                        (now, trip_id),
+                    )
                 row = connection.execute(
                     "SELECT * FROM plan_versions WHERE plan_id = ?",
                     (plan_id,),
@@ -213,7 +259,7 @@ class SqlitePlanVersionRepository:
                 self._rollback(connection)
                 raise PlanStoreError(
                     "PLAN_VERSION_CONFLICT",
-                    "Plan V1 版本号或 CURRENT 唯一约束冲突",
+                    "PlanVersion 版本号或 CURRENT 唯一约束冲突",
                 ) from exc
             except Exception:
                 self._rollback(connection)
@@ -237,6 +283,11 @@ class SqlitePlanVersionRepository:
                     raise PlanStoreError(
                         "PLAN_TRIP_MISMATCH",
                         "planId 不属于请求路径中的 tripId",
+                    )
+                if plan["version"] != 1:
+                    raise PlanStoreError(
+                        "PLAN_STATE_TRANSITION_INVALID",
+                        "Plan V2 必须通过 accept 或 reject 决策，不能使用 confirm",
                     )
 
                 trip = connection.execute(
@@ -370,6 +421,244 @@ class SqlitePlanVersionRepository:
                     plan_id=UUID(current_plan["plan_id"]),
                     trip_status="EXECUTING",
                     plan_status="CURRENT",
+                )
+            except Exception:
+                self._rollback(connection)
+                raise
+
+    def get_diff(self, trip_id: UUID, candidate_plan_id: UUID) -> PlanVersionDiff:
+        trip_text = str(trip_id)
+        candidate_text = str(candidate_plan_id)
+        with closing(self._connect()) as connection:
+            candidate_row = connection.execute(
+                "SELECT * FROM plan_versions WHERE plan_id = ?",
+                (candidate_text,),
+            ).fetchone()
+            if candidate_row is None:
+                raise PlanStoreError("PLAN_VERSION_NOT_FOUND", "未找到候选 Plan V2")
+            if candidate_row["trip_id"] != trip_text:
+                raise PlanStoreError(
+                    "PLAN_TRIP_MISMATCH",
+                    "候选 Plan V2 不属于请求路径中的 tripId",
+                )
+            candidate = self._plan_from_row(candidate_row)
+            if candidate.version != 2 or candidate.parent_id is None:
+                raise PlanStoreError(
+                    "PLAN_DIFF_REQUIRES_V2",
+                    "Diff 只能用于包含 parentId 的 Plan V2",
+                )
+            base_row = connection.execute(
+                "SELECT * FROM plan_versions WHERE plan_id = ?",
+                (str(candidate.parent_id),),
+            ).fetchone()
+            if base_row is None:
+                raise PlanStoreError("PLAN_PARENT_NOT_FOUND", "未找到 Plan V2 的父版本")
+            base = self._plan_from_row(base_row)
+
+        return calculate_plan_diff(base, candidate)
+
+    def accept_v2(self, trip_id: UUID, candidate_plan_id: UUID) -> PlanV2DecisionResult:
+        trip_text = str(trip_id)
+        candidate_text = str(candidate_plan_id)
+        now = datetime.now(UTC).isoformat()
+
+        with closing(self._connect()) as connection:
+            self._begin(connection)
+            try:
+                candidate = connection.execute(
+                    "SELECT * FROM plan_versions WHERE plan_id = ?",
+                    (candidate_text,),
+                ).fetchone()
+                if candidate is None:
+                    raise PlanStoreError("PLAN_VERSION_NOT_FOUND", "未找到候选 Plan V2")
+                if candidate["trip_id"] != trip_text:
+                    raise PlanStoreError(
+                        "PLAN_TRIP_MISMATCH",
+                        "候选 Plan V2 不属于请求路径中的 tripId",
+                    )
+                if candidate["version"] != 2:
+                    raise PlanStoreError(
+                        "PLAN_DECISION_REQUIRES_V2",
+                        "accept 只能用于 Plan V2",
+                    )
+
+                proposal = ProposedPlanVersion.model_validate_json(
+                    candidate["snapshot_json"], strict=True
+                )
+                assert proposal.parent_id is not None
+                base = connection.execute(
+                    "SELECT * FROM plan_versions WHERE plan_id = ?",
+                    (str(proposal.parent_id),),
+                ).fetchone()
+                if base is None:
+                    raise PlanStoreError("PLAN_PARENT_NOT_FOUND", "未找到 Plan V2 的父版本")
+                trip = connection.execute(
+                    "SELECT * FROM trips WHERE trip_id = ?",
+                    (trip_text,),
+                ).fetchone()
+                if trip is None:
+                    raise PlanStoreError("TRIP_NOT_FOUND", "未找到 Trip")
+
+                candidate_status = PlanVersionStatus(candidate["status"])
+                base_status = PlanVersionStatus(base["status"])
+                trip_status = TripStatus(trip["trip_status"])
+                if candidate_status is PlanVersionStatus.CURRENT:
+                    if (
+                        base_status is not PlanVersionStatus.SUPERSEDED
+                        or trip_status is not TripStatus.EXECUTING
+                    ):
+                        raise PlanStoreError(
+                            "PLAN_STATE_TRANSITION_INVALID",
+                            "已接受 Plan V2 的关联状态不一致",
+                        )
+                    self._commit(connection)
+                    return PlanV2DecisionResult(
+                        trip_id=trip_id,
+                        candidate_plan_id=candidate_plan_id,
+                        decision=PlanV2Decision.ACCEPTED,
+                        trip_status="EXECUTING",
+                        current_plan_id=candidate_plan_id,
+                        candidate_status=PlanVersionStatus.CURRENT,
+                        previous_current_status=PlanVersionStatus.SUPERSEDED,
+                    )
+
+                try:
+                    require_plan_transition(candidate_status, PlanVersionStatus.CURRENT)
+                    require_plan_transition(base_status, PlanVersionStatus.SUPERSEDED)
+                    require_trip_transition(trip_status, TripStatus.EXECUTING)
+                except StateTransitionViolation as exc:
+                    raise PlanStoreError(
+                        "PLAN_STATE_TRANSITION_INVALID",
+                        str(exc),
+                    ) from exc
+
+                connection.execute(
+                    "UPDATE plan_versions SET status = 'SUPERSEDED' WHERE plan_id = ? AND status = 'CURRENT'",
+                    (str(proposal.parent_id),),
+                )
+                connection.execute(
+                    "UPDATE plan_versions SET status = 'CURRENT', confirmed_at = ? WHERE plan_id = ? AND status = 'PROPOSED'",
+                    (now, candidate_text),
+                )
+                connection.execute(
+                    "UPDATE trips SET trip_status = 'EXECUTING', updated_at = ? WHERE trip_id = ? AND trip_status = 'REPLAN_REVIEW'",
+                    (now, trip_text),
+                )
+                self._commit(connection)
+                return PlanV2DecisionResult(
+                    trip_id=trip_id,
+                    candidate_plan_id=candidate_plan_id,
+                    decision=PlanV2Decision.ACCEPTED,
+                    trip_status="EXECUTING",
+                    current_plan_id=candidate_plan_id,
+                    candidate_status=PlanVersionStatus.CURRENT,
+                    previous_current_status=PlanVersionStatus.SUPERSEDED,
+                )
+            except sqlite3.IntegrityError as exc:
+                self._rollback(connection)
+                raise PlanStoreError(
+                    "PLAN_CURRENT_CONFLICT",
+                    "接受 Plan V2 时唯一 CURRENT 约束冲突",
+                ) from exc
+            except Exception:
+                self._rollback(connection)
+                raise
+
+    def reject_v2(self, trip_id: UUID, candidate_plan_id: UUID) -> PlanV2DecisionResult:
+        trip_text = str(trip_id)
+        candidate_text = str(candidate_plan_id)
+        now = datetime.now(UTC).isoformat()
+
+        with closing(self._connect()) as connection:
+            self._begin(connection)
+            try:
+                candidate = connection.execute(
+                    "SELECT * FROM plan_versions WHERE plan_id = ?",
+                    (candidate_text,),
+                ).fetchone()
+                if candidate is None:
+                    raise PlanStoreError("PLAN_VERSION_NOT_FOUND", "未找到候选 Plan V2")
+                if candidate["trip_id"] != trip_text:
+                    raise PlanStoreError(
+                        "PLAN_TRIP_MISMATCH",
+                        "候选 Plan V2 不属于请求路径中的 tripId",
+                    )
+                if candidate["version"] != 2:
+                    raise PlanStoreError(
+                        "PLAN_DECISION_REQUIRES_V2",
+                        "reject 只能用于 Plan V2",
+                    )
+                proposal = ProposedPlanVersion.model_validate_json(
+                    candidate["snapshot_json"], strict=True
+                )
+                assert proposal.parent_id is not None
+                base = connection.execute(
+                    "SELECT * FROM plan_versions WHERE plan_id = ?",
+                    (str(proposal.parent_id),),
+                ).fetchone()
+                if base is None:
+                    raise PlanStoreError("PLAN_PARENT_NOT_FOUND", "未找到 Plan V2 的父版本")
+                trip = connection.execute(
+                    "SELECT * FROM trips WHERE trip_id = ?",
+                    (trip_text,),
+                ).fetchone()
+                if trip is None:
+                    raise PlanStoreError("TRIP_NOT_FOUND", "未找到 Trip")
+
+                candidate_status = PlanVersionStatus(candidate["status"])
+                base_status = PlanVersionStatus(base["status"])
+                trip_status = TripStatus(trip["trip_status"])
+                if candidate_status is PlanVersionStatus.REJECTED:
+                    if (
+                        base_status is not PlanVersionStatus.CURRENT
+                        or trip_status is not TripStatus.EXECUTING
+                    ):
+                        raise PlanStoreError(
+                            "PLAN_STATE_TRANSITION_INVALID",
+                            "已拒绝 Plan V2 的关联状态不一致",
+                        )
+                    self._commit(connection)
+                    return PlanV2DecisionResult(
+                        trip_id=trip_id,
+                        candidate_plan_id=candidate_plan_id,
+                        decision=PlanV2Decision.REJECTED,
+                        trip_status="EXECUTING",
+                        current_plan_id=UUID(base["plan_id"]),
+                        candidate_status=PlanVersionStatus.REJECTED,
+                        previous_current_status=PlanVersionStatus.CURRENT,
+                    )
+
+                try:
+                    require_plan_transition(candidate_status, PlanVersionStatus.REJECTED)
+                    require_trip_transition(trip_status, TripStatus.EXECUTING)
+                except StateTransitionViolation as exc:
+                    raise PlanStoreError(
+                        "PLAN_STATE_TRANSITION_INVALID",
+                        str(exc),
+                    ) from exc
+                if base_status is not PlanVersionStatus.CURRENT:
+                    raise PlanStoreError(
+                        "PLAN_PARENT_NOT_CURRENT",
+                        "拒绝 Plan V2 时父版本必须仍为 CURRENT",
+                    )
+
+                connection.execute(
+                    "UPDATE plan_versions SET status = 'REJECTED' WHERE plan_id = ? AND status = 'PROPOSED'",
+                    (candidate_text,),
+                )
+                connection.execute(
+                    "UPDATE trips SET trip_status = 'EXECUTING', updated_at = ? WHERE trip_id = ? AND trip_status = 'REPLAN_REVIEW'",
+                    (now, trip_text),
+                )
+                self._commit(connection)
+                return PlanV2DecisionResult(
+                    trip_id=trip_id,
+                    candidate_plan_id=candidate_plan_id,
+                    decision=PlanV2Decision.REJECTED,
+                    trip_status="EXECUTING",
+                    current_plan_id=UUID(base["plan_id"]),
+                    candidate_status=PlanVersionStatus.REJECTED,
+                    previous_current_status=PlanVersionStatus.CURRENT,
                 )
             except Exception:
                 self._rollback(connection)

@@ -36,6 +36,14 @@
 - 当前持久化文件默认是 `data/plan_versions.sqlite3`，可用 `PLAN_VERSION_DB_PATH` 覆盖。
 - LangGraph/LLM 只能提出 `PROPOSED` 数据，不具备确认或直接改写状态的权限。
 
+### 2.3 PBI-05-C V1/V2 Diff 与决策模块边界
+
+- 表现层：展示中文 Diff 并发送接受/拒绝命令；V2 接受前继续展示 V1，不直接写业务状态。
+- 应用层：`PlanVersionService` 提供 Diff、接受和拒绝用例，并统一将领域冲突映射为 HTTP 404/409。
+- 领域层：`plan_diff.py` 对不可变快照执行确定性比较，覆盖地点、时间、路线、费用与关怀指标；LLM 不能生成最终 Diff 或决定状态。
+- 基础设施层：SQLite 在一个事务中完成 `CURRENT/SUPERSEDED/REJECTED` 与 Trip 状态切换，部分唯一索引继续保证唯一 `CURRENT`。
+- 执行变化的数据流为：`费用/反馈 -> 候选 PROPOSED V2 -> 服务端 Diff -> 人工接受或拒绝 -> 原子状态迁移`。
+
 ## 3. 通用分层规范
 
 ### 3.1 表现层

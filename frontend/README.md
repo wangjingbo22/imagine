@@ -107,7 +107,7 @@ RECOMMENDATION #2
 
 ### 执行阶段
 
-执行阶段不再创建 Plan V2。
+执行阶段出现费用变化或用户反馈时，系统生成不可变的候选 Plan V2，并进入中文 V1/V2 Diff 审核页。候选方案在用户接受前不会覆盖当前 V1。
 
 用户可以持续反馈：
 
@@ -117,7 +117,7 @@ RECOMMENDATION #2
 - 实际消费发生变化
 - 其他自然语言反馈
 
-Agent 只调整尚未执行的任务，已经完成或跳过的内容保持不变。
+Agent 只提出尚未执行任务的候选调整，已经完成或跳过的内容保持不变。用户接受后，旧 `CURRENT` 原子变为 `SUPERSEDED`，V2 成为唯一 `CURRENT`；用户拒绝后，V2 标记为 `REJECTED`，原版本和执行状态保持不变。
 
 ### 总结阶段
 
@@ -600,8 +600,10 @@ src/api/tripApi.ts
 | `submitNormalizedTrip()` | 后端确认 URL 后可提交正式 Trip |
 | `generatePlan()` | Mock 可用，真实 URL 待确认 |
 | `confirmConstraints()` | Mock 可用，真实 URL 待确认 |
-| `confirmPlan()` | Mock 可用，真实 URL 待确认 |
-| `getTrip()` | Mock 可用，真实 URL 待确认 |
+| `resolveCity()` / 地点 / 地理编码 / 路线方法 | 本地真实接口已接入 |
+| `confirmPlan()` | 本地真实接口已接入 |
+| `getTrip()` | 本地真实接口已接入 |
+| `getPlanDiff()` / `acceptPlanV2()` / `rejectPlanV2()` | 本地真实接口已接入 |
 | `createExecutionEvent()` | Mock 可用，真实 URL 待确认 |
 | `updatePlan()` | Mock 可用，真实 URL 待确认 |
 | `getSummary()` | Mock 可用，真实 URL 待确认 |
@@ -694,7 +696,7 @@ python3 -m pytest backend/tests/test_trip_schema.py
 - Mock 素材刷新后会丢失
 - 导出为 HTML，不是 PDF
 - 地图为视觉 Mock，不是真实地图 SDK
-- 地点和路线为演示数据
+- 计划生成与计划费用仍为演示估算；城市、同城地点候选、路线证据和来源时间已接入真实 Provider
 
 ## 21. 协作要求
 

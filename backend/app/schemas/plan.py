@@ -19,6 +19,30 @@ class PlanVersionStatus(str, Enum):
     SUPERSEDED = "SUPERSEDED"
 
 
+class PlanVersionReason(str, Enum):
+    INITIAL_PLAN = "INITIAL_PLAN"
+    EXPENSE_CHANGE = "EXPENSE_CHANGE"
+    DELAY = "DELAY"
+    FATIGUE = "FATIGUE"
+    USER_FEEDBACK = "USER_FEEDBACK"
+    OTHER = "OTHER"
+
+
+class PlanDiffCategory(str, Enum):
+    PLACE = "PLACE"
+    TIME = "TIME"
+    ROUTE = "ROUTE"
+    COST = "COST"
+    CARE = "CARE"
+
+
+class PlanDiffChangeType(str, Enum):
+    RETAINED = "RETAINED"
+    REMOVED = "REMOVED"
+    ADDED = "ADDED"
+    CHANGED = "CHANGED"
+
+
 class ConstraintHardness(str, Enum):
     HARD = "HARD"
     SOFT = "SOFT"
@@ -96,18 +120,29 @@ class ProposedPlanVersion(ContractModel):
     schema_version: Literal["1.0"]
     plan_id: UUID4
     trip_snapshot: Trip
-    version: Literal[1]
-    parent_id: None = None
-    reason: Literal["INITIAL_PLAN"] = "INITIAL_PLAN"
+    version: Literal[1, 2]
+    parent_id: UUID4 | None = None
+    reason: PlanVersionReason
     metrics: PlanMetrics
     days: list[PlanDay] = Field(min_length=1, max_length=1)
     constraints_snapshot: list[ConstraintSnapshot] = Field(min_length=1)
     sources_snapshot: list[PlanSourceSnapshot] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def validate_v1_snapshot(self) -> "ProposedPlanVersion":
+    def validate_version_snapshot(self) -> "ProposedPlanVersion":
         if self.trip_snapshot.status is not TripStatus.PLAN_REVIEW:
             raise ValueError("tripSnapshot.status must be PLAN_REVIEW")
+
+        if self.version == 1:
+            if self.parent_id is not None:
+                raise ValueError("Plan V1 parentId must be null")
+            if self.reason is not PlanVersionReason.INITIAL_PLAN:
+                raise ValueError("Plan V1 reason must be INITIAL_PLAN")
+        else:
+            if self.parent_id is None:
+                raise ValueError("Plan V2 parentId is required")
+            if self.reason is PlanVersionReason.INITIAL_PLAN:
+                raise ValueError("Plan V2 reason cannot be INITIAL_PLAN")
 
         trip_day = self.trip_snapshot.days[0]
         plan_day = self.days[0]
@@ -133,7 +168,7 @@ class ProposedPlanVersion(ContractModel):
             and constraint.status is not ConstraintCheckStatus.PASS
             for constraint in self.constraints_snapshot
         ):
-            raise ValueError("all hard constraints must PASS before Plan V1 review")
+            raise ValueError("all hard constraints must PASS before plan review")
         return self
 
 
@@ -157,6 +192,46 @@ class ExecutionStartResult(ContractModel):
     plan_status: Literal["CURRENT"]
 
 
+class PlanDiffItem(ContractModel):
+    category: PlanDiffCategory
+    change_type: PlanDiffChangeType
+    key: NonBlankText
+    label: NonBlankText
+    before: str | int | None = None
+    after: str | int | None = None
+
+
+class PlanMetricsDelta(ContractModel):
+    total_cost_cents: int
+    total_walk_meters: int
+    transfer_count: int
+
+
+class PlanVersionDiff(ContractModel):
+    trip_id: UUID4
+    base_plan_id: UUID4
+    candidate_plan_id: UUID4
+    base_version: Annotated[int, Field(ge=1)]
+    candidate_version: Annotated[int, Field(ge=2)]
+    items: list[PlanDiffItem]
+    metrics_delta: PlanMetricsDelta
+
+
+class PlanV2Decision(str, Enum):
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"
+
+
+class PlanV2DecisionResult(ContractModel):
+    trip_id: UUID4
+    candidate_plan_id: UUID4
+    decision: PlanV2Decision
+    trip_status: Literal["EXECUTING"]
+    current_plan_id: UUID4
+    candidate_status: PlanVersionStatus
+    previous_current_status: PlanVersionStatus
+
+
 class TripPlanState(ContractModel):
     trip_id: UUID4
     trip_status: TripStatus
@@ -171,13 +246,21 @@ __all__ = [
     "ConstraintSnapshot",
     "ExecutionStartResult",
     "PlanDay",
+    "PlanDiffCategory",
+    "PlanDiffChangeType",
+    "PlanDiffItem",
     "PlanMetrics",
+    "PlanMetricsDelta",
     "PlanSourceSnapshot",
     "PlanSourceStatus",
     "PlanTask",
     "PlanTransitionResult",
     "PlanVersion",
+    "PlanVersionDiff",
+    "PlanVersionReason",
     "PlanVersionStatus",
+    "PlanV2Decision",
+    "PlanV2DecisionResult",
     "ProposedPlanVersion",
     "TripPlanState",
 ]

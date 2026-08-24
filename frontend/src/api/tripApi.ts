@@ -1,10 +1,19 @@
 import type {
   ApiResponse,
+  AddressResolution,
   CityResolution,
+  CityContext,
   CreateSingleDayTrip,
   ExecutionEventInput,
   PlanSnapshot,
+  PlanV2DecisionResult,
   PlanVersionProposal,
+  PlanVersionDiff,
+  Place,
+  PlaceCollection,
+  GeoPoint,
+  RouteCollection,
+  TravelMode,
   StoredPlanVersion,
   TripDraftInput,
   TripSummary,
@@ -91,6 +100,119 @@ export const tripApi = {
       method: 'POST',
       body: JSON.stringify(proposal),
     })
+  },
+
+  suggestPlaces(
+    tripId: string,
+    cityContext: CityContext,
+    keywords: string,
+    types: string[] = [],
+    limit = 10,
+  ) {
+    return request<PlaceCollection>('/api/v1/places/suggestions', {
+      method: 'POST',
+      body: JSON.stringify({
+        schemaVersion: '1.0', tripId, cityContext, keywords, types, limit,
+      }),
+    })
+  },
+
+  searchPlaces(
+    tripId: string,
+    cityContext: CityContext,
+    keywords: string,
+    types: string[] = [],
+    page = 1,
+    pageSize = 20,
+  ) {
+    return request<PlaceCollection>('/api/v1/places/search', {
+      method: 'POST',
+      body: JSON.stringify({
+        schemaVersion: '1.0', tripId, cityContext, keywords, types, page, pageSize,
+      }),
+    })
+  },
+
+  searchNearbyPlaces(
+    tripId: string,
+    cityContext: CityContext,
+    center: GeoPoint,
+    filters: { keywords?: string; types?: string[] },
+    radiusMeters = 3_000,
+    page = 1,
+    pageSize = 20,
+  ) {
+    return request<PlaceCollection>('/api/v1/places/nearby', {
+      method: 'POST',
+      body: JSON.stringify({
+        schemaVersion: '1.0',
+        tripId,
+        cityContext,
+        center,
+        radiusMeters,
+        keywords: filters.keywords ?? null,
+        types: filters.types ?? [],
+        page,
+        pageSize,
+      }),
+    })
+  },
+
+  getPlaceDetail(tripId: string, cityContext: CityContext, placeId: string) {
+    return request<Place>('/api/v1/places/detail', {
+      method: 'POST',
+      body: JSON.stringify({ schemaVersion: '1.0', tripId, cityContext, placeId }),
+    })
+  },
+
+  forwardGeocode(tripId: string, cityContext: CityContext, address: string) {
+    return request<AddressResolution>('/api/v1/geocoding/forward', {
+      method: 'POST',
+      body: JSON.stringify({ schemaVersion: '1.0', tripId, cityContext, address }),
+    })
+  },
+
+  reverseGeocode(tripId: string, cityContext: CityContext, location: GeoPoint) {
+    return request<AddressResolution>('/api/v1/geocoding/reverse', {
+      method: 'POST',
+      body: JSON.stringify({ schemaVersion: '1.0', tripId, cityContext, location }),
+    })
+  },
+
+  planRoute(
+    tripId: string,
+    cityContext: CityContext,
+    origin: GeoPoint,
+    destination: GeoPoint,
+    mode: TravelMode,
+    strategy: number | null = null,
+  ) {
+    return request<RouteCollection>('/api/v1/routes/plan', {
+      method: 'POST',
+      body: JSON.stringify({
+        schemaVersion: '1.0', tripId, cityContext, origin, destination, mode, strategy,
+      }),
+    })
+  },
+
+  getPlanDiff(tripId: string, planId: string) {
+    return request<PlanVersionDiff>(
+      `/api/v1/trips/${tripId}/plan-versions/${planId}/diff`,
+    )
+  },
+
+  acceptPlanV2(tripId: string, planId: string) {
+    return request<PlanV2DecisionResult>(
+      `/api/v1/trips/${tripId}/plan-versions/${planId}/accept`,
+      { method: 'POST' },
+    )
+  },
+
+  rejectPlanV2(tripId: string, planId: string) {
+    return request<PlanV2DecisionResult>(
+      `/api/v1/trips/${tripId}/plan-versions/${planId}/reject`,
+      { method: 'POST' },
+    )
   },
 
   startExecution(tripId: string) {

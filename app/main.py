@@ -136,7 +136,7 @@ def create_app(
 
     app = FastAPI(
         title="行知旅伴——张琪 Sprint 1 接口",
-        description="城市地点与可信来源，以及 Plan V1 确认、不可变快照和执行状态守卫。",
+        description="城市地点与可信来源，以及 PlanVersion 确认、V1/V2 Diff、接受拒绝和执行状态守卫。",
         version="1.0.0",
         lifespan=lifespan,
         docs_url=None,
@@ -146,8 +146,8 @@ def create_app(
                 "description": "地点、路线、价格事实、可信来源和城市隔离缓存。",
             },
             {
-                "name": "Plan V1 确认与状态守卫",
-                "description": "登记 PROPOSED、确认唯一 CURRENT、阻止未确认方案执行并支持刷新恢复。",
+                "name": "PlanVersion 状态与 Diff",
+                "description": "登记不可变候选、确认唯一 CURRENT、查看 V1/V2 Diff，并原子接受或拒绝 V2。",
             },
         ],
     )

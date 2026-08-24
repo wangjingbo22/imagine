@@ -194,3 +194,30 @@ Schema 校验失败沿用人工确认结构：
 - `PLAN_CURRENT_CONFLICT`、`PLAN_VERSION_CONFLICT`：唯一 CURRENT 或版本号冲突（HTTP 409）。
 - `PLAN_TRIP_MISMATCH`：路径 Trip 与 Plan 不匹配（HTTP 409）。
 - `TRIP_NOT_FOUND`、`PLAN_VERSION_NOT_FOUND`：资源不存在（HTTP 404）。
+
+## 11. PBI-05-C V1/V2 Diff 与接受拒绝（Schema 1.0）
+
+本节契约已由张琪于 2026-08-24 确认。
+
+### 11.1 候选 V2
+
+- `POST /api/v1/trips/{tripId}/plan-versions` 同时登记 V1 和 V2。
+- V2 必须使用 `version: 2`，`parentId` 必须指向该 Trip 唯一的 `CURRENT`，Trip 必须为 `EXECUTING`。
+- V2 原因固定为 `EXPENSE_CHANGE | DELAY | FATIGUE | USER_FEEDBACK | OTHER`；`INITIAL_PLAN` 只允许 V1。
+- 登记成功后 V2 为 `PROPOSED`，Trip 从 `EXECUTING` 进入 `REPLAN_REVIEW`；V1 和 Trip 快照保持不可变。
+
+### 11.2 路由与返回
+
+- `GET /api/v1/trips/{tripId}/plan-versions/{planId}/diff`：服务端比较 V2 与其父版本。
+- `POST /api/v1/trips/{tripId}/plan-versions/{planId}/accept`：接受 V2。
+- `POST /api/v1/trips/{tripId}/plan-versions/{planId}/reject`：拒绝 V2。
+- Diff 分类固定为 `PLACE | TIME | ROUTE | COST | CARE`，变化类型固定为 `RETAINED | REMOVED | ADDED | CHANGED`。
+- Diff 同时返回 `totalCostCents`、`totalWalkMeters`、`transferCount` 的差值；正数代表 V2 增加，负数代表 V2 减少。
+
+### 11.3 原子状态守卫与幂等
+
+- 接受：父版本 `CURRENT -> SUPERSEDED`，V2 `PROPOSED -> CURRENT`，Trip `REPLAN_REVIEW -> EXECUTING`，全部在一个事务中完成。
+- 拒绝：V2 `PROPOSED -> REJECTED`，父版本继续为唯一 `CURRENT`，Trip `REPLAN_REVIEW -> EXECUTING`。
+- 相同决策可幂等重试；终态后执行相反决策返回 `PLAN_STATE_TRANSITION_INVALID`（HTTP 409）。
+- `PLAN_PARENT_NOT_FOUND` 返回 HTTP 404；父版本、路径 Trip 或不可变 Trip 快照不一致均被拒绝。
+- 页面只能调用决策接口，不得直接改写状态；候选 V2 在接受前不得覆盖当前方案。

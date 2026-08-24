@@ -4,7 +4,7 @@
 
 当前已经确认并实现的契约包括 **S1-T001 Trip Schema**、
 **S1-T003 AssistanceProfile**、PBI-02-A 城市查询，以及
-**PBI-04-B Plan V1 确认与状态守卫**：
+**PBI-04-B Plan V1 确认与状态守卫**、**PBI-05-C V1/V2 Diff 与接受拒绝**：
 
 - Python 模型：`backend/app/schemas/trip.py`
 - JSON Schema：`backend/schemas/trip.schema.json`
@@ -33,7 +33,7 @@ Trip Schema 本身**不包含**：
 - 照片或视频接口
 - 旅行总结接口
 
-其中已经在第 8 节登记的城市解析与 Plan V1 状态接口可正式调用；其余能力继续使用前端 Mock，未登记 URL 和 DTO 前不得当作正式接口调用。
+其中已经在第 8、9 节登记的城市解析、PlanVersion 状态和 Diff 决策接口可正式调用；其余能力继续使用前端 Mock，未登记 URL 和 DTO 前不得当作正式接口调用。
 
 ## 3. CreateSingleDayTrip
 
@@ -248,19 +248,37 @@ src/api/tripContract.ts
 - `tripApi.submitNormalizedTrip(path, payload)` 只用于后端负责人确认 URL 后接入
 - 不应再默认使用 `/api/v1/trips/drafts`
 
-## 8. Plan V1 正式接口
+## 8. 城市 Provider 与 Plan V1 正式接口
 
 设置 `VITE_USE_PLAN_VERSION_API=true` 后，下列调用使用本地 FastAPI，而其他未登记能力仍可保持 Mock：
 
 - `tripApi.resolveCity()` → `POST /api/v1/cities/resolve`
+- `tripApi.suggestPlaces()` → `POST /api/v1/places/suggestions`
+- `tripApi.searchPlaces()` → `POST /api/v1/places/search`
+- `tripApi.searchNearbyPlaces()` → `POST /api/v1/places/nearby`
+- `tripApi.getPlaceDetail()` → `POST /api/v1/places/detail`
+- `tripApi.forwardGeocode()` → `POST /api/v1/geocoding/forward`
+- `tripApi.reverseGeocode()` → `POST /api/v1/geocoding/reverse`
+- `tripApi.planRoute()` → `POST /api/v1/routes/plan`
 - `tripApi.registerPlanVersion()` → `POST /api/v1/trips/{tripId}/plan-versions`
 - `tripApi.confirmPlan()` → `POST /api/v1/trips/{tripId}/plan-versions/{planId}/confirm`
 - `tripApi.startExecution()` → `POST /api/v1/trips/{tripId}/execution/start`
 - `tripApi.getTrip()` → `GET /api/v1/trips/{tripId}`
 
-前端地址栏保留 `tripId`。刷新时恢复 `CURRENT` 或 `PROPOSED`；确认按钮严格按“登记候选 → 确认 CURRENT → 开始执行”的顺序调用。PlanVersion DTO 定义在 `src/domain/trip.ts`，字段名保持 camelCase，不翻译代码契约。
+计划工作台会实际调用城市解析、同城地点搜索和路线规划，并展示 `cityCode`、来源状态、`fetchedAt` 和未知价格。Provider 返回 `amountCents: null + UNKNOWN` 时，页面固定显示“未知待确认”，不会按 0 元写入预算；当前计划金额仍属于前端估算并显式标注。前端地址栏保留 `tripId`。刷新时恢复 `CURRENT` 或 `PROPOSED`；确认按钮严格按“登记候选 → 确认 CURRENT → 开始执行”的顺序调用。PlanVersion DTO 定义在 `src/domain/trip.ts`，字段名保持 camelCase，不翻译代码契约。
 
-## 9. 待后端确认的接口
+## 9. Plan V2 Diff 与决策正式接口
+
+设置 `VITE_USE_PLAN_VERSION_API=true` 后：
+
+- `tripApi.registerPlanVersion()` 可登记 `version: 2` 的不可变候选，`parentId` 指向当前 V1，原因使用已确认枚举。
+- `tripApi.getPlanDiff()` → `GET /api/v1/trips/{tripId}/plan-versions/{planId}/diff`
+- `tripApi.acceptPlanV2()` → `POST /api/v1/trips/{tripId}/plan-versions/{planId}/accept`
+- `tripApi.rejectPlanV2()` → `POST /api/v1/trips/{tripId}/plan-versions/{planId}/reject`
+
+前端展示 `PLACE | TIME | ROUTE | COST | CARE` 五类及 `RETAINED | REMOVED | ADDED | CHANGED` 四种变化。接受前不得用候选数据替换当前计划；决策完成后重新调用 `getTrip()`，以服务端唯一 `CURRENT` 为准。
+
+## 10. 待后端确认的接口
 
 以下是前端功能需求，不是已确认契约：
 

@@ -7,21 +7,27 @@ from app.infrastructure.plan_store import PlanStoreError, SqlitePlanVersionRepos
 from app.schemas.plan import (
     ExecutionStartResult,
     PlanTransitionResult,
+    PlanV2DecisionResult,
     PlanVersion,
+    PlanVersionDiff,
     ProposedPlanVersion,
     TripPlanState,
 )
 
 
 class PlanVersionService:
-    """Application boundary for Plan V1 persistence and state transitions."""
+    """Application boundary for immutable PlanVersion and state decisions."""
 
     def __init__(self, repository: SqlitePlanVersionRepository) -> None:
         self.repository = repository
 
     @staticmethod
     def _as_app_error(error: PlanStoreError) -> AppError:
-        if error.code in {"TRIP_NOT_FOUND", "PLAN_VERSION_NOT_FOUND"}:
+        if error.code in {
+            "TRIP_NOT_FOUND",
+            "PLAN_VERSION_NOT_FOUND",
+            "PLAN_PARENT_NOT_FOUND",
+        }:
             status = 404
         else:
             status = 409
@@ -47,6 +53,24 @@ class PlanVersionService:
     def start_execution(self, trip_id: UUID) -> ExecutionStartResult:
         try:
             return self.repository.start_execution(trip_id)
+        except PlanStoreError as error:
+            raise self._as_app_error(error) from error
+
+    def get_diff(self, trip_id: UUID, plan_id: UUID) -> PlanVersionDiff:
+        try:
+            return self.repository.get_diff(trip_id, plan_id)
+        except PlanStoreError as error:
+            raise self._as_app_error(error) from error
+
+    def accept_v2(self, trip_id: UUID, plan_id: UUID) -> PlanV2DecisionResult:
+        try:
+            return self.repository.accept_v2(trip_id, plan_id)
+        except PlanStoreError as error:
+            raise self._as_app_error(error) from error
+
+    def reject_v2(self, trip_id: UUID, plan_id: UUID) -> PlanV2DecisionResult:
+        try:
+            return self.repository.reject_v2(trip_id, plan_id)
         except PlanStoreError as error:
             raise self._as_app_error(error) from error
 
