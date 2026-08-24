@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "1.0",
+  "tripId": "00000000-0000-4000-8000-000000000002",
+  "mode": "SINGLE",
+  "status": "DRAFT",
+  "cityContext": {
+    "countryCode": "CN",
+    "cityCode": "310000",
+    "cityName": "上海市",
+    "center": {
+      "longitude": 121.473701,
+      "latitude": 31.230416
+    },
+    "providerConfig": {
+      "provider": "AMAP",
+      "coordinateSystem": "GCJ02"
+    }
+  },
+  "startDate": "2026-09-06",
+  "endDate": "2026-09-06",
+  "currency": "CNY",
+  "totalBudgetCents": 45000,
+  "participants": [
+    {
+      "participantId": "10000000-0000-4000-8000-000000000002",
+      "nickname": "单人旅客",
+      "budgetCapCents": 45000,
+      "preferences": [
+        {
+          "type": "INTEREST",
+          "value": "建筑",
+          "weight": 4,
+          "isHard": false
+        },
+        {
+          "type": "INTEREST",
+          "value": "博物馆",
+          "weight": 4,
+          "isHard": false
+        }
+      ],
+      "assistanceProfile": null
+    }
+  ],
+  "days": [
+    {
+      "dayIndex": 0,
+      "date": "2026-09-06",
+      "dailyBudgetCents": 42000,
+      "startLocationText": "人民广场",
+      "endLocationText": "人民广场",
+      "timeWindow": {
+        "start": "09:30:00",
+        "end": "19:30:00"
+      }
+    }
+  ]
+}

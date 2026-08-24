@@ -1,0 +1,311 @@
+{
+  "$defs": {
+    "CityContext": {
+      "additionalProperties": false,
+      "properties": {
+        "center": {
+          "$ref": "#/$defs/GeoPoint"
+        },
+        "cityCode": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Citycode",
+          "type": "string"
+        },
+        "cityName": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Cityname",
+          "type": "string"
+        },
+        "countryCode": {
+          "const": "CN",
+          "title": "Countrycode",
+          "type": "string"
+        },
+        "providerConfig": {
+          "$ref": "#/$defs/ProviderConfig"
+        }
+      },
+      "required": [
+        "countryCode",
+        "cityCode",
+        "cityName",
+        "center",
+        "providerConfig"
+      ],
+      "title": "CityContext",
+      "type": "object"
+    },
+    "GeoPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "latitude": {
+          "maximum": 90,
+          "minimum": -90,
+          "title": "Latitude",
+          "type": "number"
+        },
+        "longitude": {
+          "maximum": 180,
+          "minimum": -180,
+          "title": "Longitude",
+          "type": "number"
+        }
+      },
+      "required": [
+        "longitude",
+        "latitude"
+      ],
+      "title": "GeoPoint",
+      "type": "object"
+    },
+    "Participant": {
+      "additionalProperties": false,
+      "properties": {
+        "assistanceProfile": {
+          "default": null,
+          "title": "Assistanceprofile",
+          "type": "null"
+        },
+        "budgetCapCents": {
+          "minimum": 0,
+          "title": "Budgetcapcents",
+          "type": "integer"
+        },
+        "nickname": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Nickname",
+          "type": "string"
+        },
+        "participantId": {
+          "format": "uuid",
+          "title": "Participantid",
+          "type": "string"
+        },
+        "preferences": {
+          "items": {
+            "$ref": "#/$defs/Preference"
+          },
+          "title": "Preferences",
+          "type": "array"
+        }
+      },
+      "required": [
+        "participantId",
+        "nickname",
+        "budgetCapCents"
+      ],
+      "title": "Participant",
+      "type": "object"
+    },
+    "Preference": {
+      "additionalProperties": false,
+      "properties": {
+        "isHard": {
+          "title": "Ishard",
+          "type": "boolean"
+        },
+        "type": {
+          "$ref": "#/$defs/PreferenceType"
+        },
+        "value": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        },
+        "weight": {
+          "maximum": 5,
+          "minimum": 1,
+          "title": "Weight",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "value",
+        "weight",
+        "isHard"
+      ],
+      "title": "Preference",
+      "type": "object"
+    },
+    "PreferenceType": {
+      "enum": [
+        "INTEREST",
+        "MUST_VISIT",
+        "AVOID_PLACE"
+      ],
+      "title": "PreferenceType",
+      "type": "string"
+    },
+    "ProviderConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "coordinateSystem": {
+          "const": "GCJ02",
+          "title": "Coordinatesystem",
+          "type": "string"
+        },
+        "provider": {
+          "const": "AMAP",
+          "title": "Provider",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "coordinateSystem"
+      ],
+      "title": "ProviderConfig",
+      "type": "object"
+    },
+    "TimeWindow": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "format": "time",
+          "title": "End",
+          "type": "string"
+        },
+        "start": {
+          "format": "time",
+          "title": "Start",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "title": "TimeWindow",
+      "type": "object"
+    },
+    "TripDayInput": {
+      "additionalProperties": false,
+      "properties": {
+        "dailyBudgetCents": {
+          "minimum": 0,
+          "title": "Dailybudgetcents",
+          "type": "integer"
+        },
+        "date": {
+          "format": "date",
+          "title": "Date",
+          "type": "string"
+        },
+        "dayIndex": {
+          "minimum": 0,
+          "title": "Dayindex",
+          "type": "integer"
+        },
+        "endLocationText": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Endlocationtext",
+          "type": "string"
+        },
+        "startLocationText": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Startlocationtext",
+          "type": "string"
+        },
+        "timeWindow": {
+          "$ref": "#/$defs/TimeWindow"
+        }
+      },
+      "required": [
+        "dayIndex",
+        "date",
+        "dailyBudgetCents",
+        "startLocationText",
+        "endLocationText",
+        "timeWindow"
+      ],
+      "title": "TripDayInput",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "cityContext": {
+      "$ref": "#/$defs/CityContext"
+    },
+    "currency": {
+      "const": "CNY",
+      "title": "Currency",
+      "type": "string"
+    },
+    "days": {
+      "items": {
+        "$ref": "#/$defs/TripDayInput"
+      },
+      "maxItems": 1,
+      "minItems": 1,
+      "title": "Days",
+      "type": "array"
+    },
+    "endDate": {
+      "format": "date",
+      "title": "Enddate",
+      "type": "string"
+    },
+    "mode": {
+      "const": "SINGLE",
+      "title": "Mode",
+      "type": "string"
+    },
+    "participants": {
+      "items": {
+        "$ref": "#/$defs/Participant"
+      },
+      "maxItems": 1,
+      "minItems": 1,
+      "title": "Participants",
+      "type": "array"
+    },
+    "schemaVersion": {
+      "const": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "startDate": {
+      "format": "date",
+      "title": "Startdate",
+      "type": "string"
+    },
+    "status": {
+      "const": "DRAFT",
+      "title": "Status",
+      "type": "string"
+    },
+    "totalBudgetCents": {
+      "minimum": 0,
+      "title": "Totalbudgetcents",
+      "type": "integer"
+    },
+    "tripId": {
+      "format": "uuid",
+      "title": "Tripid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "tripId",
+    "mode",
+    "status",
+    "cityContext",
+    "startDate",
+    "endDate",
+    "currency",
+    "totalBudgetCents",
+    "participants",
+    "days"
+  ],
+  "title": "CreateSingleDayTrip",
+  "type": "object"
+}
