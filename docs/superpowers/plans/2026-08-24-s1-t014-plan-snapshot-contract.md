@@ -11,7 +11,8 @@
 ## Global Constraints
 
 - Work only on isolated branch `czy-S1-T014`; do not modify or merge `main`.
-- Sprint 1 Plan snapshots are exactly one participant and exactly one Trip day.
+- Sprint 1 Plan snapshots are exactly one participant and exactly one Trip day;
+  `mode` and `status` remain `TripMode`/`TripStatus` enum values in Python.
 - Reuse `validate_single_day_policy`; do not duplicate its date, day-index,
   time-window, budget, or preference rules.
 - Reject invalid payloads before any service/repository write with HTTP 422,
@@ -36,11 +37,13 @@
 - [ ] Add a small async helper that posts a proposal and restores the Trip state.
 - [ ] Add parameterized invalid V1 cases for participant count, Trip-day count,
   end-date mismatch, day-date mismatch, nonzero day index, reversed/equal time
-  window, and daily budget above total budget.
+  window, daily budget above total budget, invalid preference hardness, and a
+  normalized must-visit/avoid preference conflict.
 - [ ] Assert HTTP 422, `TRIP_SCHEMA_INVALID`, exact error path/code, and a
   subsequent `TRIP_NOT_FOUND` response for every case.
-- [ ] Add an invalid V2 regression: establish a valid V1 as CURRENT/EXECUTING,
-  submit a multi-participant V2, then assert CURRENT V1 and state are unchanged.
+- [ ] Add invalid V2 regressions: establish a valid V1 as CURRENT/EXECUTING,
+  submit both a multi-participant V2 and an invalid-preference V2, then assert
+  CURRENT V1 and state are unchanged after each isolated case.
 - [ ] Run only the new tests and capture a RED result caused by the current wide
   `Trip` contract accepting or imprecisely reporting the payloads.
 
@@ -60,8 +63,9 @@
 
 - [ ] Generalize only the type annotation of `validate_single_day_policy` from
   `CreateSingleDayTrip` to `Trip`; preserve its behavior and issue ordering.
-- [ ] Add `PlanReviewTripSnapshot(Trip)` with literal `SINGLE` mode,
-  literal `PLAN_REVIEW` status, and one-item participant/day bounds.
+- [ ] Add `PlanReviewTripSnapshot(Trip)` with
+  `Literal[TripMode.SINGLE]` mode, `Literal[TripStatus.PLAN_REVIEW]` status, and
+  one-item participant/day bounds; assert parsed values retain enum types.
 - [ ] Run the shared policy in an after-model validator. Raise the first issue as
   `PydanticCustomError(issue.code, issue.message, {"public_path": ...})`,
   prefixing the T001 path with `tripSnapshot.`.

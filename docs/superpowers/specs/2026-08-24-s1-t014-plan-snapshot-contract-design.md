@@ -58,8 +58,9 @@ the wrong lifecycle state.
 
 ### Dedicated Plan-review subtype with shared policy (selected)
 
-Add `PlanReviewTripSnapshot(Trip)` with `mode = SINGLE`,
-`status = PLAN_REVIEW`, and exactly one participant/day. Its model validator
+Add `PlanReviewTripSnapshot(Trip)` with enum-preserving
+`mode = TripMode.SINGLE`, `status = TripStatus.PLAN_REVIEW`, and exactly one
+participant/day. Its model validator
 calls the existing T001 cross-field policy. `ProposedPlanVersion` then uses this
 type instead of the generic `Trip`.
 
@@ -77,6 +78,8 @@ shares one implementation for the cross-field rules.
 | `days[0].dayIndex != 0` | `tripSnapshot.days[0].dayIndex` | `invalid_day_index` |
 | `timeWindow.end <= start` | `tripSnapshot.days[0].timeWindow.end` | `invalid_time_window` |
 | `dailyBudgetCents > totalBudgetCents` | `tripSnapshot.days[0].dailyBudgetCents` | `budget_exceeded` |
+| Preference `isHard` contradicts its type | `tripSnapshot.participants[0].preferences[i].isHard` | `invalid_preference_hardness` |
+| Same normalized place is both must-visit and avoid | `tripSnapshot.participants[0].preferences[i].value` | `preference_conflict` |
 
 All HTTP failures use status 422 and the existing envelope:
 
@@ -114,12 +117,14 @@ ability to return its complete issue list.
 
 ## Acceptance and Test Strategy
 
-- A parameterized HTTP contract test covers all seven invalid-snapshot cases,
+- A parameterized HTTP contract test covers all nine invalid-snapshot cases,
   checks the exact error path/code, and verifies `GET /trips/{tripId}` remains
   `TRIP_NOT_FOUND` after each rejected V1.
-- A V2 regression test starts from a valid CURRENT V1 in `EXECUTING`, rejects
-  an invalid V2, and verifies the current plan, Trip state, and candidate list
-  are unchanged.
+- V2 regression cases start from a valid CURRENT V1 in `EXECUTING`, reject both
+  a cardinality violation and a shared custom-policy violation, and verify the
+  current plan, Trip state, and candidate list are unchanged.
+- A model-level regression asserts `mode` and `status` remain `TripMode` and
+  `TripStatus` enum members rather than being narrowed to plain strings.
 - Existing V1/V2 tests remain green, proving valid snapshots and state flows are
   backward compatible.
 - Full Python tests, frontend lint/build, and `git diff --check` must pass before
