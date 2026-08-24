@@ -134,6 +134,19 @@ def build_plan_service(tmp_path: Path) -> PlanVersionService:
     )
 
 
+async def post_proposal_and_restore_state(
+    client: httpx.AsyncClient,
+    payload: dict[str, object],
+) -> tuple[httpx.Response, httpx.Response]:
+    trip_id = payload["tripSnapshot"]["tripId"]  # type: ignore[index]
+    registered = await client.post(
+        f"/api/v1/trips/{trip_id}/plan-versions",
+        json=payload,
+    )
+    restored = await client.get(f"/api/v1/trips/{trip_id}")
+    return registered, restored
+
+
 def test_plan_contract_rejects_bad_totals_order_and_hard_constraint() -> None:
     bad_total = proposal_payload()
     bad_total["metrics"]["totalCostCents"] = 1  # type: ignore[index]
@@ -270,3 +283,115 @@ async def test_plan_http_rejects_path_payload_trip_mismatch(tmp_path: Path) -> N
 
     assert response.status_code == 422
     assert response.json()["errors"][0]["path"] == "tripSnapshot.tripId"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("invalid_case", "expected_path", "expected_code"),
+    [
+        ("multiple_participants", "tripSnapshot.participants", "too_long"),
+        ("multiple_trip_days", "tripSnapshot.days", "too_long"),
+        ("end_date_mismatch", "tripSnapshot.endDate", "date_mismatch"),
+        ("trip_day_date_mismatch", "tripSnapshot.days[0].date", "date_mismatch"),
+        ("nonzero_day_index", "tripSnapshot.days[0].dayIndex", "invalid_day_index"),
+        (
+            "equal_time_window",
+            "tripSnapshot.days[0].timeWindow.end",
+            "invalid_time_window",
+        ),
+        (
+            "daily_budget_exceeds_total",
+            "tripSnapshot.days[0].dailyBudgetCents",
+            "budget_exceeded",
+        ),
+    ],
+)
+async def test_single_day_snapshot_rejects_invalid_v1_without_persistence(
+    tmp_path: Path,
+    invalid_case: str,
+    expected_path: str,
+    expected_code: str,
+) -> None:
+    app = create_app(
+        service=UnusedLocationService(),  # type: ignore[arg-type]
+        plan_service=build_plan_service(tmp_path),
+    )
+    payload = proposal_payload()
+    snapshot = payload["tripSnapshot"]  # type: ignore[index]
+    snapshot_day = snapshot["days"][0]  # type: ignore[index]
+    plan_day = payload["days"][0]  # type: ignore[index]
+
+    if invalid_case == "multiple_participants":
+        snapshot["participants"].append(copy.deepcopy(snapshot["participants"][0]))  # type: ignore[index]
+    elif invalid_case == "multiple_trip_days":
+        snapshot["days"].append(copy.deepcopy(snapshot_day))  # type: ignore[index]
+    elif invalid_case == "end_date_mismatch":
+        snapshot["endDate"] = "2026-09-06"  # type: ignore[index]
+    elif invalid_case == "trip_day_date_mismatch":
+        snapshot_day["date"] = "2026-09-06"  # type: ignore[index]
+        plan_day["date"] = "2026-09-06"  # type: ignore[index]
+    elif invalid_case == "nonzero_day_index":
+        snapshot_day["dayIndex"] = 1  # type: ignore[index]
+        plan_day["dayIndex"] = 1  # type: ignore[index]
+    elif invalid_case == "equal_time_window":
+        snapshot_day["timeWindow"]["end"] = "09:00:00"  # type: ignore[index]
+    elif invalid_case == "daily_budget_exceeds_total":
+        snapshot_day["dailyBudgetCents"] = 35_001  # type: ignore[index]
+    else:
+        raise AssertionError(f"Unhandled invalid snapshot case: {invalid_case}")
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        registered, restored = await post_proposal_and_restore_state(client, payload)
+
+    assert registered.status_code == 422
+    body = registered.json()
+    assert body["code"] == "TRIP_SCHEMA_INVALID"
+    assert body["errors"][0]["path"] == expected_path
+    assert body["errors"][0]["code"] == expected_code
+    assert restored.status_code == 404
+    assert restored.json()["code"] == "TRIP_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_invalid_v2_snapshot_preserves_current_v1_execution_state(
+    tmp_path: Path,
+) -> None:
+    app = create_app(
+        service=UnusedLocationService(),  # type: ignore[arg-type]
+        plan_service=build_plan_service(tmp_path),
+    )
+    v1 = proposal_payload()
+    trip_id = v1["tripSnapshot"]["tripId"]  # type: ignore[index]
+    v2 = copy.deepcopy(v1)
+    v2["planId"] = "20000000-0000-4000-8000-000000000002"
+    v2["version"] = 2
+    v2["parentId"] = v1["planId"]
+    v2["reason"] = "DELAY"
+    v2["tripSnapshot"]["participants"].append(  # type: ignore[index]
+        copy.deepcopy(v2["tripSnapshot"]["participants"][0])  # type: ignore[index]
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        registered_v1 = await client.post(
+            f"/api/v1/trips/{trip_id}/plan-versions",
+            json=v1,
+        )
+        confirmed_v1 = await client.post(
+            f"/api/v1/trips/{trip_id}/plan-versions/{v1['planId']}/confirm"
+        )
+        started_v1 = await client.post(f"/api/v1/trips/{trip_id}/execution/start")
+        rejected_v2, restored = await post_proposal_and_restore_state(client, v2)
+
+    assert registered_v1.status_code == confirmed_v1.status_code == started_v1.status_code == 200
+    assert rejected_v2.status_code == 422
+    body = rejected_v2.json()
+    assert body["code"] == "TRIP_SCHEMA_INVALID"
+    assert body["errors"][0]["path"] == "tripSnapshot.participants"
+    assert body["errors"][0]["code"] == "too_long"
+    assert restored.status_code == 200
+    state = restored.json()["data"]
+    assert state["tripStatus"] == "EXECUTING"
+    assert state["currentPlan"]["planId"] == v1["planId"]
+    assert state["proposedPlans"] == []
