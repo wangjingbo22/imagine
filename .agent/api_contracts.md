@@ -106,3 +106,55 @@
   `TRIP_CONFIRMATION_REQUIRED`，两者均返回字段级 `errors[]`。
 - 当前尚未登记正式 HTTP URL。自然语言解析、城市查询、计划、执行、媒体与总结接口均保持 Mock，等待责任人补充契约。
 - 前端对齐说明见 `frontend/src/api/API.md`。
+
+## 9. PBI-02-A 城市地点、路线与可信来源（Schema 1.0）
+
+以下 URL 是张琪任务的本地联调接口，尚未登记为团队正式 HTTP 契约；字段命名和数据定义以第 8 节及 `backend/app/schemas/trip.py` 为准。
+
+### 9.1 成功与失败结构
+
+成功：
+
+```json
+{"code": 200, "message": "success", "data": {}}
+```
+
+Schema 校验失败沿用人工确认结构：
+
+```json
+{
+  "code": "TRIP_SCHEMA_INVALID",
+  "schemaVersion": "1.0",
+  "errors": [{"path": "days[0].timeWindow.end", "code": "missing", "message": "Field required"}]
+}
+```
+
+其他失败使用相同失败外形，`code` 为稳定业务错误码。已登记错误码：`CITY_CONTEXT_REQUIRED`、`CITY_CONTEXT_MISMATCH`、`AMAP_KEY_MISSING`、`AMAP_AUTH_FAILED`、`AMAP_QUOTA_EXCEEDED`、`AMAP_RATE_LIMITED`、`PROVIDER_TIMEOUT`、`PROVIDER_UNAVAILABLE`、`CITY_CACHE_MISS`、`PLACE_NOT_FOUND`、`ROUTE_NOT_FOUND`、`INVALID_ROUTE_MODE`。
+
+### 9.2 可信来源规则
+
+- `sourceStatus`：`ONLINE | VERIFIED_CACHE | USER_CONFIRMED | ESTIMATED | UNKNOWN`
+- 所有地点、路线和价格事实必须带 `provider`、`fetchedAt`、`isStale`。
+- 未知价格固定返回 `amountCents: null` 与 `sourceStatus: UNKNOWN`，不得返回 0 冒充已知价格。
+- `cityCode` 使用团队 Trip Schema 定义的行政区划码（如北京 `110000`），必须同时进入 Provider 调用上下文和缓存复合键；高德返回的电话区号 `citycode` 仅用于核验，不替代该字段。
+- 在线失败只允许读取请求参数完全一致的同城市缓存。
+
+### 9.3 本地联调接口
+
+均为 JSON `POST`，请求必须带 `schemaVersion: "1.0"`；除城市解析外，必须带 `tripId` 与完整 `cityContext`。
+
+- `/api/v1/cities/resolve`：按国内城市名解析 CityContext。
+- `/api/v1/places/suggestions`：同城地点输入提示。
+- `/api/v1/places/search`：同城关键词/类型地点搜索。
+- `/api/v1/places/nearby`：同城中心点周边搜索。
+- `/api/v1/places/detail`：地点详情。
+- `/api/v1/geocoding/forward`：同城地址转坐标。
+- `/api/v1/geocoding/reverse`：坐标转地址并核对城市。
+- `/api/v1/routes/plan`：`WALKING | TRANSIT | DRIVING | BICYCLING` 路线规划。
+
+### 9.4 安全与幂等
+
+- 高德 Key 只允许从 `AMAP_WEB_SERVICE_KEY` 环境变量读取。
+- Key 不得出现在响应、日志、缓存键、缓存值或 Git 文件中。
+- 查询接口只读；相同城市与相同参数生成稳定缓存摘要。
+- 高德错误必须转换为本项目错误码，不向前端暴露内部异常堆栈。
