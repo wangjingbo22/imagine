@@ -248,3 +248,87 @@ def test_confirmation_error_envelope_preserves_reference_date_and_candidates():
             }
         ],
     }
+
+
+@pytest.mark.parametrize(
+    ("field_path", "mutate"),
+    [
+        (
+            "tripId",
+            lambda payload: payload.update(
+                {"tripId": "6ba7b810-9dad-11d1-80b4-00c04fd430c8"}
+            ),
+        ),
+        (
+            "participants[0].participantId",
+            lambda payload: payload["participants"][0].update(
+                {"participantId": "6ba7b810-9dad-11d1-80b4-00c04fd430c8"}
+            ),
+        ),
+    ],
+    ids=["trip-id", "participant-id"],
+)
+def test_uuid_fields_require_uuid4(field_path: str, mutate):
+    payload = load_fixture_payload()
+    mutate(payload)
+
+    with pytest.raises(TripSchemaError) as exc_info:
+        validate_trip_json(json.dumps(payload, ensure_ascii=False))
+
+    errors = exc_info.value.as_dict()["errors"]
+    assert {error["path"] for error in errors} == {field_path}
+    assert errors[0]["code"] == "uuid_version"
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "expected_paths"),
+    [
+        (
+            "09:00:00.500000",
+            "10:00:00.500000",
+            {"days[0].timeWindow.start", "days[0].timeWindow.end"},
+        ),
+        (
+            "09:00:00+08:00",
+            "10:00:00+08:00",
+            {"days[0].timeWindow.start", "days[0].timeWindow.end"},
+        ),
+        ("09:00:00", "10:00:00+08:00", {"days[0].timeWindow.end"}),
+    ],
+    ids=["fractional", "offset", "mixed"],
+)
+def test_time_window_requires_naive_second_precision(
+    start: str, end: str, expected_paths: set[str]
+):
+    payload = load_fixture_payload()
+    payload["days"][0]["timeWindow"] = {"start": start, "end": end}
+
+    with pytest.raises(TripSchemaError) as exc_info:
+        validate_trip_json(json.dumps(payload, ensure_ascii=False))
+
+    errors = exc_info.value.as_dict()["errors"]
+    assert {error["path"] for error in errors} == expected_paths
+    assert {error["code"] for error in errors} == {"time_format"}
+
+
+def test_reverse_preference_conflict_points_to_second_item():
+    payload = load_fixture_payload()
+    payload["participants"][0]["preferences"] = [
+        {"type": "AVOID_PLACE", "value": "abc", "weight": 1, "isHard": True},
+        {"type": "MUST_VISIT", "value": "ＡＢＣ", "weight": 1, "isHard": True},
+    ]
+
+    with pytest.raises(TripSchemaError) as exc_info:
+        validate_trip_json(json.dumps(payload, ensure_ascii=False))
+
+    error = exc_info.value.as_dict()
+    assert error["errors"][0]["path"] == "participants[0].preferences[1].value"
+    assert error["errors"][0]["code"] == "preference_conflict"
+
+
+def test_published_schema_matches_test_snapshot():
+    published_path = Path(__file__).parents[1] / "schemas" / "trip.schema.json"
+    assert published_path.exists()
+    assert json.loads(published_path.read_text(encoding="utf-8")) == json.loads(
+        SNAPSHOT_PATH.read_text(encoding="utf-8")
+    )

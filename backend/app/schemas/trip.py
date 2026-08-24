@@ -2,23 +2,65 @@ from __future__ import annotations
 
 from datetime import date, time
 from enum import Enum
+import re
 from typing import Annotated, Literal
 from unicodedata import normalize
-from uuid import UUID
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
+    UUID4,
     ValidationError,
+    ValidationInfo,
     alias_generators,
+    field_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from .validation_error import (
     TripSchemaError,
     ValidationIssue,
     issues_from_pydantic,
 )
+
+
+_SECOND_PRECISION_TIME = re.compile(r"^\d{2}:\d{2}:\d{2}$")
+
+
+def _validate_second_precision_time(value: object) -> object:
+    """Reject fractional-second and timezone-bearing time values."""
+
+    if isinstance(value, str):
+        if not _SECOND_PRECISION_TIME.fullmatch(value):
+            raise PydanticCustomError(
+                "time_format",
+                "Time must use HH:mm:ss without fractional seconds or timezone offsets",
+            )
+        try:
+            return time.fromisoformat(value)
+        except ValueError as exc:
+            raise PydanticCustomError(
+                "time_parsing",
+                "Input should be a valid time in HH:mm:ss format",
+            ) from exc
+
+    if isinstance(value, time):
+        if value.microsecond or value.tzinfo is not None:
+            raise PydanticCustomError(
+                "time_format",
+                "Time must use HH:mm:ss without fractional seconds or timezone offsets",
+            )
+        return value
+
+    return value
+
+
+SecondPrecisionTime = Annotated[
+    time,
+    BeforeValidator(_validate_second_precision_time),
+]
 
 
 class ContractModel(BaseModel):
@@ -53,6 +95,13 @@ class PreferenceType(str, Enum):
     AVOID_PLACE = "AVOID_PLACE"
 
 
+class AssistanceType(str, Enum):
+    ORDINARY = "ORDINARY"
+    PARENT_CHILD = "PARENT_CHILD"
+    LOW_STAMINA = "LOW_STAMINA"
+    MOBILITY_ASSISTANCE_BETA = "MOBILITY_ASSISTANCE_BETA"
+
+
 class GeoPoint(ContractModel):
     longitude: Annotated[float, Field(ge=-180, le=180)]
     latitude: Annotated[float, Field(ge=-90, le=90)]
@@ -78,17 +127,52 @@ class Preference(ContractModel):
     is_hard: bool
 
 
+class WalkLimits(ContractModel):
+    """Walking thresholds in metres for one segment and the whole day."""
+
+    max_continuous_meters: Annotated[int | None, Field(ge=1)]
+    max_daily_meters: Annotated[int | None, Field(ge=1)]
+
+
+class NapWindow(ContractModel):
+    start: SecondPrecisionTime
+    end: SecondPrecisionTime
+
+    @field_validator("end")
+    @classmethod
+    def end_must_follow_start(cls, value: time, info: ValidationInfo) -> time:
+        start = info.data.get("start")
+        if start is not None and value <= start:
+            raise PydanticCustomError(
+                "invalid_nap_window",
+                "napWindow.end must be later than napWindow.start",
+            )
+        return value
+
+
+class AssistanceProfile(ContractModel):
+    """One serializable source for downstream care-constraint compilation."""
+
+    type: AssistanceType
+    child_age: Annotated[int | None, Field(ge=0, le=17)]
+    walk_limits: WalkLimits
+    max_transfers: Annotated[int | None, Field(ge=0)]
+    rest_interval: Annotated[int | None, Field(ge=1)]
+    nap_window: NapWindow | None
+    avoid_stairs: bool
+
+
 class Participant(ContractModel):
-    participant_id: UUID
+    participant_id: UUID4
     nickname: Annotated[str, Field(min_length=1, max_length=40)]
     budget_cap_cents: Annotated[int, Field(ge=0)]
     preferences: list[Preference] = Field(default_factory=list)
-    assistance_profile: None = None
+    assistance_profile: AssistanceProfile | None = None
 
 
 class TimeWindow(ContractModel):
-    start: time
-    end: time
+    start: SecondPrecisionTime
+    end: SecondPrecisionTime
 
 
 class TripDayInput(ContractModel):
@@ -102,7 +186,7 @@ class TripDayInput(ContractModel):
 
 class Trip(ContractModel):
     schema_version: Literal["1.0"]
-    trip_id: UUID
+    trip_id: UUID4
     mode: TripMode
     status: TripStatus
     city_context: CityContext
@@ -202,7 +286,7 @@ def validate_single_day_policy(
                 avoid_place[normalized_value] = preference_index
 
         for value in sorted(must_visit.keys() & avoid_place.keys()):
-            conflict_index = avoid_place[value]
+            conflict_index = max(must_visit[value], avoid_place[value])
             issues.append(
                 ValidationIssue(
                     path=(
@@ -232,9 +316,12 @@ def validate_trip_json(raw: str | bytes) -> CreateSingleDayTrip:
 
 
 __all__ = [
+    "AssistanceProfile",
+    "AssistanceType",
     "CityContext",
     "CreateSingleDayTrip",
     "GeoPoint",
+    "NapWindow",
     "Participant",
     "Preference",
     "PreferenceType",
@@ -244,6 +331,7 @@ __all__ = [
     "TripDayInput",
     "TripMode",
     "TripStatus",
+    "WalkLimits",
     "validate_single_day_policy",
     "validate_trip_json",
 ]

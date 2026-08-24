@@ -1,0 +1,11 @@
+{
+  "segments": [
+    {
+      "routeSegment": "seg-stairs",
+      "walkingDistanceMeters": 120,
+      "cumulativeTransfers": 0,
+      "elapsedSinceRestMinutes": 20,
+      "walkTypes": ["LEVEL", "STAIRS"]
+    }
+  ]
+}

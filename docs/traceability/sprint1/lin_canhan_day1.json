@@ -1,0 +1,127 @@
+{
+  "schemaVersion": "1.0",
+  "owner": "林粲涵",
+  "sprint": "Sprint 1",
+  "scope": "DAY_1_ONLY",
+  "compatibilityBaseline": {
+    "teamHead": "0a72d88",
+    "upstreamTask": "S1-T001",
+    "upstreamLineageCommit": "22eeaae29e141da68c4a6adc6c3efb9fa28690ad",
+    "finalSourceCommit": "e487fa29228181d219226ccd3b24ee76420b38a7",
+    "finalSourceDirectory": "2026lindashixun12zu-main",
+    "finalTripSchemaSha256": "17010CE35B9E51CFA871C82002BEB5865DE72FEC6FCA53A2DF74C48235A19ED4",
+    "finalTripTestsSha256": "2C8FB8681524F7E4F187B55527DA4835C40700432E921C765DDABB3D761FEC21"
+  },
+  "tasks": [
+    {
+      "taskId": "S1-T003",
+      "pbiId": "PBI-01-B",
+      "acId": "AC-01-B",
+      "status": "IMPLEMENTED",
+      "dependsOn": ["S1-T001"],
+      "consumedBy": ["S1-T004", "S1-T007"],
+      "codeFiles": [
+        "backend/app/schemas/trip.py",
+        "backend/app/schemas/assistance.py"
+      ],
+      "testFiles": [
+        "backend/tests/test_assistance_profile_schema.py",
+        "backend/tests/test_trip_schema.py"
+      ],
+      "fixtures": [
+        "backend/tests/fixtures/assistance_profiles/ordinary.json",
+        "backend/tests/fixtures/assistance_profiles/parent_child.json",
+        "backend/tests/fixtures/assistance_profiles/low_stamina.json",
+        "backend/tests/fixtures/assistance_profiles/mobility_assistance_beta.json"
+      ],
+      "proves": [
+        "four-profile-presets-serialize",
+        "single-participant",
+        "trip-status-draft",
+        "t001-null-profile-backward-compatible"
+      ]
+    },
+    {
+      "taskId": "S1-T008",
+      "pbiId": "PBI-03-A",
+      "acId": "AC-03-A",
+      "status": "IMPLEMENTED_WITH_T007_PORT",
+      "dependsOn": ["S1-T007"],
+      "consumedBy": ["S1-T011", "S1-T024"],
+      "codeFiles": [
+        "backend/app/schemas/constraint.py",
+        "backend/app/agents/tools/assistance_constraints.py"
+      ],
+      "testFiles": [
+        "backend/tests/test_assistance_constraint_tool.py"
+      ],
+      "fixtures": [],
+      "proves": [
+        "compiler-is-injected",
+        "scope-rewrite-rejected",
+        "hardness-rewrite-rejected",
+        "value-rewrite-rejected",
+        "constraint-omission-rejected",
+        "fail-closed-before-planning"
+      ]
+    },
+    {
+      "taskId": "S1-T009",
+      "pbiId": "PBI-03-B",
+      "acId": "AC-03-B",
+      "status": "IMPLEMENTED",
+      "dependsOn": ["S1-T007"],
+      "consumedBy": ["S1-T010", "S1-T011"],
+      "codeFiles": [
+        "backend/app/services/route_risk/models.py",
+        "backend/app/services/route_risk/evaluator.py"
+      ],
+      "testFiles": [
+        "backend/tests/test_route_risk.py"
+      ],
+      "fixtures": [
+        "backend/tests/fixtures/routes/stairs.json",
+        "backend/tests/fixtures/routes/excessive_walk.json",
+        "backend/tests/fixtures/routes/too_many_transfers.json",
+        "backend/tests/fixtures/routes/missed_rest.json"
+      ],
+      "proves": [
+        "known-stairs-fail-with-segment-and-rule",
+        "walking-limit-fail-with-segment-and-rule",
+        "transfer-limit-fail-with-segment-and-rule",
+        "rest-interval-fail-with-segment-and-rule",
+        "ordinary-profile-no-demographic-false-positive",
+        "unknown-stair-evidence-needs-confirmation",
+        "unsupported-hard-route-rule-fails-closed"
+      ]
+    }
+  ],
+  "deferredByUser": [
+    {
+      "taskId": "S1-T011",
+      "day": "Day 2",
+      "status": "NOT_IMPLEMENTED"
+    },
+    {
+      "taskId": "S1-T018",
+      "day": "Day 2",
+      "status": "NOT_IMPLEMENTED"
+    },
+    {
+      "taskId": "S1-T022",
+      "day": "Day 2",
+      "status": "NOT_IMPLEMENTED"
+    }
+  ],
+  "localVerification": {
+    "command": "python -m pytest -q",
+    "result": "66 passed"
+  },
+  "externalEvidence": {
+    "commit": null,
+    "pullRequest": null,
+    "buildId": null,
+    "qaSignoff": null,
+    "poAcceptance": null
+  }
+}

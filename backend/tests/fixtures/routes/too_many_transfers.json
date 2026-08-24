@@ -1,0 +1,11 @@
+{
+  "segments": [
+    {
+      "routeSegment": "seg-transfer-3",
+      "walkingDistanceMeters": 80,
+      "cumulativeTransfers": 3,
+      "elapsedSinceRestMinutes": 40,
+      "walkTypes": ["LEVEL"]
+    }
+  ]
+}

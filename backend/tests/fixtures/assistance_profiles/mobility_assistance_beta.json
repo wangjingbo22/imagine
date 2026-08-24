@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "1.0",
+  "tripId": "00000000-0000-4000-8000-000000000104",
+  "mode": "SINGLE",
+  "status": "DRAFT",
+  "cityContext": {
+    "countryCode": "CN",
+    "cityCode": "110000",
+    "cityName": "北京市",
+    "center": {
+      "longitude": 116.407387,
+      "latitude": 39.904179
+    },
+    "providerConfig": {
+      "provider": "AMAP",
+      "coordinateSystem": "GCJ02"
+    }
+  },
+  "startDate": "2026-09-11",
+  "endDate": "2026-09-11",
+  "currency": "CNY",
+  "totalBudgetCents": 35000,
+  "participants": [
+    {
+      "participantId": "10000000-0000-4000-8000-000000000104",
+      "nickname": "行动辅助旅客",
+      "budgetCapCents": 35000,
+      "preferences": [],
+      "assistanceProfile": {
+        "type": "MOBILITY_ASSISTANCE_BETA",
+        "childAge": null,
+        "walkLimits": {
+          "maxContinuousMeters": null,
+          "maxDailyMeters": null
+        },
+        "maxTransfers": null,
+        "restInterval": null,
+        "napWindow": null,
+        "avoidStairs": true
+      }
+    }
+  ],
+  "days": [
+    {
+      "dayIndex": 0,
+      "date": "2026-09-11",
+      "dailyBudgetCents": 32000,
+      "startLocationText": "北京林业大学",
+      "endLocationText": "北京林业大学",
+      "timeWindow": {
+        "start": "09:00:00",
+        "end": "20:00:00"
+      }
+    }
+  ]
+}
