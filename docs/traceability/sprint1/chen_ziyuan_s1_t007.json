@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "1.0",
+  "taskId": "S1-T007",
+  "pbiId": "PBI-03-A",
+  "acId": "AC-03-A",
+  "owner": "陈梓元",
+  "status": "IMPLEMENTED",
+  "baseline": "67206f2c55dcb011c61304de94f95b8b83a72ba0",
+  "dependsOn": ["S1-T003"],
+  "consumedBy": ["S1-T008", "S1-T009", "S1-T011"],
+  "codeFiles": [
+    "backend/app/services/assistance_constraints/__init__.py",
+    "backend/app/services/assistance_constraints/compiler.py"
+  ],
+  "contractFiles": [
+    "backend/app/schemas/trip.py",
+    "backend/app/schemas/assistance.py",
+    "backend/app/schemas/constraint.py",
+    "backend/app/agents/tools/assistance_constraints.py",
+    "backend/app/services/route_risk/evaluator.py"
+  ],
+  "testFiles": [
+    "backend/tests/test_assistance_constraint_compiler.py",
+    "backend/tests/test_assistance_constraint_integration.py",
+    "backend/tests/test_s1_t007_traceability.py"
+  ],
+  "snapshots": [
+    "backend/tests/snapshots/assistance_constraints.json"
+  ],
+  "proves": [
+    "four-profile-canonical-snapshot",
+    "repeatable-order-and-json-bytes",
+    "null-source-constraint-omission",
+    "walking-transfer-rest-nap-return-stairs-covered",
+    "field-level-invalid-profile-fails-closed",
+    "t008-protocol-and-rewrite-guard-compatible",
+    "t009-route-fields-and-day-scope-compatible"
+  ],
+  "nonGoals": [
+    "profile-schema-change",
+    "agent-adapter-change",
+    "route-risk-algorithm-change",
+    "planner-or-return-reference-resolution"
+  ]
+}
