@@ -11,7 +11,7 @@ from app.application.plan_service import PlanVersionService
 from app.infrastructure.plan_store import PlanStoreError, SqlitePlanVersionRepository
 from app.main import create_app
 from app.schemas.plan import PlanVersionStatus, ProposedPlanVersion
-from app.schemas.trip import TripStatus
+from app.schemas.trip import TripMode, TripStatus
 
 
 class UnusedLocationService:
@@ -162,6 +162,13 @@ def test_plan_contract_rejects_bad_totals_order_and_hard_constraint() -> None:
     failed_hard_rule["constraintsSnapshot"][0]["status"] = "FAIL"  # type: ignore[index]
     with pytest.raises(ValidationError, match="hard constraints"):
         parse_proposal(failed_hard_rule)
+
+
+def test_plan_review_snapshot_retains_enum_members() -> None:
+    proposal = parse_proposal()
+
+    assert proposal.trip_snapshot.mode is TripMode.SINGLE
+    assert proposal.trip_snapshot.status is TripStatus.PLAN_REVIEW
 
 
 def test_plan_confirmation_guard_and_refresh_restore(tmp_path: Path) -> None:

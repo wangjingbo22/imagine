@@ -36,9 +36,18 @@ def format_error_path(location: Sequence[object]) -> str:
 def issues_from_pydantic(errors: Sequence[Mapping[str, Any]]) -> list[ValidationIssue]:
     """Map Pydantic error details into the public error contract."""
 
+    def issue_path(detail: Mapping[str, Any]) -> str:
+        context = detail.get("ctx")
+        public_path = (
+            context.get("public_path") if isinstance(context, Mapping) else None
+        )
+        if isinstance(public_path, str) and public_path:
+            return public_path
+        return format_error_path(detail.get("loc", ()))
+
     return [
         ValidationIssue(
-            path=format_error_path(detail.get("loc", ())),
+            path=issue_path(detail),
             code=str(detail.get("type", "validation_error")),
             message=str(detail.get("msg", "Validation failed")),
         )
