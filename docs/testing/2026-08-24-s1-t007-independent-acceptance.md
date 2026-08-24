@@ -11,7 +11,7 @@
   - `docs/superpowers/specs/2026-08-24-s1-t007-assistance-constraint-compiler-design.md`
   - `docs/superpowers/plans/2026-08-24-s1-t007-assistance-constraint-compiler.md`
   - T003、T008、T009 在冻结基线上的生产契约与既有测试
-- 当前状态：`PENDING_IMPLEMENTATION`。本规程建立测试与判定标准，不代表业务代码已验收。
+- 规程冻结时状态：`PENDING_IMPLEMENTATION`。正式独立执行结果与最终状态见第 11 节。
 
 实现窗口的测试日志、自报结果、截图、提交说明或追溯文件声明均不能单独作为 PASS 证据。所有强制命令必须由独立 QA 在交接的目标 commit 上重新执行；预期输出必须由本规程、冻结契约或独立黑盒预言机证明。
 
@@ -585,3 +585,70 @@ QA 在黑盒通过后检查新增服务并记录文件与行号：
 出现任一条件不满足即为 `FAIL`；目标 commit 尚未交接或证据尚未执行时为 `PENDING`。不允许 `CONDITIONAL PASS`，也不允许以“实现者自测通过”“预计 CI 会通过”或“仅定向测试通过”替代本门槛。
 
 最终报告必须列出：目标 commit、各命令实际通过数、两个黑盒探针标志、快照 `0/2/3/1`、冻结 diff 结果、静态审查结论、剩余工作树条目、缺陷清单与复验 commit。所有证据通过后才向实现分析窗口交回 PASS，供其最后检查。
+
+## 11. 独立执行记录（2026-08-24）
+
+### 11.1 验收对象与环境
+
+- 待验 commit：`11fae535a70f67cf3a3aa63cfce4f6d9296e6d30`
+- 分支：`czy-S1-T007`
+- 测试前及记录证据前，本地 HEAD、`origin/czy-S1-T007` tracking ref 和 `git ls-remote` 结果均精确等于待验 commit。
+- `git merge-base 67206f2c55dcb011c61304de94f95b8b83a72ba0 HEAD` 返回冻结契约基线本身。
+- 独立环境：`C:\Users\lenovo\AppData\Local\Temp\codex-s1-t007-qa-11fae535a70f67cf`
+- 解释器：Python `3.12.13`；pytest `8.4.2`；依赖探针打印 `project-deps-ok`。
+- `PYTHONPATH`：仓库的 `backend` 绝对路径。
+- 测试前工作树仅有既存 Excel 锁文件，未使用实现窗口的虚拟环境或测试日志。
+
+### 11.2 新鲜自动化证据
+
+两段独立黑盒预言机均 exit code 0，并打印：
+
+```text
+s1-t007-compiler-black-box-ok
+s1-t007-t008-t009-boundaries-ok
+```
+
+pytest 使用 `-p no:cacheprovider -ra -q` 新鲜运行；收集命令另以 `--collect-only -q` 复核。未使用 `-k` 或其他筛选表达式。
+
+| 测试组 | collected | passed | skipped | xfailed | deselected | 结果 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 编译器定向 | 12 | 12 | 0 | 0 | 0 | PASS |
+| T008/T009 真实集成 | 9 | 9 | 0 | 0 | 0 | PASS |
+| T003/T008/T009 冻结回归 | 38 | 38 | 0 | 0 | 0 | PASS |
+| S1-T007 + 原 Day 1 追溯 | 4 | 4 | 0 | 0 | 0 | PASS |
+| S1 关怀回归 | 63 | 63 | 0 | 0 | 0 | PASS |
+| backend 全量 | 89 | 89 | 0 | 0 | 0 | PASS |
+| 全仓测试 | 101 | 101 | 0 | 0 | 0 | PASS |
+
+### 11.3 人工审查证据
+
+- `compiler.py:36-90`：错误对象固定为 `ASSISTANCE_PROFILE_INVALID`，仅返回 code、camelCase 路径、错误类型与消息；直接类型错误和被 mutation 模型均在输出前 fail-closed。
+- `compiler.py:62-76`：每次编译前执行 Profile JSON round-trip 与 `strict=True` 重验证；不信任构造后被修改的 Pydantic 实例。
+- `compiler.py:96-180`：公开签名返回 `tuple[Constraint, ...]`；局部新建 list、每项 Constraint 与嵌套 value，最后转为新 tuple，无共享可变状态且不修改输入。
+- `compiler.py:103-178`：七段显式控制流固定连续步行、全天步行、换乘、休息、午休、返程、避阶梯顺序；所有输出均为 HARD。`is not None` 保留合法 `maxTransfers=0`，`avoidStairs` 仅在 true 时输出。
+- `compiler.py:143-168`：午休为 `napWindow/BLOCK/DAY` 原子规则；返程为 `return/ARRIVE_BY/DAY`，只引用 `days[0].endLocationText` 与 `days[0].timeWindow.end`。
+- `assistance_constraints.json:1-57`：人工逐字段复核四预设为 `0/2/3/1`；field/operator/value/scope/hardness、嵌套键顺序与本规程预言机完全一致，无 null 或 `EQ false`。
+- 独立编译器黑盒进一步证明：四预设完整对象、七项组合顺序、compact UTF-8 JSON 字节、跨编译器/JSON round-trip 确定性、输入不变、Constraint 与嵌套 dict 新鲜性全部成立。
+- `assistance_constraints.py:91-122`：T008 在规划前严格重编译并比较完整输出。独立边界预言机分别篡改 scope、hardness、value、顺序和数量，五类均得到 `CONSTRAINT_TOOL_OUTPUT_MISMATCH`；既有结构缺失用例得到 `CONSTRAINT_TOOL_OUTPUT_INVALID`。
+- `test_assistance_constraint_integration.py:38-129`：真实编译器满足 runtime Protocol，Agent 输出与直接编译一致；错误 Agent 输入没有规划值；T009 无字段翻译消费四类路线规则，并隔离亲子 DAY 规则。
+- `evaluator.py:127-155`：T009 忽略未知的非路线 scope，未知 HARD 路线规则抛 `UNSUPPORTED_HARD_ROUTE_CONSTRAINT`。独立预言机还验证真实 `maxDailyMeters` 输出被累计步行规则消费。
+- `chen_ziyuan_s1_t007.json:3-44` 与同名 Markdown：`S1-T007 / PBI-03-A / AC-03-A`、T003 依赖、T008/T009/T011 消费者及代码/契约/测试/快照路径闭环；T011 返程引用解析明确为非目标。
+- 服务只 import schema/validation contract，不反向依赖 Agent 或路线风险器；未发现 I/O、网络、数据库、环境变量、时钟、随机源、缓存或全局可变状态。
+
+### 11.4 静态与仓库门禁
+
+- 快照 JSON：`snapshot-ok`，顶层顺序固定，计数精确为 `0/2/3/1`。
+- 追溯 JSON：`trace-json-ok`，task/PBI/AC、依赖和消费者精确。
+- 五个冻结生产契约相对 `67206f2c...`：无 diff。
+- 三个 T003/T008/T009 既有测试相对基线：无 diff。
+- 原 Day 1 JSON/Markdown 与追溯测试相对基线：无 diff。
+- `git diff --check 8b5c73322a8c736986f02e563c6586716815c608..11fae535a70f67cf3a3aa63cfce4f6d9296e6d30`：无输出，exit code 0。
+- 设计/计划基线之后变更路径：9 个，精确等于第 2 节白名单，无额外文件。
+- 禁止依赖扫描：零命中。
+- 工作树：仅 `?? doc/~$行知旅伴_V2.3_Sprint1待办列表_含负责人.xlsx`；该文件未读取、修改、暂存或提交。
+
+### 11.5 缺陷与最终结论
+
+- 未发现 P0、P1、P2 或 P3 缺陷；无需回传代码窗口修复或执行缺陷复验。
+- 本结论只覆盖 `S1-T007` 确定性 AssistanceProfile→Constraint 编译器及其 T008/T009 兼容边界，不声明 T011、返程引用解析或端到端规划完成。
+- **最终结论：PASS。** 待验 commit `11fae535a70f67cf3a3aa63cfce4f6d9296e6d30` 满足本规程全部强制门禁，可交回实现分析窗口做最后检查。
