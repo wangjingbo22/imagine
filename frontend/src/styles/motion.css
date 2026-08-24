@@ -147,6 +147,16 @@
   background: #f3f6fa;
 }
 
+.workspace-tabs button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.workspace-tabs button:disabled:hover {
+  color: var(--web-muted);
+  background: transparent;
+}
+
 .workspace-tabs button:active {
   transform: scale(0.97);
 }

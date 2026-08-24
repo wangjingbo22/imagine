@@ -22,6 +22,7 @@ import {
   Telescope,
   Utensils,
   Wallet,
+  X,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useLocation } from 'react-router-dom'
@@ -47,17 +48,14 @@ export function WorkspacePage() {
   const draft = (location.state as { draft?: TripDraftInput } | null)?.draft
   const [view, setView] = useState<WorkspaceView>('plan')
   const [actualCost, setActualCost] = useState('188')
-  const [isAccepted, setIsAccepted] = useState(false)
+  const [currentTaskIndex, setCurrentTaskIndex] = useState(1)
+  const [currentPlanVersion, setCurrentPlanVersion] = useState<1 | 2>(1)
+  const [completedTaskIds, setCompletedTaskIds] = useState<string[]>(['task-1'])
+  const [skippedTaskIds, setSkippedTaskIds] = useState<string[]>([])
+  const [replanExpenseDeltaCents, setReplanExpenseDeltaCents] = useState<number | null>(null)
+  const [actualSpentCents, setActualSpentCents] = useState(600)
   const budgetCents = draft?.budgetCents ?? 35000
   const remainingBudgetCents = Math.max(0, budgetCents - mockPlanV1.totalCostCents)
-  const actualExpenseCents = Math.max(0, Number(actualCost) || 0) * 100
-  const expenseDeltaCents = actualExpenseCents - 13800
-  const projectedCostCents = mockPlanV1.totalCostCents + expenseDeltaCents
-  const projectedBufferCents = budgetCents - projectedCostCents
-  const expenseDifferenceLabel =
-    expenseDeltaCents === 0
-      ? '实际消费与计划一致'
-      : `比计划${expenseDeltaCents > 0 ? '多花' : '少花'} ${formatMoney(Math.abs(expenseDeltaCents))}`
   const validationRules = [
     `单段步行 ≤ ${draft?.assistanceProfile.maxSegmentWalkMeters ?? 500}m`,
     `换乘次数 ≤ ${draft?.assistanceProfile.maxTransfers ?? 2}`,
@@ -89,6 +87,72 @@ export function WorkspacePage() {
         : displayPlanV1.tasks[index]?.title ?? task.title,
     })),
   }
+  const activePlan = currentPlanVersion === 2 ? displayPlanV2 : displayPlanV1
+  const currentTask = activePlan.tasks[currentTaskIndex]
+  const nextTask = activePlan.tasks[currentTaskIndex + 1]
+  const actualExpenseCents = Math.max(0, Number(actualCost) || 0) * 100
+  const expenseDeltaCents = actualExpenseCents - (currentTask?.costCents ?? 0)
+  const effectiveReplanDeltaCents = replanExpenseDeltaCents ?? expenseDeltaCents
+  const projectedCostCents = mockPlanV1.totalCostCents + effectiveReplanDeltaCents
+  const projectedBufferCents = budgetCents - projectedCostCents
+  const expenseDifferenceLabel =
+    expenseDeltaCents === 0
+      ? '实际消费与计划一致'
+      : `比计划${expenseDeltaCents > 0 ? '多花' : '少花'} ${formatMoney(Math.abs(expenseDeltaCents))}`
+  const executionProgress = Math.round(
+    ((completedTaskIds.length + skippedTaskIds.length) / activePlan.tasks.length) * 100,
+  )
+  const isJourneyComplete =
+    completedTaskIds.length + skippedTaskIds.length >= activePlan.tasks.length
+
+  function moveToNextTask() {
+    const nextIndex = currentTaskIndex + 1
+    const task = activePlan.tasks[nextIndex]
+    if (!task) {
+      setView('summary')
+      return
+    }
+    setCurrentTaskIndex(nextIndex)
+    setActualCost(String(task.costCents / 100))
+    setView('execute')
+  }
+
+  function handleSkipTask() {
+    if (!currentTask) {
+      return
+    }
+    setSkippedTaskIds((current) =>
+      current.includes(currentTask.id) ? current : [...current, currentTask.id],
+    )
+    moveToNextTask()
+  }
+
+  function handleCompleteTask() {
+    if (!currentTask) {
+      return
+    }
+    setCompletedTaskIds((current) =>
+      current.includes(currentTask.id) ? current : [...current, currentTask.id],
+    )
+    setActualSpentCents((current) => current + actualExpenseCents)
+    if (currentPlanVersion === 1 && currentTaskIndex === 1 && expenseDeltaCents !== 0) {
+      setReplanExpenseDeltaCents(expenseDeltaCents)
+      setView('diff')
+      return
+    }
+    moveToNextTask()
+  }
+
+  function handlePlanDecision(decision: 'ACCEPT' | 'REJECT') {
+    if (decision === 'ACCEPT') {
+      setCurrentPlanVersion(2)
+    }
+    const nextIndex = Math.max(currentTaskIndex + 1, 2)
+    const nextPlan = decision === 'ACCEPT' ? displayPlanV2 : displayPlanV1
+    setCurrentTaskIndex(nextIndex)
+    setActualCost(String((nextPlan.tasks[nextIndex]?.costCents ?? 0) / 100))
+    setView('execute')
+  }
 
   return (
     <AppShell compact>
@@ -106,7 +170,16 @@ export function WorkspacePage() {
 
         <nav className="workspace-tabs" data-reveal="fade" aria-label="行程视图">
           {views.map((item) => (
-            <button className={view === item.value ? 'is-active' : ''} key={item.value} onClick={() => setView(item.value)} type="button">
+            <button
+              className={view === item.value ? 'is-active' : ''}
+              disabled={
+                (item.value === 'summary' && !isJourneyComplete) ||
+                (item.value === 'diff' && replanExpenseDeltaCents === null)
+              }
+              key={item.value}
+              onClick={() => setView(item.value)}
+              type="button"
+            >
               {item.label}
               {item.value === 'diff' && <span>1</span>}
             </button>
@@ -216,7 +289,7 @@ export function WorkspacePage() {
             <div className="execution-web__main">
               <div className="execution-web__heading">
                 <div>
-                  <span className="section-kicker">LIVE EXECUTION · PLAN V1</span>
+                  <span className="section-kicker">LIVE EXECUTION · PLAN V{currentPlanVersion}</span>
                   <h2>当前任务</h2>
                 </div>
                 <span className="execution-status"><span className="status-dot" /> 行程执行中</span>
@@ -232,13 +305,13 @@ export function WorkspacePage() {
                   </div>
                 </div>
                 <div className="current-task-card__content">
-                  <span className="category-chip">任务 2 / 4 · 特色餐饮</span>
-                  <h3>四季民福 · 前门店</h3>
-                  <p><MapPin size={16} /> 北京市东城区前门东大街 23 号</p>
+                  <span className="category-chip">任务 {currentTaskIndex + 1} / {activePlan.tasks.length} · {currentTask?.category}</span>
+                  <h3>{currentTask?.title}</h3>
+                  <p><MapPin size={16} /> {draft?.cityName ?? '北京'} · 当前任务目的地</p>
                   <div className="current-task-metrics">
-                    <div><Clock3 size={19} /><span>计划时间<strong>12:05 — 13:20</strong></span></div>
-                    <div><Navigation size={19} /><span>距离目的地<strong>步行 460 米</strong></span></div>
-                    <div><Wallet size={19} /><span>计划消费<strong>¥138</strong></span></div>
+                    <div><Clock3 size={19} /><span>计划时间<strong>{currentTask?.timeRange}</strong></span></div>
+                    <div><Navigation size={19} /><span>预计步行<strong>{currentTask?.walkMeters ?? 0} 米</strong></span></div>
+                    <div><Wallet size={19} /><span>计划消费<strong>{formatMoney(currentTask?.costCents ?? 0)}</strong></span></div>
                   </div>
                 </div>
               </article>
@@ -257,9 +330,14 @@ export function WorkspacePage() {
                   <div><strong>{expenseDifferenceLabel}</strong><small>提交后 Agent 将检查剩余路线是否仍满足预算和关怀约束。</small></div>
                 </div>
                 <div className="execution-form-actions">
-                  <button className="button button--ghost" type="button">跳过此任务</button>
-                  <button className="button button--primary" onClick={() => setView('diff')} type="button">
-                    完成并重新规划 <RefreshCw size={17} />
+                  <button className="button button--ghost" onClick={handleSkipTask} type="button">跳过此任务</button>
+                  <button className="button button--primary" onClick={handleCompleteTask} type="button">
+                    {currentTaskIndex === activePlan.tasks.length - 1
+                      ? '完成行程并查看总结'
+                      : currentPlanVersion === 1 && currentTaskIndex === 1 && expenseDeltaCents !== 0
+                        ? '完成并重新规划'
+                        : '完成当前任务'}
+                    <RefreshCw size={17} />
                   </button>
                 </div>
               </div>
@@ -267,22 +345,24 @@ export function WorkspacePage() {
 
             <aside className="execution-web__side">
               <section className="trip-progress-card">
-                <div className="trip-progress-card__head"><span>今日进度</span><strong>1 / 4</strong></div>
-                <div className="progress-bar"><i style={{ width: '25%' }} /></div>
+                <div className="trip-progress-card__head"><span>今日进度</span><strong>{completedTaskIds.length + skippedTaskIds.length} / {activePlan.tasks.length}</strong></div>
+                <div className="progress-bar"><i style={{ width: `${executionProgress}%` }} /></div>
                 <div className="trip-progress-stats">
-                  <div><span>已用预算</span><strong>¥6</strong></div>
-                  <div><span>剩余预算</span><strong>{formatMoney(Math.max(0, budgetCents - 600))}</strong></div>
+                  <div><span>已用预算</span><strong>{formatMoney(actualSpentCents)}</strong></div>
+                  <div><span>剩余预算</span><strong>{formatMoney(Math.max(0, budgetCents - actualSpentCents))}</strong></div>
                   <div><span>已步行</span><strong>420m</strong></div>
-                  <div><span>当前版本</span><strong>V1</strong></div>
+                  <div><span>当前版本</span><strong>V{currentPlanVersion}</strong></div>
                 </div>
               </section>
 
-              <section className="next-task-card">
-                <span className="section-kicker">UP NEXT · 14:10</span>
-                <h3>景山公园</h3>
-                <p>公交 5 路 · 31 分钟 · 预计步行 780 米</p>
-                <div><Route size={18} /><span>路线包含坡道，建议根据当前体力决定是否调整。</span></div>
-              </section>
+              {nextTask && (
+                <section className="next-task-card">
+                  <span className="section-kicker">UP NEXT · {nextTask.timeRange.split('—')[0]}</span>
+                  <h3>{nextTask.title}</h3>
+                  <p>{nextTask.transport} · 预计步行 {nextTask.walkMeters} 米</p>
+                  <div><Route size={18} /><span>{nextTask.note}</span></div>
+                </section>
+              )}
 
               <section className="execution-rules-card">
                 <h3>执行保护规则</h3>
@@ -334,8 +414,8 @@ export function WorkspacePage() {
               <p><strong>为什么这样调整？</strong> 午餐{expenseDifferenceLabel}后，Agent 重新检查了剩余预算与体力约束。替换为北海公园东岸可减少 400 米步行，并尽量保留返程缓冲。</p>
             </div>
             <div className="diff-actions">
-              <button className="button button--ghost" onClick={() => setView('execute')} type="button">拒绝，继续 V1</button>
-              <button className="button button--primary" onClick={() => { setIsAccepted(true); setView('summary') }} type="button">
+              <button className="button button--ghost" onClick={() => handlePlanDecision('REJECT')} type="button">拒绝，继续 V1</button>
+              <button className="button button--primary" onClick={() => handlePlanDecision('ACCEPT')} type="button">
                 接受 Plan V2 <Check size={17} />
               </button>
             </div>
@@ -347,22 +427,24 @@ export function WorkspacePage() {
             <div className="summary-hero">
               <span className="summary-icon"><BadgeCheck size={34} /></span>
               <span className="section-kicker">JOURNEY COMPLETE</span>
-              <h2>今天，你和北京认真地见了一面。</h2>
-              <p>{isAccepted ? 'Plan V2 已接受并完成。' : '基础总结已生成。'} 每一次变化都有记录，每一笔花费都有来处。</p>
+              <h2>今天，你和{draft?.cityName ?? '北京'}认真地见了一面。</h2>
+              <p>行程已经结束。每一次完成、跳过和版本变化都有记录，每一笔花费都有来处。</p>
             </div>
             <div className="summary-metrics">
-              <article><span>任务完成</span><strong>3<small>/4</small></strong><i style={{ width: '75%' }} /></article>
-              <article><span>实际花费</span><strong>{formatMoney(projectedCostCents)}</strong><small>计划 {formatMoney(mockPlanV1.totalCostCents)} · {expenseDeltaCents >= 0 ? '+' : '-'}{formatMoney(Math.abs(expenseDeltaCents))}</small></article>
+              <article><span>任务完成</span><strong>{completedTaskIds.length}<small>/{activePlan.tasks.length}</small></strong><i style={{ width: `${(completedTaskIds.length / activePlan.tasks.length) * 100}%` }} /></article>
+              <article><span>实际花费</span><strong>{formatMoney(actualSpentCents)}</strong><small>计划 {formatMoney(activePlan.totalCostCents)} · {actualSpentCents >= activePlan.totalCostCents ? '+' : '-'}{formatMoney(Math.abs(actualSpentCents - activePlan.totalCostCents))}</small></article>
               <article><span>关怀满足率</span><strong>100<small>%</small></strong><small>4 项硬约束全部满足</small></article>
-              <article><span>当前版本</span><strong>V2</strong><small>1 次最小扰动调整</small></article>
+              <article><span>最终版本</span><strong>V{currentPlanVersion}</strong><small>{currentPlanVersion === 2 ? '接受了 1 次最小扰动调整' : '继续执行原始计划'}</small></article>
             </div>
             <div className="memory-route">
               <div className="panel-heading"><div><span className="section-kicker">ACTUAL TIMELINE</span><h2>实际旅程</h2></div><Route size={22} /></div>
-              {displayPlanV2.tasks.slice(0, 3).map((task, index) => (
+              {activePlan.tasks
+                .filter((task) => completedTaskIds.includes(task.id) || skippedTaskIds.includes(task.id))
+                .map((task, index) => (
                 <div className="memory-stop" key={task.id}>
                   <span>{index + 1}</span>
-                  <div><strong>{task.title}</strong><small>{task.timeRange} · 实际完成</small></div>
-                  <CheckCircle2 size={19} />
+                  <div><strong>{task.title}</strong><small>{task.timeRange} · {skippedTaskIds.includes(task.id) ? '已跳过' : '实际完成'}</small></div>
+                  {skippedTaskIds.includes(task.id) ? <X size={19} /> : <CheckCircle2 size={19} />}
                 </div>
               ))}
             </div>
