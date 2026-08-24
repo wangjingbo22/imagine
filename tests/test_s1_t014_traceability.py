@@ -46,67 +46,34 @@ def test_s1_t014_traceability_contract_is_complete_and_points_to_real_evidence()
         "tests/test_s1_t014_traceability.py",
     }
 
-    expected_cases = {
-        "v1_multiple_participants",
-        "v1_multiple_days",
-        "v1_date_mismatch",
-        "v1_day_date_mismatch",
-        "v1_invalid_day_index",
-        "v1_equal_time_window",
-        "v1_reversed_time_window",
-        "v1_daily_budget_exceeded",
-        "v1_preference_hardness_mismatch",
-        "v1_preference_conflict",
-        "v2_multiple_participants_preserves_current",
-        "v2_invalid_preference_hardness_preserves_current",
-        "enum_preservation",
-        "valid_v1_v2_regression",
-    }
     cases = {case["id"]: case for case in trace["acceptanceCases"]}
-    assert expected_cases <= cases.keys()
-    assert cases["v1_date_mismatch"]["publicError"] == {
-        "path": "tripSnapshot.endDate",
-        "code": "date_mismatch",
+    expected_v1_public_errors = {
+        "v1_multiple_participants": {"path": "tripSnapshot.participants", "code": "too_long"},
+        "v1_multiple_days": {"path": "tripSnapshot.days", "code": "too_long"},
+        "v1_date_mismatch": {"path": "tripSnapshot.endDate", "code": "date_mismatch"},
+        "v1_day_date_mismatch": {"path": "tripSnapshot.days[0].date", "code": "date_mismatch"},
+        "v1_invalid_day_index": {"path": "tripSnapshot.days[0].dayIndex", "code": "invalid_day_index"},
+        "v1_equal_time_window": {"path": "tripSnapshot.days[0].timeWindow.end", "code": "invalid_time_window"},
+        "v1_reversed_time_window": {"path": "tripSnapshot.days[0].timeWindow.end", "code": "invalid_time_window"},
+        "v1_daily_budget_exceeded": {"path": "tripSnapshot.days[0].dailyBudgetCents", "code": "budget_exceeded"},
+        "v1_preference_hardness_mismatch": {"path": "tripSnapshot.participants[0].preferences[0].isHard", "code": "invalid_preference_hardness"},
+        "v1_preference_conflict": {"path": "tripSnapshot.participants[0].preferences[1].value", "code": "preference_conflict"},
     }
-    assert cases["v1_day_date_mismatch"]["publicError"] == {
-        "path": "tripSnapshot.days[0].date",
-        "code": "date_mismatch",
+    expected_v2_public_errors = {
+        "v2_multiple_participants_preserves_current": {"path": "tripSnapshot.participants", "code": "too_long"},
+        "v2_invalid_preference_hardness_preserves_current": {
+            "path": "tripSnapshot.participants[0].preferences[0].isHard",
+            "code": "invalid_preference_hardness",
+        },
     }
-    assert cases["v1_invalid_day_index"]["publicError"] == {
-        "path": "tripSnapshot.days[0].dayIndex",
-        "code": "invalid_day_index",
-    }
-    assert cases["v1_equal_time_window"]["publicError"] == {
-        "path": "tripSnapshot.days[0].timeWindow.end",
-        "code": "invalid_time_window",
-    }
-    assert cases["v1_reversed_time_window"]["publicError"] == {
-        "path": "tripSnapshot.days[0].timeWindow.end",
-        "code": "invalid_time_window",
-    }
-    assert cases["v1_daily_budget_exceeded"]["publicError"] == {
-        "path": "tripSnapshot.days[0].dailyBudgetCents",
-        "code": "budget_exceeded",
-    }
-    assert cases["v1_preference_hardness_mismatch"]["publicError"] == {
-        "path": "tripSnapshot.participants[0].preferences[0].isHard",
-        "code": "invalid_preference_hardness",
-    }
-    assert cases["v1_preference_conflict"]["publicError"] == {
-        "path": "tripSnapshot.participants[0].preferences[1].value",
-        "code": "preference_conflict",
-    }
-    assert cases["v1_multiple_participants"]["publicError"] == {
-        "path": "tripSnapshot.participants",
-        "code": "too_long",
-    }
-    assert cases["v1_multiple_days"]["publicError"] == {
-        "path": "tripSnapshot.days",
-        "code": "too_long",
-    }
-    assert cases["v1_multiple_participants"]["noPersistence"] is True
-    assert cases["v2_multiple_participants_preserves_current"]["preservesFullCurrent"] is True
-    assert cases["v2_invalid_preference_hardness_preserves_current"]["preservesFullCurrent"] is True
+    assert {case_id for case_id in cases if case_id.startswith("v1_")} == set(expected_v1_public_errors)
+    assert {case_id for case_id in cases if case_id.startswith("v2_")} == set(expected_v2_public_errors)
+    for case_id, expected_public_error in expected_v1_public_errors.items():
+        assert cases[case_id]["publicError"] == expected_public_error
+        assert cases[case_id]["noPersistence"] is True
+    for case_id, expected_public_error in expected_v2_public_errors.items():
+        assert cases[case_id]["publicError"] == expected_public_error
+        assert cases[case_id]["preservesFullCurrent"] is True
     assert cases["enum_preservation"]["preservesEnums"] is True
     assert cases["valid_v1_v2_regression"]["regression"] is True
     assert trace["implementationCommit"] == "9f11d8a"
