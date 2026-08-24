@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -73,6 +74,10 @@ EXPECTED = {
         }
     ],
 }
+
+SNAPSHOT_PATH = (
+    Path(__file__).parent / "snapshots" / "assistance_constraints.json"
+)
 
 
 def dumped(compiler, profile: AssistanceProfile) -> list[dict[str, Any]]:
@@ -173,3 +178,14 @@ def test_mutated_profile_fails_closed_with_field_issue(
     assert error["code"] == "ASSISTANCE_PROFILE_INVALID"
     assert error["errors"][0]["path"] == expected_path
     assert error["errors"][0]["code"] == expected_code
+
+
+@pytest.mark.parametrize("profile_type", list(AssistanceType))
+def test_profile_output_matches_reviewed_snapshot(profile_type):
+    expected = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    compiler = DeterministicAssistanceConstraintCompiler()
+
+    assert dumped(
+        compiler,
+        create_assistance_profile(profile_type),
+    ) == expected[profile_type.value]

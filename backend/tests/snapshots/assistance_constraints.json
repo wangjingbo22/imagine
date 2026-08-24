@@ -1,0 +1,57 @@
+{
+  "ORDINARY": [],
+  "PARENT_CHILD": [
+    {
+      "field": "napWindow",
+      "operator": "BLOCK",
+      "value": {
+        "start": "13:00:00",
+        "end": "14:00:00"
+      },
+      "scope": "DAY",
+      "hardness": "HARD"
+    },
+    {
+      "field": "return",
+      "operator": "ARRIVE_BY",
+      "value": {
+        "endLocationPath": "days[0].endLocationText",
+        "deadlinePath": "days[0].timeWindow.end"
+      },
+      "scope": "DAY",
+      "hardness": "HARD"
+    }
+  ],
+  "LOW_STAMINA": [
+    {
+      "field": "walkLimits.maxContinuousMeters",
+      "operator": "LTE",
+      "value": 500,
+      "scope": "ROUTE_SEGMENT",
+      "hardness": "HARD"
+    },
+    {
+      "field": "maxTransfers",
+      "operator": "LTE",
+      "value": 2,
+      "scope": "ROUTE",
+      "hardness": "HARD"
+    },
+    {
+      "field": "restInterval",
+      "operator": "LTE",
+      "value": 90,
+      "scope": "ROUTE",
+      "hardness": "HARD"
+    }
+  ],
+  "MOBILITY_ASSISTANCE_BETA": [
+    {
+      "field": "avoidStairs",
+      "operator": "EQ",
+      "value": true,
+      "scope": "ROUTE_SEGMENT",
+      "hardness": "HARD"
+    }
+  ]
+}
