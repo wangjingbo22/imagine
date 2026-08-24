@@ -81,25 +81,24 @@
 - 幂等：同一 `idempotencyKey` 不得重复生成事件或重复扣减金额。
 - 错误：`404` 任务不存在；`409` 幂等或状态冲突；`422` 金额或事件不合法。
 
-## 7. 生成 Plan V2
+## 7. 持续反馈并更新当前计划
 
-- `POST /api/v1/trips/{tripId}/replans`
-- 用途：基于消费等执行事件冻结完成项，生成候选 V2。
-- 状态要求：候选 V2 未接受前不得替换当前版本。
-- 错误：`409` 当前状态不可重规划；`422` 无可行后缀方案。
+- `POST /api/v1/trips/{tripId}/plan-feedback`
+- 用途：基于消费、疲劳或文字反馈更新尚未执行的任务。
+- 状态要求：已完成和已跳过任务不可修改；更新结果重新通过硬约束校验。
+- 错误：`409` 当前状态不可调整；`422` 无可行后续方案。
 
-## 8. 接受或拒绝候选版本
+## 8. 上传任务媒体
 
-- `POST /api/v1/trips/{tripId}/plans/{planId}/decision`
-- 请求：`{ "decision": "ACCEPT" }` 或 `{ "decision": "REJECT" }`。
-- 接受：旧 `CURRENT` 变为 `SUPERSEDED`，V2 成为唯一 `CURRENT`。
-- 拒绝：V2 变为 `REJECTED`，当前版本及执行状态不变。
+- `POST /api/v1/trips/{tripId}/tasks/{taskId}/media`
+- 请求格式：`multipart/form-data`，支持 `photo` 和 `video`。
+- 图片建议不超过 5MB，视频建议不超过 30MB。
+- 删除：`DELETE /api/v1/trips/{tripId}/media/{mediaId}`。
 
 ## 9. 获取基础总结
 
 - `GET /api/v1/trips/{tripId}/summary`
-- 返回：计划费用、实际费用、差额、完成/跳过任务、当前及历史版本。
-- Sprint 1 不要求照片时间线。
+- 返回：计划费用、实际费用、差额、完成/跳过任务、计划调整记录和任务媒体。
 
 ## 前端类型来源
 

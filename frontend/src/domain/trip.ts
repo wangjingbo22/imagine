@@ -65,5 +65,5 @@ export interface TripSummary {
   actualCostCents: number
   completedTasks: number
   totalTasks: number
-  currentPlanVersion: number
+  planAdjustmentCount: number
 }

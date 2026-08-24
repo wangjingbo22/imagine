@@ -234,49 +234,63 @@ POST /api/v1/trips/{tripId}/events
 
 相同的 `idempotencyKey` 不得重复创建事件或重复扣减预算。
 
-## 9. 生成 Plan V2
+## 9. 持续反馈并更新当前计划
 
 ```http
-POST /api/v1/trips/{tripId}/replans
+POST /api/v1/trips/{tripId}/plan-feedback
+```
+
+### 请求体
+
+```json
+{
+  "taskId": "task_2",
+  "feedback": "有点累了，希望减少后面的步行",
+  "eventId": "event_08"
+}
 ```
 
 要求：
 
-- 已完成任务保持不变
-- 用户锁定任务保持不变
-- 只调整未完成后缀
-- 新计划必须重新通过硬约束校验
-- 候选 V2 未被接受前不得覆盖当前 V1
+- 已完成和已跳过任务保持不变
+- 只调整尚未执行的后续任务
+- 更新后的当前计划必须重新通过硬约束校验
+- 不创建 Plan V2，不要求用户处理版本接受/拒绝
+- 每次调整需记录反馈、时间和受影响任务
 
-无可行方案时返回 `422`，并说明冲突规则及可放宽项。
+无可行调整时返回 `422`，并说明冲突规则及可放宽项。
 
-## 10. 接受或拒绝 Plan V2
+## 10. 上传任务照片或视频
 
 ```http
-POST /api/v1/trips/{tripId}/plans/{planId}/decision
+POST /api/v1/trips/{tripId}/tasks/{taskId}/media
 ```
 
-### 接受
+- 请求格式：`multipart/form-data`
+- 字段：
+  - `file`：图片或视频文件
+  - `mediaType`：`photo | video`
+  - `caption`：可选说明
+- 图片建议限制：5MB
+- 视频建议限制：30MB
+
+成功响应应返回：
 
 ```json
 {
-  "decision": "ACCEPT"
+  "mediaId": "media_01",
+  "taskId": "task_2",
+  "mediaType": "photo",
+  "url": "https://example.com/media/media_01.jpg",
+  "createdAt": "2026-08-26T12:45:00+08:00"
 }
 ```
 
-- 原 V1：`CURRENT` → `SUPERSEDED`
-- 新 V2：`PROPOSED` → `CURRENT`
+还应提供删除素材接口：
 
-### 拒绝
-
-```json
-{
-  "decision": "REJECT"
-}
+```http
+DELETE /api/v1/trips/{tripId}/media/{mediaId}
 ```
-
-- 新 V2：`PROPOSED` → `REJECTED`
-- 当前 V1 和执行状态保持不变
 
 ## 11. 获取旅行总结
 
@@ -292,11 +306,14 @@ GET /api/v1/trips/{tripId}/summary
   "actualCostCents": 34300,
   "completedTasks": 3,
   "totalTasks": 4,
-  "currentPlanVersion": 2
+  "planAdjustmentCount": 2,
+  "media": []
 }
 ```
 
-还应返回任务完成/跳过记录及版本变化，且能追溯到对应事件。
+还应返回任务完成/跳过记录、途中反馈、计划调整记录和任务媒体。
+
+前端的“导出旅行总结”会将总结数据和已加载的媒体生成 HTML 文件。
 
 ## 12. 联调步骤
 
@@ -315,8 +332,8 @@ GET /api/v1/trips/{tripId}/summary
    - 确认约束
    - 生成并确认 Plan V1
    - 创建执行事件
-   - 生成 Plan V2
-   - 接受或拒绝 V2
+   - 持续提交途中反馈并更新当前计划
+   - 上传任务照片或视频
    - 获取总结
 
 ## 13. 前端文件对应关系

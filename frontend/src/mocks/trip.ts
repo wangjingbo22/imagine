@@ -69,31 +69,10 @@ export const mockPlanV1: PlanSnapshot = {
   ],
 }
 
-export const mockPlanV2: PlanSnapshot = {
-  ...mockPlanV1,
-  id: 'plan-v2',
-  version: 2,
-  totalCostCents: 34300,
-  bufferCents: 700,
-  totalWalkMeters: 1880,
-  tasks: mockPlanV1.tasks.map((task) =>
-    task.id === 'task-3'
-      ? {
-          ...task,
-          title: '北海公园 · 东岸',
-          timeRange: '14:20 — 15:40',
-          costCents: 1000,
-          walkMeters: 380,
-          note: '减少爬坡与步行，保留休息缓冲',
-        }
-      : task,
-  ),
-}
-
 export const mockSummary: TripSummary = {
   plannedCostCents: 29800,
   actualCostCents: 34300,
   completedTasks: 3,
   totalTasks: 4,
-  currentPlanVersion: 2,
+  planAdjustmentCount: 2,
 }

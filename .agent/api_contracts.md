@@ -106,7 +106,7 @@
   - `POST /api/v1/trips/{tripId}/plans/{planId}/confirm`
   - `GET /api/v1/trips/{tripId}`
   - `POST /api/v1/trips/{tripId}/events`
-  - `POST /api/v1/trips/{tripId}/replans`
-  - `POST /api/v1/trips/{tripId}/plans/{planId}/decision`
+  - `POST /api/v1/trips/{tripId}/plan-feedback`
+  - `POST /api/v1/trips/{tripId}/tasks/{taskId}/media`
   - `GET /api/v1/trips/{tripId}/summary`
 - 详细请求、响应、错误码、幂等和状态约束见 `doc/frontend_api_contract.md`。

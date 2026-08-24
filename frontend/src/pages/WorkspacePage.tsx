@@ -2,13 +2,16 @@ import {
   ArrowRight,
   BadgeCheck,
   BusFront,
+  Camera,
   Check,
   CheckCircle2,
   ChevronDown,
   CircleDollarSign,
   Clock3,
+  Download,
+  FileVideo,
   Footprints,
-  GitCompareArrows,
+  Image,
   LoaderCircle,
   Layers3,
   Map,
@@ -22,22 +25,33 @@ import {
   Send,
   Sparkles,
   Telescope,
+  Trash2,
+  Upload,
   Utensils,
+  Video,
   Wallet,
   X,
 } from 'lucide-react'
-import { useState } from 'react'
+import { type ChangeEvent, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import type { TripDraftInput } from '../domain/trip'
-import { mockPlanV1, mockPlanV2 } from '../mocks/trip'
+import { mockPlanV1 } from '../mocks/trip'
 
-type WorkspaceView = 'plan' | 'execute' | 'diff' | 'summary'
+type WorkspaceView = 'plan' | 'execute' | 'summary'
+
+interface MediaAsset {
+  id: string
+  taskId: string
+  type: 'photo' | 'video'
+  name: string
+  dataUrl: string
+  createdAt: string
+}
 
 const views: Array<{ value: WorkspaceView; label: string }> = [
   { value: 'plan', label: '计划工作台' },
   { value: 'execute', label: '执行旅程' },
-  { value: 'diff', label: '版本对比' },
   { value: 'summary', label: '旅行总结' },
 ]
 
@@ -53,16 +67,23 @@ function formatMoney(cents: number) {
   return `¥${Math.round(cents / 100)}`
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
 export function WorkspacePage() {
   const location = useLocation()
   const draft = (location.state as { draft?: TripDraftInput } | null)?.draft
   const [view, setView] = useState<WorkspaceView>('plan')
   const [actualCost, setActualCost] = useState('188')
   const [currentTaskIndex, setCurrentTaskIndex] = useState(1)
-  const [currentPlanVersion, setCurrentPlanVersion] = useState<1 | 2>(1)
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>(['task-1'])
   const [skippedTaskIds, setSkippedTaskIds] = useState<string[]>([])
-  const [replanExpenseDeltaCents, setReplanExpenseDeltaCents] = useState<number | null>(null)
   const [actualSpentCents, setActualSpentCents] = useState(600)
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false)
   const [recommendationFeedback, setRecommendationFeedback] = useState('')
@@ -70,6 +91,12 @@ export function WorkspacePage() {
   const [recommendationRound, setRecommendationRound] = useState(1)
   const [isRegenerating, setIsRegenerating] = useState(false)
   const [appliedFeedback, setAppliedFeedback] = useState<string[]>([])
+  const [executionFeedback, setExecutionFeedback] = useState('')
+  const [executionAdjustmentCount, setExecutionAdjustmentCount] = useState(0)
+  const [executionNotice, setExecutionNotice] = useState('')
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([])
+  const [mediaError, setMediaError] = useState('')
   const budgetCents = draft?.budgetCents ?? 35000
   const validationRules = [
     `单段步行 ≤ ${draft?.assistanceProfile.maxSegmentWalkMeters ?? 500}m`,
@@ -120,24 +147,12 @@ export function WorkspacePage() {
       }
     : baseDisplayPlanV1
   const remainingBudgetCents = Math.max(0, budgetCents - displayPlanV1.totalCostCents)
-  const displayPlanV2 = {
-    ...mockPlanV2,
-    cityName: draft?.cityName ?? mockPlanV2.cityName,
-    tasks: mockPlanV2.tasks.map((task, index) => ({
-      ...task,
-      title: index === 2 && draft?.cityName && draft.cityName !== '北京'
-        ? `${draft.cityName}湖畔公园`
-        : displayPlanV1.tasks[index]?.title ?? task.title,
-    })),
-  }
-  const activePlan = currentPlanVersion === 2 ? displayPlanV2 : displayPlanV1
+  const activePlan = displayPlanV1
   const currentTask = activePlan.tasks[currentTaskIndex]
   const nextTask = activePlan.tasks[currentTaskIndex + 1]
+  const selectedTask = activePlan.tasks.find((task) => task.id === selectedTaskId)
   const actualExpenseCents = Math.max(0, Number(actualCost) || 0) * 100
   const expenseDeltaCents = actualExpenseCents - (currentTask?.costCents ?? 0)
-  const effectiveReplanDeltaCents = replanExpenseDeltaCents ?? expenseDeltaCents
-  const projectedCostCents = displayPlanV1.totalCostCents + effectiveReplanDeltaCents
-  const projectedBufferCents = budgetCents - projectedCostCents
   const expenseDifferenceLabel =
     expenseDeltaCents === 0
       ? '实际消费与计划一致'
@@ -202,23 +217,96 @@ export function WorkspacePage() {
       current.includes(currentTask.id) ? current : [...current, currentTask.id],
     )
     setActualSpentCents((current) => current + actualExpenseCents)
-    if (currentPlanVersion === 1 && currentTaskIndex === 1 && expenseDeltaCents !== 0) {
-      setReplanExpenseDeltaCents(expenseDeltaCents)
-      setView('diff')
-      return
+    if (expenseDeltaCents !== 0) {
+      setRecommendationRound((current) => current + 1)
+      setExecutionAdjustmentCount((current) => current + 1)
+      setExecutionNotice(`Agent 已根据“${expenseDifferenceLabel}”更新后续安排`)
     }
     moveToNextTask()
   }
 
-  function handlePlanDecision(decision: 'ACCEPT' | 'REJECT') {
-    if (decision === 'ACCEPT') {
-      setCurrentPlanVersion(2)
+  function handleExecutionFeedback() {
+    if (!executionFeedback.trim()) {
+      return
     }
-    const nextIndex = Math.max(currentTaskIndex + 1, 2)
-    const nextPlan = decision === 'ACCEPT' ? displayPlanV2 : displayPlanV1
-    setCurrentTaskIndex(nextIndex)
-    setActualCost(String((nextPlan.tasks[nextIndex]?.costCents ?? 0) / 100))
-    setView('execute')
+    setRecommendationRound((current) => current + 1)
+    setExecutionAdjustmentCount((current) => current + 1)
+    setExecutionNotice(`Agent 已采用反馈：“${executionFeedback.trim()}”`)
+    setExecutionFeedback('')
+  }
+
+  function handleMediaUpload(
+    event: ChangeEvent<HTMLInputElement>,
+    type: MediaAsset['type'],
+  ) {
+    const input = event.currentTarget
+    const file = input.files?.[0]
+    if (!file || !selectedTask) {
+      return
+    }
+    const expectedPrefix = type === 'photo' ? 'image/' : 'video/'
+    const maxSize = type === 'photo' ? 5 * 1024 * 1024 : 30 * 1024 * 1024
+    if (!file.type.startsWith(expectedPrefix)) {
+      setMediaError(`请选择${type === 'photo' ? '图片' : '视频'}文件。`)
+      input.value = ''
+      return
+    }
+    if (file.size > maxSize) {
+      setMediaError(`${type === 'photo' ? '图片不能超过 5MB' : '视频不能超过 30MB'}。`)
+      input.value = ''
+      return
+    }
+
+    setMediaError('')
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = reader.result
+      if (typeof dataUrl !== 'string') {
+        setMediaError('素材读取失败，请重新选择文件。')
+        return
+      }
+      setMediaAssets((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          taskId: selectedTask.id,
+          type,
+          name: file.name,
+          dataUrl,
+          createdAt: new Date().toISOString(),
+        },
+      ])
+    }
+    reader.onerror = () => setMediaError('素材读取失败，请重新选择文件。')
+    reader.readAsDataURL(file)
+    input.value = ''
+  }
+
+  function handleExportSummary() {
+    const taskRows = activePlan.tasks.map((task) => {
+      const status = skippedTaskIds.includes(task.id)
+        ? '已跳过'
+        : completedTaskIds.includes(task.id)
+          ? '已完成'
+          : '未执行'
+      return `<tr><td>${task.order}</td><td>${escapeHtml(task.title)}</td><td>${escapeHtml(task.timeRange)}</td><td>${status}</td></tr>`
+    }).join('')
+    const mediaHtml = mediaAssets.length > 0
+      ? mediaAssets.map((asset) => asset.type === 'photo'
+          ? `<figure><img src="${asset.dataUrl}" alt="${escapeHtml(asset.name)}"><figcaption>${escapeHtml(asset.name)}</figcaption></figure>`
+          : `<figure><video controls src="${asset.dataUrl}"></video><figcaption>${escapeHtml(asset.name)}</figcaption></figure>`,
+        ).join('')
+      : '<p>本次旅行没有保存照片或视频。</p>'
+    const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>行知旅伴旅行总结</title><style>body{font-family:system-ui,sans-serif;max-width:960px;margin:40px auto;padding:0 24px;color:#172033}h1{font-size:36px}section{margin-top:32px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border-bottom:1px solid #e5eaf1;text-align:left}.media{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.media img,.media video{width:100%;max-height:360px;object-fit:cover;border-radius:12px}figcaption{margin-top:6px;color:#667085;font-size:12px}</style></head><body><h1>${escapeHtml(draft?.cityName ?? '北京')}旅行总结</h1><p>完成 ${completedTaskIds.length}/${activePlan.tasks.length} 个任务，跳过 ${skippedTaskIds.length} 个任务，实际花费 ${formatMoney(actualSpentCents)}。</p><section><h2>实际行程</h2><table><thead><tr><th>#</th><th>地点</th><th>时间</th><th>状态</th></tr></thead><tbody>${taskRows}</tbody></table></section><section><h2>旅行影像</h2><div class="media">${mediaHtml}</div></section></body></html>`
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }))
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${draft?.cityName ?? '北京'}旅行总结.html`
+    anchor.style.display = 'none'
+    document.body.append(anchor)
+    anchor.click()
+    anchor.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
   return (
@@ -239,16 +327,12 @@ export function WorkspacePage() {
           {views.map((item) => (
             <button
               className={view === item.value ? 'is-active' : ''}
-              disabled={
-                (item.value === 'summary' && !isJourneyComplete) ||
-                (item.value === 'diff' && replanExpenseDeltaCents === null)
-              }
+              disabled={item.value === 'summary' && !isJourneyComplete}
               key={item.value}
               onClick={() => setView(item.value)}
               type="button"
             >
               {item.label}
-              {item.value === 'diff' && <span>1</span>}
             </button>
           ))}
         </nav>
@@ -285,6 +369,9 @@ export function WorkspacePage() {
                         <span><Footprints size={15} /> {task.walkMeters} 米</span>
                       </div>
                       <div className="task-note"><BadgeCheck size={15} /> {task.note}</div>
+                      <button className="task-guide-button" onClick={() => setSelectedTaskId(task.id)} type="button">
+                        <Camera size={15} /> 查看拍照与视频指导
+                      </button>
                     </div>
                   </article>
                 ))}
@@ -310,7 +397,7 @@ export function WorkspacePage() {
                 </div>
               </section>
               <section className="metric-card">
-                <div className="metric-card__head"><span>预算使用</span><strong>{formatMoney(mockPlanV1.totalCostCents)} / {formatMoney(budgetCents)}</strong></div>
+                <div className="metric-card__head"><span>预算使用</span><strong>{formatMoney(displayPlanV1.totalCostCents)} / {formatMoney(budgetCents)}</strong></div>
                 <div className="progress-bar"><i style={{ width: '85%' }} /></div>
                 <div className="metric-grid">
                   <div><Wallet size={18} /><span>剩余缓冲<strong>{formatMoney(remainingBudgetCents)}</strong></span></div>
@@ -410,7 +497,7 @@ export function WorkspacePage() {
             <div className="execution-web__main">
               <div className="execution-web__heading">
                 <div>
-                  <span className="section-kicker">LIVE EXECUTION · PLAN V{currentPlanVersion}</span>
+                  <span className="section-kicker">LIVE EXECUTION · CONTINUOUS PLAN</span>
                   <h2>当前任务</h2>
                 </div>
                 <span className="execution-status"><span className="status-dot" /> 行程执行中</span>
@@ -434,6 +521,9 @@ export function WorkspacePage() {
                     <div><Navigation size={19} /><span>预计步行<strong>{currentTask?.walkMeters ?? 0} 米</strong></span></div>
                     <div><Wallet size={19} /><span>计划消费<strong>{formatMoney(currentTask?.costCents ?? 0)}</strong></span></div>
                   </div>
+                  <button className="task-guide-button task-guide-button--large" onClick={() => setSelectedTaskId(currentTask?.id ?? null)} type="button">
+                    <Camera size={16} /> 进入地点体验与拍摄指导
+                  </button>
                 </div>
               </article>
 
@@ -455,8 +545,8 @@ export function WorkspacePage() {
                   <button className="button button--primary" onClick={handleCompleteTask} type="button">
                     {currentTaskIndex === activePlan.tasks.length - 1
                       ? '完成行程并查看总结'
-                      : currentPlanVersion === 1 && currentTaskIndex === 1 && expenseDeltaCents !== 0
-                        ? '完成并重新规划'
+                      : expenseDeltaCents !== 0
+                        ? '完成并更新后续安排'
                         : '完成当前任务'}
                     <RefreshCw size={17} />
                   </button>
@@ -472,7 +562,7 @@ export function WorkspacePage() {
                   <div><span>已用预算</span><strong>{formatMoney(actualSpentCents)}</strong></div>
                   <div><span>剩余预算</span><strong>{formatMoney(Math.max(0, budgetCents - actualSpentCents))}</strong></div>
                   <div><span>已步行</span><strong>420m</strong></div>
-                  <div><span>当前版本</span><strong>V{currentPlanVersion}</strong></div>
+                  <div><span>计划调整</span><strong>{executionAdjustmentCount} 次</strong></div>
                 </div>
               </section>
 
@@ -485,61 +575,29 @@ export function WorkspacePage() {
                 </section>
               )}
 
+              <section className="execution-feedback-card">
+                <div className="source-card__head">
+                  <span><MessageSquareText size={18} /> 随时反馈给 Agent</span>
+                </div>
+                <textarea
+                  maxLength={160}
+                  onChange={(event) => setExecutionFeedback(event.target.value)}
+                  placeholder="例如：有点累了、想提前吃饭、希望减少后面的步行……"
+                  value={executionFeedback}
+                />
+                <button className="button button--soft" disabled={!executionFeedback.trim()} onClick={handleExecutionFeedback} type="button">
+                  <Send size={15} /> 更新后续安排
+                </button>
+                {executionNotice && <p><CheckCircle2 size={14} /> {executionNotice}</p>}
+              </section>
+
               <section className="execution-rules-card">
                 <h3>执行保护规则</h3>
                 <div><Check size={16} /><span><strong>完成项保持不变</strong><small>已发生的行程不会被重写</small></span></div>
-                <div><Check size={16} /><span><strong>新版必须由你确认</strong><small>候选 V2 不自动覆盖 V1</small></span></div>
+                <div><Check size={16} /><span><strong>反馈后即时更新</strong><small>只调整尚未执行的后续任务</small></span></div>
                 <div><Check size={16} /><span><strong>事件和金额可追溯</strong><small>每条记录绑定具体任务</small></span></div>
               </section>
             </aside>
-          </section>
-        )}
-
-        {view === 'diff' && (
-          <section className="diff-stage motion-enter">
-            <div className="agent-processing">
-              <span className="agent-processing__orb"><LoaderCircle size={24} /></span>
-              <div><strong>Agent 已完成最小扰动重规划</strong><p>保留 2 个已确认任务，仅调整下午路线。</p></div>
-              <span className="pass-chip"><ShieldCheck size={13} /> V2 校验通过</span>
-            </div>
-            <div className="diff-heading">
-              <div><span className="section-kicker">PLAN CHANGE REVIEW</span><h2>看看 Agent 改了什么</h2></div>
-              <div className="diff-summary">
-                <span>预算余量 <strong>{formatMoney(remainingBudgetCents)} → {formatMoney(projectedBufferCents)}</strong></span>
-                <span>步行距离 <strong>2.65 → 1.88 km</strong></span>
-              </div>
-            </div>
-            <div className="diff-columns">
-              <article className="diff-plan">
-                <header><span>当前版本</span><strong>Plan V1</strong></header>
-                {displayPlanV1.tasks.map((task) => (
-                  <div className={task.id === 'task-3' ? 'diff-task is-removed' : 'diff-task'} key={task.id}>
-                    <span>{task.order}</span><div><strong>{task.title}</strong><small>{task.timeRange} · {formatMoney(task.costCents)}</small></div>
-                    {task.id === 'task-3' ? <em>移除</em> : <em>保留</em>}
-                  </div>
-                ))}
-              </article>
-              <span className="diff-arrow"><GitCompareArrows size={24} /></span>
-              <article className="diff-plan diff-plan--new">
-                <header><span>候选版本</span><strong>Plan V2</strong></header>
-                {displayPlanV2.tasks.map((task) => (
-                  <div className={task.id === 'task-3' ? 'diff-task is-added' : 'diff-task'} key={task.id}>
-                    <span>{task.order}</span><div><strong>{task.title}</strong><small>{task.timeRange} · {formatMoney(task.costCents)}</small></div>
-                    {task.id === 'task-3' ? <em>新增</em> : <em>保留</em>}
-                  </div>
-                ))}
-              </article>
-            </div>
-            <div className="diff-reason">
-              <Sparkles size={20} />
-              <p><strong>为什么这样调整？</strong> 午餐{expenseDifferenceLabel}后，Agent 重新检查了剩余预算与体力约束。替换为北海公园东岸可减少 400 米步行，并尽量保留返程缓冲。</p>
-            </div>
-            <div className="diff-actions">
-              <button className="button button--ghost" onClick={() => handlePlanDecision('REJECT')} type="button">拒绝，继续 V1</button>
-              <button className="button button--primary" onClick={() => handlePlanDecision('ACCEPT')} type="button">
-                接受 Plan V2 <Check size={17} />
-              </button>
-            </div>
           </section>
         )}
 
@@ -549,13 +607,13 @@ export function WorkspacePage() {
               <span className="summary-icon"><BadgeCheck size={34} /></span>
               <span className="section-kicker">JOURNEY COMPLETE</span>
               <h2>今天，你和{draft?.cityName ?? '北京'}认真地见了一面。</h2>
-              <p>行程已经结束。每一次完成、跳过和版本变化都有记录，每一笔花费都有来处。</p>
+              <p>行程已经结束。每一次完成、跳过、反馈和拍摄记录都已保存在这份总结中。</p>
             </div>
             <div className="summary-metrics">
               <article><span>任务完成</span><strong>{completedTaskIds.length}<small>/{activePlan.tasks.length}</small></strong><i style={{ width: `${(completedTaskIds.length / activePlan.tasks.length) * 100}%` }} /></article>
               <article><span>实际花费</span><strong>{formatMoney(actualSpentCents)}</strong><small>计划 {formatMoney(activePlan.totalCostCents)} · {actualSpentCents >= activePlan.totalCostCents ? '+' : '-'}{formatMoney(Math.abs(actualSpentCents - activePlan.totalCostCents))}</small></article>
               <article><span>关怀满足率</span><strong>100<small>%</small></strong><small>4 项硬约束全部满足</small></article>
-              <article><span>最终版本</span><strong>V{currentPlanVersion}</strong><small>{currentPlanVersion === 2 ? '接受了 1 次最小扰动调整' : '继续执行原始计划'}</small></article>
+              <article><span>Agent 调整</span><strong>{executionAdjustmentCount}<small>次</small></strong><small>根据实际消费与途中反馈更新</small></article>
             </div>
             <div className="memory-route">
               <div className="panel-heading"><div><span className="section-kicker">ACTUAL TIMELINE</span><h2>实际旅程</h2></div><Route size={22} /></div>
@@ -569,7 +627,91 @@ export function WorkspacePage() {
                 </div>
               ))}
             </div>
+            <div className="summary-media">
+              <div className="panel-heading">
+                <div><span className="section-kicker">TRAVEL MEDIA</span><h2>旅行影像</h2></div>
+                <button className="button button--primary" onClick={handleExportSummary} type="button"><Download size={16} /> 导出旅行总结</button>
+              </div>
+              {mediaAssets.length > 0 ? (
+                <div className="summary-media__grid">
+                  {mediaAssets.map((asset) => (
+                    <article key={asset.id}>
+                      {asset.type === 'photo'
+                        ? <img alt={asset.name} src={asset.dataUrl} />
+                        : <video controls src={asset.dataUrl} />}
+                      <div><span>{asset.type === 'photo' ? <Image size={14} /> : <FileVideo size={14} />}{asset.name}</span></div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="summary-media__empty"><Camera size={24} /><span>本次旅行还没有保存照片或视频</span></div>
+              )}
+            </div>
           </section>
+        )}
+        {selectedTask && (
+          <div className="place-experience-backdrop" onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setSelectedTaskId(null)
+            }
+          }}>
+            <section className="place-experience-modal" aria-modal="true" role="dialog">
+              <header>
+                <div>
+                  <span className="section-kicker">AGENT CREATIVE GUIDE</span>
+                  <h2>{selectedTask.title}</h2>
+                  <p>{selectedTask.category} · {selectedTask.timeRange}</p>
+                </div>
+                <button onClick={() => setSelectedTaskId(null)} type="button"><X size={20} /></button>
+              </header>
+              <div className="creative-guide-grid">
+                <article>
+                  <span className="creative-guide-icon"><Camera size={22} /></span>
+                  <h3>拍照指导</h3>
+                  <ol>
+                    <li>先拍一张包含环境的横向全景，保留地点标志。</li>
+                    <li>人物放在画面三分线位置，避免正午顶光直射面部。</li>
+                    <li>补拍门票、餐食或建筑细节，方便总结页讲故事。</li>
+                  </ol>
+                </article>
+                <article>
+                  <span className="creative-guide-icon"><Video size={22} /></span>
+                  <h3>视频分镜指导</h3>
+                  <ol>
+                    <li>开场 3 秒：稳定拍摄地点名称或入口。</li>
+                    <li>过程 5—8 秒：缓慢横移，记录人物与环境互动。</li>
+                    <li>结尾 3 秒：拍下离开路线或一句现场感受。</li>
+                  </ol>
+                </article>
+              </div>
+              <div className="media-upload-area">
+                <div>
+                  <h3>保存本次体验</h3>
+                  <p>照片上限 5MB，视频上限 30MB；素材仅保存在当前演示会话中。</p>
+                </div>
+                <div className="media-upload-actions">
+                  <label className="button button--ghost"><Upload size={16} /> 上传照片<input accept="image/*" hidden onChange={(event) => handleMediaUpload(event, 'photo')} type="file" /></label>
+                  <label className="button button--ghost"><Video size={16} /> 上传视频<input accept="video/*" hidden onChange={(event) => handleMediaUpload(event, 'video')} type="file" /></label>
+                </div>
+                {mediaError && <p className="media-error">{mediaError}</p>}
+              </div>
+              <div className="saved-media">
+                <div className="panel-heading"><h3>已保存素材</h3><small>{mediaAssets.filter((asset) => asset.taskId === selectedTask.id).length} 项</small></div>
+                {mediaAssets.some((asset) => asset.taskId === selectedTask.id) ? (
+                  <div className="saved-media__grid">
+                    {mediaAssets.filter((asset) => asset.taskId === selectedTask.id).map((asset) => (
+                      <article key={asset.id}>
+                        {asset.type === 'photo'
+                          ? <img alt={asset.name} src={asset.dataUrl} />
+                          : <video controls src={asset.dataUrl} />}
+                        <div><span>{asset.name}</span><button onClick={() => setMediaAssets((current) => current.filter((item) => item.id !== asset.id))} type="button"><Trash2 size={14} /></button></div>
+                      </article>
+                    ))}
+                  </div>
+                ) : <div className="saved-media__empty">还没有保存素材</div>}
+              </div>
+            </section>
+          </div>
         )}
       </main>
     </AppShell>

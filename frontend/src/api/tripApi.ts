@@ -5,7 +5,7 @@ import type {
   TripDraftInput,
   TripSummary,
 } from '../domain/trip'
-import { mockPlanV1, mockPlanV2, mockSummary } from '../mocks/trip'
+import { mockPlanV1, mockSummary } from '../mocks/trip'
 import { request } from './client'
 
 const USE_MOCK_API = (import.meta.env.VITE_USE_MOCK_API ?? 'true') === 'true'
@@ -75,26 +75,20 @@ export const tripApi = {
     })
   },
 
-  replan(tripId: string) {
-    if (USE_MOCK_API) {
-      return mockResponse(mockPlanV2)
-    }
-    return request<PlanSnapshot>(`/api/v1/trips/${tripId}/replans`, { method: 'POST' })
-  },
-
-  decidePlan(tripId: string, planId: string, decision: 'ACCEPT' | 'REJECT') {
+  updatePlan(tripId: string, feedback: string) {
     if (USE_MOCK_API) {
       return mockResponse({
         tripId,
-        planId,
-        status: decision === 'ACCEPT' ? 'CURRENT' : 'REJECTED',
+        currentPlan: mockPlanV1,
+        feedback,
+        status: 'UPDATED',
       })
     }
-    return request<{ tripId: string; planId: string; status: string }>(
-      `/api/v1/trips/${tripId}/plans/${planId}/decision`,
+    return request<{ tripId: string; currentPlan: PlanSnapshot; status: string }>(
+      `/api/v1/trips/${tripId}/plan-feedback`,
       {
         method: 'POST',
-        body: JSON.stringify({ decision }),
+        body: JSON.stringify({ feedback }),
       },
     )
   },
