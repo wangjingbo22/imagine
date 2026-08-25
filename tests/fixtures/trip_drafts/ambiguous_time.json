@@ -1,0 +1,10 @@
+{
+  "name": "时间歧义",
+  "request": {
+    "schemaVersion": "1.0",
+    "referenceDate": "2026-08-25",
+    "naturalLanguageRequest": "我想在北京2026年9月5日玩一天，9点到8点，预算350元，喜欢历史文化。"
+  },
+  "expectedCanPlan": false,
+  "expectedConfirmationPaths": ["endTime"]
+}

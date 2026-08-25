@@ -15,11 +15,11 @@ import type {
   RouteCollection,
   TravelMode,
   StoredPlanVersion,
-  TripDraftInput,
+  TripDraftParseInput,
+  TripDraftParseResult,
   TripSummary,
   TripPlanState,
 } from '../domain/trip'
-import { ApiError } from './client'
 import { mockPlanV1, mockSummary } from '../mocks/trip'
 import { request } from './client'
 
@@ -33,14 +33,18 @@ async function mockResponse<T>(data: T): Promise<ApiResponse<T>> {
 }
 
 export const tripApi = {
-  createDraft(input: TripDraftInput) {
-    if (USE_MOCK_API) {
-      return mockResponse({ tripId: crypto.randomUUID(), draft: input })
-    }
-    throw new ApiError(
-      'TRIP_DRAFT_ENDPOINT_UNREGISTERED',
-      '自然语言表单解析接口尚未由后端登记；请先通过解析/城市 Provider 生成 CreateSingleDayTrip。',
-    )
+  createDraft(input: TripDraftParseInput) {
+    return request<TripDraftParseResult>('/api/v1/trips/drafts/parse', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  },
+
+  confirmDraft(input: TripDraftParseInput) {
+    return request<CreateSingleDayTrip>('/api/v1/trips/drafts/confirm', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
   },
 
   submitNormalizedTrip(path: string, input: CreateSingleDayTrip) {

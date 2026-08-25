@@ -1,0 +1,10 @@
+{
+  "name": "完整输入",
+  "request": {
+    "schemaVersion": "1.0",
+    "referenceDate": "2026-08-25",
+    "naturalLanguageRequest": "我想在北京安排2026年9月5日的一日游，上午9点到晚上8点，预算350元，喜欢历史文化和特色餐饮，必去故宫博物院，避开三里屯。"
+  },
+  "expectedCanPlan": true,
+  "expectedConfirmationPaths": []
+}

@@ -1,0 +1,10 @@
+{
+  "name": "缺预算",
+  "request": {
+    "schemaVersion": "1.0",
+    "referenceDate": "2026-08-25",
+    "naturalLanguageRequest": "我想在上海安排2026年9月5日的一日游，上午9点到晚上8点，喜欢博物馆和特色餐饮。"
+  },
+  "expectedCanPlan": false,
+  "expectedConfirmationPaths": ["budgetCents"]
+}

@@ -9,8 +9,10 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.api.routes import router
 from app.api.plan_routes import router as plan_router
+from app.api.trip_draft_routes import router as trip_draft_router
 from app.application.amap_service import AmapLocationService
 from app.application.plan_service import PlanVersionService
+from app.application.trip_draft_service import TripDraftParserService
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.domain.models import ErrorResponse
@@ -159,9 +161,11 @@ def create_app(
         allow_headers=["Content-Type"],
     )
     app.state.location_service = service
+    app.state.trip_draft_service = TripDraftParserService(service)
     app.state.plan_version_service = plan_service
     app.include_router(router)
     app.include_router(plan_router)
+    app.include_router(trip_draft_router)
 
     @app.get("/docs", include_in_schema=False)
     async def chinese_api_docs() -> HTMLResponse:

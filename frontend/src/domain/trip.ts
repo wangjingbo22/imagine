@@ -51,6 +51,7 @@ export interface ApiResponse<T> {
 }
 
 export interface TripDraftInput {
+  schemaVersion: '1.0'
   cityName: string
   travelDate: string
   startTime: string
@@ -66,6 +67,43 @@ export interface TripDraftInput {
     restIntervalMinutes: number
   }
   naturalLanguageRequest: string
+}
+
+export interface TripDraftParseInput extends Omit<
+  TripDraftInput,
+  'cityName' | 'travelDate' | 'startTime' | 'endTime' | 'budgetCents'
+> {
+  cityName: string | null
+  travelDate: string | null
+  startTime: string | null
+  endTime: string | null
+  budgetCents: number | null
+}
+
+export interface TripDraftConfirmationItem {
+  itemId: string
+  path: string
+  code: 'missing' | 'ambiguous' | 'conflict' | 'invalid'
+  message: string
+  candidates: string[]
+}
+
+export interface TripDraftParseResult {
+  tripId: string
+  status: 'DRAFT'
+  parsed: {
+    cityName: string | null
+    travelDate: string | null
+    startTime: string | null
+    endTime: string | null
+    budgetCents: number | null
+    interests: string[]
+    mustVisit: string[]
+    avoidPlaces: string[]
+  }
+  confirmationItems: TripDraftConfirmationItem[]
+  canPlan: boolean
+  trip: CreateSingleDayTrip | null
 }
 
 export interface GeoPoint {

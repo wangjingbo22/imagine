@@ -1,0 +1,65 @@
+{
+  "tripId": "4451c4b2-33d5-4e03-9db1-e08661dc63d7",
+  "status": "DRAFT",
+  "parsed": {
+    "cityName": "北京",
+    "travelDate": "2026-09-05",
+    "startTime": "09:00",
+    "endTime": "20:00",
+    "budgetCents": 35000,
+    "interests": ["历史文化", "特色餐饮"],
+    "mustVisit": ["故宫博物院"],
+    "avoidPlaces": ["三里屯"]
+  },
+  "confirmationItems": [],
+  "canPlan": true,
+  "trip": {
+    "schemaVersion": "1.0",
+    "tripId": "4451c4b2-33d5-4e03-9db1-e08661dc63d7",
+    "mode": "SINGLE",
+    "status": "DRAFT",
+    "cityContext": {
+      "countryCode": "CN",
+      "cityCode": "110000",
+      "cityName": "北京市",
+      "center": {"longitude": 116.407387, "latitude": 39.904179},
+      "providerConfig": {"provider": "AMAP", "coordinateSystem": "GCJ02"}
+    },
+    "startDate": "2026-09-05",
+    "endDate": "2026-09-05",
+    "currency": "CNY",
+    "totalBudgetCents": 35000,
+    "participants": [
+      {
+        "participantId": "f3cbd976-53d5-46e6-82ff-4bb0f0dd9ea9",
+        "nickname": "单人旅客",
+        "budgetCapCents": 35000,
+        "preferences": [
+          {"type": "INTEREST", "value": "历史文化", "weight": 4, "isHard": false},
+          {"type": "INTEREST", "value": "特色餐饮", "weight": 4, "isHard": false},
+          {"type": "MUST_VISIT", "value": "故宫博物院", "weight": 5, "isHard": true},
+          {"type": "AVOID_PLACE", "value": "三里屯", "weight": 5, "isHard": true}
+        ],
+        "assistanceProfile": {
+          "type": "ORDINARY",
+          "childAge": null,
+          "walkLimits": {"maxContinuousMeters": 500, "maxDailyMeters": null},
+          "maxTransfers": 2,
+          "restInterval": 90,
+          "napWindow": null,
+          "avoidStairs": false
+        }
+      }
+    ],
+    "days": [
+      {
+        "dayIndex": 0,
+        "date": "2026-09-05",
+        "dailyBudgetCents": 35000,
+        "startLocationText": "北京市中心",
+        "endLocationText": "北京市中心",
+        "timeWindow": {"start": "09:00:00", "end": "20:00:00"}
+      }
+    ]
+  }
+}

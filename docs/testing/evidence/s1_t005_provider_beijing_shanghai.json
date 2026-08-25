@@ -1,0 +1,82 @@
+{
+  "taskId": "S1-T005",
+  "generatedAt": "2026-08-25T01:54:46.360784+00:00",
+  "provider": "AMAP",
+  "secretRedaction": "PASS - 请求/响应证据不记录 key",
+  "cities": [
+    {
+      "city": "北京",
+      "cityResolve": {
+        "request": {"cityName": "北京"},
+        "response": {
+          "cityCode": "110000",
+          "cityName": "北京市",
+          "sourceStatus": "ONLINE",
+          "fetchedAt": "2026-08-25T01:54:40.291809Z"
+        }
+      },
+      "poiSearch": {
+        "request": {"cityCode": "110000", "keywords": "故宫博物院"},
+        "response": {
+          "resultCityCode": "110000",
+          "returned": 10,
+          "firstPlace": "故宫博物院",
+          "firstPlaceCityCode": "110000",
+          "sourceStatus": "ONLINE",
+          "fetchedAt": "2026-08-25T01:54:41.520155Z",
+          "priceFactStatus": "UNKNOWN",
+          "priceAmountCents": null
+        }
+      },
+      "walkingRoute": {
+        "request": {"cityCode": "110000", "mode": "WALKING"},
+        "response": {
+          "resultCityCode": "110000",
+          "distanceMeters": 2196,
+          "durationSeconds": 1757,
+          "sourceStatus": "ONLINE",
+          "fetchedAt": "2026-08-25T01:54:41.644295Z",
+          "priceFactStatus": "ONLINE",
+          "priceAmountCents": 0
+        }
+      }
+    },
+    {
+      "city": "上海",
+      "cityResolve": {
+        "request": {"cityName": "上海"},
+        "response": {
+          "cityCode": "310000",
+          "cityName": "上海市",
+          "sourceStatus": "ONLINE",
+          "fetchedAt": "2026-08-25T01:54:41.842631Z"
+        }
+      },
+      "poiSearch": {
+        "request": {"cityCode": "310000", "keywords": "上海博物馆"},
+        "response": {
+          "resultCityCode": "310000",
+          "returned": 10,
+          "firstPlace": "上海博物馆(人民广场馆)",
+          "firstPlaceCityCode": "310000",
+          "sourceStatus": "ONLINE",
+          "fetchedAt": "2026-08-25T01:54:45.225096Z",
+          "priceFactStatus": "UNKNOWN",
+          "priceAmountCents": null
+        }
+      },
+      "walkingRoute": {
+        "request": {"cityCode": "310000", "mode": "WALKING"},
+        "response": {
+          "resultCityCode": "310000",
+          "distanceMeters": 2389,
+          "durationSeconds": 1911,
+          "sourceStatus": "ONLINE",
+          "fetchedAt": "2026-08-25T01:54:46.333624Z",
+          "priceFactStatus": "ONLINE",
+          "priceAmountCents": 0
+        }
+      }
+    }
+  ]
+}

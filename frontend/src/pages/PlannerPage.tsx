@@ -19,6 +19,11 @@ import { useNavigate } from 'react-router-dom'
 import { tripApi } from '../api/tripApi'
 import { AppShell } from '../components/AppShell'
 import type { AssistanceMode } from '../domain/trip'
+import type {
+  TripDraftConfirmationItem,
+  TripDraftInput,
+  TripDraftParseInput,
+} from '../domain/trip'
 
 const assistanceOptions: Array<{
   value: AssistanceMode
@@ -39,6 +44,7 @@ export function PlannerPage() {
   const [assistanceMode, setAssistanceMode] = useState<AssistanceMode>('low-mobility')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  const [confirmationItems, setConfirmationItems] = useState<TripDraftConfirmationItem[]>([])
   const [cityName, setCityName] = useState('北京')
   const [travelDate, setTravelDate] = useState('2026-08-26')
   const [startTime, setStartTime] = useState('09:00')
@@ -60,13 +66,7 @@ export function PlannerPage() {
     [assistanceMode],
   )
 
-  const isFormValid =
-    cityName.trim().length > 0 &&
-    travelDate.length > 0 &&
-    startTime.length > 0 &&
-    endTime.length > 0 &&
-    Number(budget) > 0 &&
-    interests.length > 0
+  const canParse = request.trim().length > 0
 
   function toggleInterest(interest: string) {
     setInterests((current) =>
@@ -77,20 +77,24 @@ export function PlannerPage() {
   }
 
   async function handleSubmit() {
-    if (!isFormValid) {
-      setSubmitError('请完整填写城市、日期、时间、预算，并至少选择一个兴趣。')
+    if (!canParse) {
+      setSubmitError('请先输入自然语言行程需求。')
       return
     }
 
     setSubmitError('')
     setIsSubmitting(true)
     try {
-      const draft = {
-        cityName: cityName.trim(),
-        travelDate,
-        startTime,
-        endTime,
-        budgetCents: Math.round(Number(budget) * 100),
+      const budgetNumber = Number(budget)
+      const parseInput: TripDraftParseInput = {
+        schemaVersion: '1.0',
+        cityName: cityName.trim() || null,
+        travelDate: travelDate || null,
+        startTime: startTime || null,
+        endTime: endTime || null,
+        budgetCents: Number.isFinite(budgetNumber) && budgetNumber > 0
+          ? Math.round(budgetNumber * 100)
+          : null,
         interests,
         mustVisit: mustVisitInput.trim() ? [mustVisitInput.trim()] : [],
         avoidPlaces: avoidInput.trim() ? [avoidInput.trim()] : [],
@@ -102,8 +106,36 @@ export function PlannerPage() {
         },
         naturalLanguageRequest: request,
       }
-      const response = await tripApi.createDraft(draft)
-      navigate('/generating', { state: { tripId: response.data.tripId, draft } })
+      const response = await tripApi.createDraft(parseInput)
+      if (!response.data.canPlan || !response.data.trip) {
+        setConfirmationItems(response.data.confirmationItems)
+        setSubmitError('请根据确认清单补全或修正字段；确认完成前不会进入规划。')
+        setIsSubmitting(false)
+        return
+      }
+      const parsed = response.data.parsed
+      if (
+        !parsed.cityName || !parsed.travelDate || !parsed.startTime ||
+        !parsed.endTime || parsed.budgetCents === null
+      ) {
+        throw new Error('解析结果缺少生成统一 Trip 所需字段。')
+      }
+      const draft: TripDraftInput = {
+        ...parseInput,
+        cityName: parsed.cityName,
+        travelDate: parsed.travelDate,
+        startTime: parsed.startTime,
+        endTime: parsed.endTime,
+        budgetCents: parsed.budgetCents,
+        interests: parsed.interests,
+        mustVisit: parsed.mustVisit,
+        avoidPlaces: parsed.avoidPlaces,
+      }
+      const confirmed = await tripApi.confirmDraft(parseInput)
+      setConfirmationItems([])
+      navigate('/generating', {
+        state: { tripId: response.data.tripId, draft, trip: confirmed.data },
+      })
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : '创建行程失败，请稍后重试。')
       setIsSubmitting(false)
@@ -262,14 +294,43 @@ export function PlannerPage() {
             </div>
           )}
 
+          {confirmationItems.length > 0 && (
+            <section className="draft-confirmation motion-enter" aria-live="polite">
+              <div className="draft-confirmation__heading">
+                <span><Sparkles size={18} /></span>
+                <div>
+                  <strong>还有 {confirmationItems.length} 项需要你确认</strong>
+                  <p>直接在上方对应输入框修改，然后点击“重新解析并确认”。</p>
+                </div>
+              </div>
+              <ul>
+                {confirmationItems.map((item) => (
+                  <li key={`${item.path}-${item.code}`}>
+                    <div>
+                      <strong>{item.path}</strong>
+                      <span>{item.message}</span>
+                    </div>
+                    {item.candidates.length > 0 && (
+                      <small>可选：{item.candidates.join(' / ')}</small>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           <div className="planner-actions">
             <button className="button button--ghost" onClick={() => navigate('/')} type="button">
               <ChevronLeft size={18} /> 返回首页
             </button>
             <div className="planner-actions__submit">
               {submitError && <span className="form-error">{submitError}</span>}
-              <button className="button button--primary" disabled={isSubmitting || !isFormValid} onClick={handleSubmit} type="button">
-                {isSubmitting ? '正在理解需求…' : '确认并生成方案'}
+              <button className="button button--primary" disabled={isSubmitting || !canParse} onClick={handleSubmit} type="button">
+                {isSubmitting
+                  ? '正在理解需求…'
+                  : confirmationItems.length > 0
+                    ? '重新解析并确认'
+                    : '解析并确认后生成'}
                 {!isSubmitting && <ArrowRight size={18} />}
               </button>
             </div>
