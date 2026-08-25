@@ -1,4 +1,5 @@
 import json
+import shutil
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,7 @@ import pytest
 
 from app.core.errors import AppError
 from app.domain.models import CityContext, SourceStatus
+from app.infrastructure.cache import SqliteProviderCache
 from tests.conftest import build_service
 
 
@@ -298,3 +300,31 @@ async def test_cached_unknown_price_keeps_unknown_price_provenance(
         cached.places[0].priceReference.provenance.fetchedAt
         == cached.provenance.fetchedAt
     )
+
+
+def test_sqlite_provider_cache_closes_connections_before_directory_cleanup(
+    tmp_path,
+) -> None:
+    cache_root = tmp_path / "provider-cache"
+    cache = SqliteProviderCache(cache_root / "cache.sqlite3")
+    parameters = {"cityCode": "110000", "keywords": "城市博物馆"}
+    cache.put(
+        provider="AMAP",
+        operation="place_search",
+        city_code="110000",
+        parameters=parameters,
+        payload={"status": "1"},
+        ttl_seconds=60,
+    )
+
+    record = cache.get(
+        provider="AMAP",
+        operation="place_search",
+        city_code="110000",
+        parameters=parameters,
+    )
+
+    assert record is not None
+    assert record.payload == {"status": "1"}
+    shutil.rmtree(cache_root)
+    assert not cache_root.exists()
