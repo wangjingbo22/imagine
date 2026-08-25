@@ -1,3 +1,6 @@
+import json
+import sqlite3
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -7,20 +10,27 @@ from app.domain.models import CityContext, SourceStatus
 from tests.conftest import build_service
 
 
+CACHE_KEY_SNAPSHOT = (
+    Path(__file__).parent / "snapshots" / "s1_t006_cache_keys.json"
+)
+
+
 def place_payload(
     *,
     provider_city_code: str,
     ad_code: str,
     cost: str | list[Any] = "",
+    place_id: str | None = None,
+    name: str = "测试景点",
 ) -> dict[str, Any]:
     return {
         "status": "1",
         "count": "1",
         "pois": [
             {
-                "id": f"poi-{ad_code}",
-                "name": "测试景点",
-                "address": "测试路1号",
+                "id": place_id or f"poi-{ad_code}",
+                "name": name,
+                "address": "测试路 1 号",
                 "location": "116.397499,39.908722",
                 "citycode": provider_city_code,
                 "adcode": ad_code,
@@ -153,3 +163,76 @@ async def test_cross_city_provider_result_is_rejected(
         )
 
     assert captured.value.code == "CITY_CONTEXT_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_same_named_poi_cache_is_isolated_by_city_code_and_matches_key_snapshot(
+    tmp_path,
+    beijing: CityContext,
+    shanghai: CityContext,
+) -> None:
+    query = {
+        "keywords": "城市博物馆",
+        "types": [],
+        "page": 1,
+        "page_size": 20,
+    }
+    await build_service(
+        tmp_path,
+        SearchClient(
+            place_payload(
+                provider_city_code="010",
+                ad_code="110101",
+                place_id="same-name-beijing",
+                name="城市博物馆",
+            )
+        ),
+    ).search_places(beijing, **query)
+    await build_service(
+        tmp_path,
+        SearchClient(
+            place_payload(
+                provider_city_code="021",
+                ad_code="310101",
+                place_id="same-name-shanghai",
+                name="城市博物馆",
+            )
+        ),
+    ).search_places(shanghai, **query)
+
+    offline = build_service(
+        tmp_path,
+        SearchClient(error=AppError("PROVIDER_TIMEOUT", "timeout", 503, True)),
+    )
+    cached_beijing = await offline.search_places(beijing, **query)
+    cached_shanghai = await offline.search_places(shanghai, **query)
+
+    assert cached_beijing.provenance.sourceStatus is SourceStatus.VERIFIED_CACHE
+    assert cached_beijing.cityCode == "110000"
+    assert cached_beijing.places[0].placeId == "same-name-beijing"
+    assert cached_beijing.places[0].adCode == "110101"
+    assert cached_shanghai.provenance.sourceStatus is SourceStatus.VERIFIED_CACHE
+    assert cached_shanghai.cityCode == "310000"
+    assert cached_shanghai.places[0].placeId == "same-name-shanghai"
+    assert cached_shanghai.places[0].adCode == "310101"
+
+    with sqlite3.connect(tmp_path / "cache.sqlite3") as connection:
+        rows = connection.execute(
+            """
+            SELECT provider, operation, city_code, request_hash
+            FROM provider_cache
+            WHERE operation = 'place_search'
+            ORDER BY city_code
+            """
+        ).fetchall()
+    actual_snapshot = [
+        {
+            "provider": row[0],
+            "operation": row[1],
+            "cityCode": row[2],
+            "requestHash": row[3],
+        }
+        for row in rows
+    ]
+    expected_snapshot = json.loads(CACHE_KEY_SNAPSHOT.read_text(encoding="utf-8"))
+    assert actual_snapshot == expected_snapshot
