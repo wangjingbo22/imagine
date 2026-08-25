@@ -4,13 +4,14 @@
   "sprint": "Sprint 1",
   "scope": "DAY_2",
   "compatibilityBaseline": {
-    "teamMainCommit": "b5b6d9fc0f19c01ef56f5b6db2aa8f13bf82cbdf",
+    "teamMainCommit": "3b9321c39e794a3e1bcc782cb947219bff197c3d",
     "verifiedRemoteBranch": "origin/main",
     "verifiedAt": "2026-08-25"
   },
   "implementationCommit": "1837e288686aa30c215eb01ea97e21682fba0360",
-  "integratedMainCommit": "4538540cbbc7b0b93c24eb60b48d7c89eb2173a9",
-  "integrationAdaptationCommit": "85f6f63cf168d36d375a4a2585954c1e47ae8144",
+  "integratedMainCommit": "3b9321c39e794a3e1bcc782cb947219bff197c3d",
+  "latestMainMergeCommit": "9a7c290a3af2fe7a4afc9627090366fdc0150299",
+  "integrationAdaptationCommit": "d43442c8ada3c741ed43b629aec5b20a291cae07",
   "tasks": [
     {
       "taskId": "S1-T011",
@@ -34,11 +35,37 @@
         "backend/app/services/route_risk/evaluator.py",
         "backend/app/schemas/plan.py",
         "app/application/plan_service.py",
-        "app/infrastructure/plan_store.py"
+        "app/infrastructure/plan_store.py",
+        "app/api/trip_draft_routes.py",
+        "app/application/trip_draft_service.py",
+        "app/application/workflow_service.py",
+        "app/infrastructure/workflow_store.py",
+        "app/api/planning_routes.py",
+        "app/application/planning_boundary_service.py",
+        "app/infrastructure/trusted_planning_store.py",
+        "backend/app/schemas/planning.py",
+        "app/main.py",
+        "frontend/src/api/tripApi.ts",
+        "frontend/src/domain/trip.ts",
+        "frontend/src/pages/AgentProcessPage.tsx",
+        "frontend/src/pages/WorkspacePage.tsx",
+        "frontend/src/services/amapPlan.ts",
+        "frontend/src/services/assistanceConstraints.ts",
+        "frontend/src/services/candidateRequestBuilder.ts",
+        "frontend/src/services/planningFacts.ts",
+        "frontend/src/services/restClock.ts",
+        "frontend/src/services/routeRiskFacts.ts"
       ],
       "testFiles": [
         "backend/tests/test_candidate_planner.py",
-        "backend/tests/test_planning_replanning_integration.py"
+        "backend/tests/test_planning_replanning_integration.py",
+        "backend/tests/test_planning_http_boundaries.py",
+        "tests/test_trip_draft_parser.py",
+        "frontend/tests/assistanceConstraints.test.ts",
+        "frontend/tests/candidateRequestBuilder.test.ts",
+        "frontend/tests/planningFacts.test.ts",
+        "frontend/tests/restClock.test.ts",
+        "frontend/tests/routeRiskFacts.test.ts"
       ],
       "fixtures": [
         "backend/tests/fixtures/planning/golden_candidate_plan.json"
@@ -54,7 +81,12 @@
         "t010-facility-evidence-requires-four-unique-types-and-unknown-remains-needs-confirmation",
         "confirmed-t010-facility-fail-is-preserved-as-a-soft-plan-snapshot",
         "complete-pass-candidate-bridges-to-existing-v1-and-v2-plan-contracts",
-        "mutated-candidate-request-or-pass-snapshot-fails-closed"
+        "mutated-candidate-request-or-pass-snapshot-fails-closed",
+        "t004-confirmed-profile-and-authoritative-trip-are-required-before-t011",
+        "budget-time-endpoint-participant-and-preference-tampering-write-no-plan-or-trust-row",
+        "client-direct-plan-registration-is-forbidden",
+        "only-server-issued-canonical-digests-can-be-confirmed",
+        "confirmed-trip-return-endpoint-and-refresh-facts-survive-the-frontend-runtime"
       ]
     },
     {
@@ -76,12 +108,23 @@
         "app/application/workflow_service.py",
         "app/infrastructure/workflow_store.py",
         "app/application/plan_service.py",
-        "app/infrastructure/plan_store.py"
+        "app/infrastructure/plan_store.py",
+        "app/api/planning_routes.py",
+        "app/application/planning_boundary_service.py",
+        "app/infrastructure/trusted_planning_store.py",
+        "backend/app/schemas/planning.py",
+        "frontend/src/api/tripApi.ts",
+        "frontend/src/domain/trip.ts",
+        "frontend/src/pages/WorkspacePage.tsx",
+        "frontend/src/services/amapPlan.ts",
+        "frontend/src/services/replanPolicy.ts"
       ],
       "testFiles": [
         "backend/tests/test_minimum_disruption_replanning.py",
         "backend/tests/test_planning_replanning_integration.py",
-        "backend/tests/test_day2_duplicate_plan_registration.py"
+        "backend/tests/test_day2_duplicate_plan_registration.py",
+        "backend/tests/test_planning_http_boundaries.py",
+        "frontend/tests/replanPolicy.test.ts"
       ],
       "fixtures": [
         "backend/tests/snapshots/t018_no_feasible.json"
@@ -97,7 +140,11 @@
         "selected-v2-registers-in-real-sqlite-as-proposed-and-enters-replan-review",
         "t013-rejects-duplicate-selected-v2-registration-atomically",
         "no-feasible-result-reports-rule-ids-and-actionable-relaxations",
-        "missing-trusted-facts-tampering-and-forged-pass-snapshots-fail-closed"
+        "missing-trusted-facts-tampering-and-forged-pass-snapshots-fail-closed",
+        "runtime-replans-endpoint-runs-t011-and-t018-before-registering-only-the-selected-v2",
+        "current-v1-must-have-a-matching-issued-digest-before-it-can-parent-v2",
+        "client-direct-v2-registration-and-unissued-lineage-are-forbidden",
+        "sprint-one-second-replan-is-blocked-after-a-v2-decision"
       ]
     },
     {
@@ -121,6 +168,9 @@
         "app/application/plan_service.py",
         "app/infrastructure/plan_store.py",
         "app/api/plan_routes.py",
+        "app/api/planning_routes.py",
+        "app/application/planning_boundary_service.py",
+        "app/infrastructure/trusted_planning_store.py",
         "app/main.py"
       ],
       "testFiles": [
@@ -128,7 +178,8 @@
       ],
       "testSupportFiles": [
         "tests/test_plan_versions.py",
-        "tests/test_plan_v2_diff.py"
+        "tests/test_plan_v2_diff.py",
+        "backend/tests/test_planning_http_boundaries.py"
       ],
       "fixtures": [
         "backend/tests/fixtures/summary_paths/no_v2.json",
@@ -141,7 +192,8 @@
         "event-task-id-must-belong-to-its-referenced-plan-version",
         "accepted-v2-expenses-retain-cross-version-lineage",
         "tampered-summary-or-event-lineage-fails-closed",
-        "all-three-acceptance-paths-contain-no-photo-field"
+        "all-three-acceptance-paths-contain-no-photo-field",
+        "all-summary-paths-enter-through-server-issued-v1-and-v2-boundaries"
       ]
     }
   ],
@@ -158,7 +210,14 @@
       ],
       "testFiles": [
         "backend/tests/test_candidate_planner.py",
-        "backend/tests/test_planning_replanning_integration.py"
+        "backend/tests/test_planning_replanning_integration.py",
+        "backend/tests/test_planning_http_boundaries.py",
+        "tests/test_trip_draft_parser.py",
+        "frontend/tests/assistanceConstraints.test.ts",
+        "frontend/tests/candidateRequestBuilder.test.ts",
+        "frontend/tests/planningFacts.test.ts",
+        "frontend/tests/restClock.test.ts",
+        "frontend/tests/routeRiskFacts.test.ts"
       ],
       "fixtureFiles": [
         "backend/tests/fixtures/planning/golden_candidate_plan.json"
@@ -178,7 +237,9 @@
       "testFiles": [
         "backend/tests/test_minimum_disruption_replanning.py",
         "backend/tests/test_planning_replanning_integration.py",
-        "backend/tests/test_day2_duplicate_plan_registration.py"
+        "backend/tests/test_day2_duplicate_plan_registration.py",
+        "backend/tests/test_planning_http_boundaries.py",
+        "frontend/tests/replanPolicy.test.ts"
       ],
       "fixtureFiles": [
         "backend/tests/snapshots/t018_no_feasible.json"
@@ -208,6 +269,47 @@
   ],
   "crossTaskLinkages": [
     {
+      "sourceTaskId": "S1-T002",
+      "targetTaskId": "S1-T011",
+      "contract": "CreateSingleDayTrip authoritative snapshot",
+      "behavior": "draft confirmation persists one canonical Trip; V1 planning may change only status from DRAFT to PLANNING and rejects any participant, preference, budget, time-window or endpoint drift before T011 or persistence",
+      "sourceFiles": [
+        "app/api/trip_draft_routes.py",
+        "app/application/trip_draft_service.py"
+      ],
+      "consumerFiles": [
+        "app/application/workflow_service.py",
+        "app/infrastructure/workflow_store.py",
+        "app/application/planning_boundary_service.py",
+        "frontend/src/services/candidateRequestBuilder.ts"
+      ],
+      "testFiles": [
+        "tests/test_trip_draft_parser.py",
+        "backend/tests/test_planning_http_boundaries.py",
+        "frontend/tests/candidateRequestBuilder.test.ts"
+      ]
+    },
+    {
+      "sourceTaskId": "S1-T004",
+      "targetTaskId": "S1-T011",
+      "contract": "ConstraintProfileState.CONSTRAINT_CONFIRMED",
+      "behavior": "a saved and confirmed AssistanceProfile must exactly match the canonical Trip profile before T011 compilation, trust staging or PlanVersion registration",
+      "sourceFiles": [
+        "app/api/workflow_routes.py",
+        "app/application/workflow_service.py",
+        "app/infrastructure/workflow_store.py"
+      ],
+      "consumerFiles": [
+        "app/application/planning_boundary_service.py",
+        "backend/app/services/planning/planner.py"
+      ],
+      "testFiles": [
+        "backend/tests/test_planning_http_boundaries.py",
+        "tests/test_trip_draft_parser.py",
+        "frontend/tests/assistanceConstraints.test.ts"
+      ]
+    },
+    {
       "sourceTaskId": "S1-T010",
       "targetTaskId": "S1-T011",
       "contract": "Route.facilityEvidence",
@@ -223,7 +325,8 @@
       ],
       "testFiles": [
         "tests/test_t010_facility_evidence.py",
-        "backend/tests/test_candidate_planner.py"
+        "backend/tests/test_candidate_planner.py",
+        "frontend/tests/routeRiskFacts.test.ts"
       ]
     },
     {
@@ -240,7 +343,8 @@
       ],
       "testFiles": [
         "tests/test_plan_versions.py",
-        "backend/tests/test_day2_duplicate_plan_registration.py"
+        "backend/tests/test_day2_duplicate_plan_registration.py",
+        "backend/tests/test_planning_http_boundaries.py"
       ]
     },
     {
@@ -258,7 +362,8 @@
       ],
       "testFiles": [
         "tests/test_execution_expenses.py",
-        "backend/tests/test_planning_replanning_integration.py"
+        "backend/tests/test_planning_replanning_integration.py",
+        "backend/tests/test_planning_http_boundaries.py"
       ]
     }
   ],
@@ -268,7 +373,13 @@
       "implementedByThisDelivery": false,
       "port": "ReplanCandidateSource",
       "definedIn": "backend/app/services/replanning/selector.py",
-      "evidence": "backend/tests/test_minimum_disruption_replanning.py"
+      "runtimeCandidateSupplier": "frontend/src/services/amapPlan.ts",
+      "runtimeBoundary": "POST /api/v1/trips/{tripId}/replans",
+      "evidence": [
+        "backend/tests/test_minimum_disruption_replanning.py",
+        "backend/tests/test_planning_http_boundaries.py",
+        "frontend/tests/candidateRequestBuilder.test.ts"
+      ]
     },
     "S1-T019": {
       "status": "EXISTING_MAIN_CONSUMER_VERIFIED",
@@ -285,11 +396,12 @@
   },
   "traceabilityTest": "backend/tests/test_day2_traceability.py",
   "localVerification": {
-    "status": "VERIFIED_AFTER_MAIN_INTEGRATION",
+    "status": "VERIFIED_AFTER_LATEST_MAIN_TRUSTED_RUNTIME_INTEGRATION",
     "backendCommand": "python -B -m pytest -p no:cacheprovider -q",
-    "backendResult": "239 passed in 4.13s",
-    "focusedCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_candidate_planner.py backend/tests/test_minimum_disruption_replanning.py backend/tests/test_planning_replanning_integration.py backend/tests/test_s1_t022_summary_paths.py",
-    "focusedResult": "40 passed in 1.30s",
+    "backendResult": "261 passed in 4.54s",
+    "focusedCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_candidate_planner.py backend/tests/test_minimum_disruption_replanning.py backend/tests/test_planning_replanning_integration.py backend/tests/test_planning_http_boundaries.py backend/tests/test_s1_t022_summary_paths.py tests/test_trip_draft_parser.py tests/test_execution_expenses.py",
+    "focusedResult": "76 passed in 2.75s",
+    "frontendTest": "npm test: 16 passed",
     "frontendBuild": "npm run build passed",
     "frontendLint": "npm run lint passed"
   },
