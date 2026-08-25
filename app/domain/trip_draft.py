@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, alias_generators
 
@@ -25,6 +26,7 @@ class DraftAssistanceInput(DraftContractModel):
 
 class TripDraftParseRequest(DraftContractModel):
     schema_version: Literal["1.0"] = "1.0"
+    trip_id: UUID | None = None
     natural_language_request: str = Field(min_length=1, max_length=1000)
     reference_date: date | None = None
     city_name: str | None = None

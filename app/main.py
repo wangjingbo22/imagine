@@ -10,15 +10,18 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from app.api.routes import router
 from app.api.plan_routes import router as plan_router
 from app.api.trip_draft_routes import router as trip_draft_router
+from app.api.workflow_routes import router as workflow_router
 from app.application.amap_service import AmapLocationService
 from app.application.plan_service import PlanVersionService
 from app.application.trip_draft_service import TripDraftParserService
+from app.application.workflow_service import WorkflowService
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.domain.models import ErrorResponse
 from app.infrastructure.amap import AmapClient
 from app.infrastructure.cache import SqliteProviderCache
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
+from app.infrastructure.workflow_store import SqliteWorkflowRepository
 from app.schemas.validation_error import TripSchemaError, issues_from_pydantic
 
 
@@ -108,6 +111,7 @@ def create_app(
     settings: Settings | None = None,
     service: AmapLocationService | None = None,
     plan_service: PlanVersionService | None = None,
+    workflow_service: WorkflowService | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     managed_client: AmapClient | None = None
@@ -125,9 +129,15 @@ def create_app(
             route_ttl_seconds=resolved_settings.amap_route_cache_ttl_seconds,
         )
 
+    if workflow_service is None:
+        workflow_service = WorkflowService(
+            SqliteWorkflowRepository(resolved_settings.plan_version_db_path)
+        )
+
     if plan_service is None:
         plan_service = PlanVersionService(
-            SqlitePlanVersionRepository(resolved_settings.plan_version_db_path)
+            SqlitePlanVersionRepository(resolved_settings.plan_version_db_path),
+            workflow_service=workflow_service,
         )
 
     @asynccontextmanager
@@ -155,17 +165,23 @@ def create_app(
     )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=resolved_settings.cors_origins,
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type"],
     )
     app.state.location_service = service
     app.state.trip_draft_service = TripDraftParserService(service)
     app.state.plan_version_service = plan_service
+    app.state.workflow_service = workflow_service
     app.include_router(router)
     app.include_router(plan_router)
     app.include_router(trip_draft_router)
+    app.include_router(workflow_router)
+
+    @app.get("/health", tags=["系统"], summary="健康检查")
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
 
     @app.get("/docs", include_in_schema=False)
     async def chinese_api_docs() -> HTMLResponse:

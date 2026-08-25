@@ -175,7 +175,9 @@ S1-T003 已支持四类正式值：
 ```text
 用户表单
   -> TripDraftInput
-  -> 自然语言/城市解析（后端尚未登记）
+  -> POST /api/v1/trips/drafts/parse
+  -> 歧义确认清单
+  -> POST /api/v1/trips/drafts/confirm
   -> 获得 CityContext、UUID、起终点
   -> buildCreateSingleDayTrip()
   -> CreateSingleDayTrip
@@ -239,14 +241,13 @@ src/api/tripContract.ts
 
 ## 7. HTTP 路由状态
 
-后端当前尚未在本分支实现或登记 Trip 创建 HTTP URL。
+已登记：
 
-因此：
+- `tripApi.createDraft()` → `POST /api/v1/trips/drafts/parse`
+- `tripApi.confirmDraft()` → `POST /api/v1/trips/drafts/confirm`
 
-- `tripApi.createDraft()` 仅允许 Mock 模式
-- 关闭 Mock 后调用会抛出 `TRIP_DRAFT_ENDPOINT_UNREGISTERED`
-- `tripApi.submitNormalizedTrip(path, payload)` 只用于后端负责人确认 URL 后接入
-- 不应再默认使用 `/api/v1/trips/drafts`
+请求携带稳定 `tripId`，解析、约束确认和后续 PlanVersion 使用同一 Trip。
+确认清单未清空时 `canPlan=false`，页面不得进入规划。
 
 ## 8. 城市 Provider 与 Plan V1 正式接口
 

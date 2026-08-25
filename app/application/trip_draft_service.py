@@ -122,7 +122,7 @@ class TripDraftParserService:
             must_visit=must_visit,
             avoid_places=avoid_places,
         )
-        trip_uuid = uuid4()
+        trip_uuid = request.trip_id or uuid4()
         trip_id = str(trip_uuid)
         if items:
             return TripDraftParseResult(

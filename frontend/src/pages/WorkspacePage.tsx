@@ -32,7 +32,7 @@ import {
   Wallet,
   X,
 } from 'lucide-react'
-import { type ChangeEvent, useEffect, useState } from 'react'
+import { type ChangeEvent, useCallback, useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { tripApi, USE_PLAN_VERSION_API } from '../api/tripApi'
@@ -40,6 +40,7 @@ import { buildCreateSingleDayTrip } from '../api/tripContract'
 import { AppShell } from '../components/AppShell'
 import type {
   CityResolution,
+  ExecutionEvent,
   Place,
   PlanSnapshot,
   PlanVersionDiff,
@@ -50,6 +51,8 @@ import type {
   SourceStatus,
   StoredPlanVersion,
   TripDraftInput,
+  TripPlanState,
+  TripSummary,
 } from '../domain/trip'
 import { mockPlanV1 } from '../mocks/trip'
 
@@ -199,6 +202,7 @@ export function WorkspacePage() {
   const tripId =
     new URLSearchParams(location.search).get('tripId') ?? navigationState?.tripId ?? null
   const [view, setView] = useState<WorkspaceView>('plan')
+  const [summary, setSummary] = useState<TripSummary | null>(null)
   const [restoredPlan, setRestoredPlan] = useState<PlanSnapshot | null>(null)
   const [storedCurrentPlan, setStoredCurrentPlan] = useState<StoredPlanVersion | null>(null)
   const [candidatePlanV2, setCandidatePlanV2] = useState<StoredPlanVersion | null>(null)
@@ -207,13 +211,14 @@ export function WorkspacePage() {
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
   const [isPreparingV2, setIsPreparingV2] = useState(false)
   const [isDecidingV2, setIsDecidingV2] = useState(false)
+  const [isWritingEvent, setIsWritingEvent] = useState(false)
   const [advanceAfterDecision, setAdvanceAfterDecision] = useState(false)
   const [planLifecycleError, setPlanLifecycleError] = useState('')
-  const [actualCost, setActualCost] = useState('188')
-  const [currentTaskIndex, setCurrentTaskIndex] = useState(1)
-  const [completedTaskIds, setCompletedTaskIds] = useState<string[]>(['task-1'])
+  const [actualCost, setActualCost] = useState('0')
+  const [currentTaskIndex, setCurrentTaskIndex] = useState(0)
+  const [completedTaskIds, setCompletedTaskIds] = useState<string[]>([])
   const [skippedTaskIds, setSkippedTaskIds] = useState<string[]>([])
-  const [actualSpentCents, setActualSpentCents] = useState(600)
+  const [actualSpentCents, setActualSpentCents] = useState(0)
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false)
   const [recommendationFeedback, setRecommendationFeedback] = useState('')
   const [selectedFeedbackOptions, setSelectedFeedbackOptions] = useState<string[]>([])
@@ -231,6 +236,44 @@ export function WorkspacePage() {
     Boolean(tripId && draft),
   )
   const [locationEvidenceError, setLocationEvidenceError] = useState('')
+
+  const applyTripState = useCallback((state: TripPlanState) => {
+    const current = state.currentPlan
+    if (current) {
+      const display = toDisplayPlan(current)
+      setStoredCurrentPlan(current)
+      setRestoredPlan(display)
+      setPersistedPlanId(current.planId)
+      const completed = state.events
+        .filter((event) => event.eventType === 'COMPLETE')
+        .map((event) => event.taskId)
+      const skipped = state.events
+        .filter((event) => event.eventType === 'SKIP')
+        .map((event) => event.taskId)
+      const terminal = new Set([...completed, ...skipped])
+      const unfinishedIndex = display.tasks.findIndex(
+        (task) => !terminal.has(task.id),
+      )
+      const nextIndex =
+        unfinishedIndex < 0 ? Math.max(0, display.tasks.length - 1) : unfinishedIndex
+      setCompletedTaskIds([...new Set(completed)])
+      setSkippedTaskIds([...new Set(skipped)])
+      setActualSpentCents(
+        state.events
+          .filter((event) => event.eventType === 'EXPENSE')
+          .reduce((total, event) => total + (event.amountCents ?? 0), 0),
+      )
+      setCurrentTaskIndex(nextIndex)
+      const nextTask = unfinishedIndex < 0 ? null : display.tasks[nextIndex]
+      if (nextTask) {
+        setActualCost(String(nextTask.costCents / 100))
+      }
+    }
+    if (state.tripStatus === 'COMPLETED') {
+      setView('summary')
+    }
+  }, [])
+
   useEffect(() => {
     if (!USE_PLAN_VERSION_API || !tripId) {
       return
@@ -246,8 +289,7 @@ export function WorkspacePage() {
         setPersistedPlanId(stored.planId)
       }
       if (current) {
-        setStoredCurrentPlan(current)
-        setPersistedPlanId(current.planId)
+        applyTripState(response.data)
       }
       if (candidate) {
         setCandidatePlanV2(candidate)
@@ -271,7 +313,26 @@ export function WorkspacePage() {
     return () => {
       cancelled = true
     }
-  }, [tripId])
+  }, [applyTripState, tripId])
+
+  useEffect(() => {
+    if (view !== 'summary' || !tripId) {
+      return
+    }
+    let cancelled = false
+    void tripApi.getSummary(tripId).then((response) => {
+      if (!cancelled) {
+        setSummary(response.data)
+      }
+    }).catch((error: unknown) => {
+      if (!cancelled) {
+        setPlanLifecycleError(error instanceof Error ? error.message : '加载总结失败')
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [tripId, view])
 
   useEffect(() => {
     if (!tripId || !draft) {
@@ -468,6 +529,39 @@ export function WorkspacePage() {
     }, 1200)
   }
 
+  async function recordExecutionEvent(
+    planId: string,
+    taskId: string,
+    eventType: ExecutionEvent['eventType'],
+    amountCents: number | null = null,
+  ) {
+    if (!tripId) {
+      throw new Error('当前页面缺少 tripId。')
+    }
+    const amountSuffix = eventType === 'EXPENSE' ? `:${amountCents ?? 0}` : ''
+    await tripApi.createExecutionEvent(tripId, {
+      taskId,
+      planVersionId: planId,
+      eventType,
+      amountCents,
+      idempotencyKey: `${planId}:${taskId}:${eventType}${amountSuffix}`,
+    })
+    const restored = await tripApi.getTrip(tripId)
+    applyTripState(restored.data)
+    return restored.data
+  }
+
+  async function startTask(
+    plan: StoredPlanVersion,
+    taskIndex: number,
+  ) {
+    const task = plan.days[0].tasks[taskIndex]
+    if (!task) {
+      return
+    }
+    await recordExecutionEvent(plan.planId, task.taskId, 'START')
+  }
+
   async function handleAcceptPlan() {
     if (!tripId) {
       setPlanLifecycleError('当前页面缺少 tripId，请从“新建行程”重新进入。')
@@ -589,9 +683,8 @@ export function WorkspacePage() {
       await tripApi.startExecution(tripId)
       const restored = await tripApi.getTrip(tripId)
       if (restored.data.currentPlan) {
-        setStoredCurrentPlan(restored.data.currentPlan)
-        setRestoredPlan(toDisplayPlan(restored.data.currentPlan))
-        setPersistedPlanId(restored.data.currentPlan.planId)
+        applyTripState(restored.data)
+        await startTask(restored.data.currentPlan, 0)
       }
       setView('execute')
     } catch (error) {
@@ -711,9 +804,7 @@ export function WorkspacePage() {
         throw new Error('决策完成后未找到 CURRENT 版本。')
       }
       const nextDisplayPlan = toDisplayPlan(restored.data.currentPlan)
-      setStoredCurrentPlan(restored.data.currentPlan)
-      setRestoredPlan(nextDisplayPlan)
-      setPersistedPlanId(restored.data.currentPlan.planId)
+      applyTripState(restored.data)
       setCandidatePlanV2(null)
       setPlanDiff(null)
       setExecutionNotice(
@@ -731,8 +822,7 @@ export function WorkspacePage() {
         if (!next) {
           setView('summary')
         } else {
-          setCurrentTaskIndex(nextIndex)
-          setActualCost(String(next.costCents / 100))
+          await startTask(restored.data.currentPlan, nextIndex)
           setView('execute')
         }
       } else {
@@ -745,56 +835,71 @@ export function WorkspacePage() {
     }
   }
 
-  function moveToNextTask() {
-    const nextIndex = currentTaskIndex + 1
-    const task = activePlan.tasks[nextIndex]
-    if (!task) {
-      setView('summary')
+  async function handleSkipTask() {
+    if (!currentTask || !storedCurrentPlan) {
       return
     }
-    setCurrentTaskIndex(nextIndex)
-    setActualCost(String(task.costCents / 100))
-    setView('execute')
-  }
-
-  function handleSkipTask() {
-    if (!currentTask) {
-      return
+    setIsWritingEvent(true)
+    setPlanLifecycleError('')
+    try {
+      await recordExecutionEvent(
+        storedCurrentPlan.planId,
+        currentTask.id,
+        'SKIP',
+      )
+      const nextIndex = currentTaskIndex + 1
+      if (storedCurrentPlan.days[0].tasks[nextIndex]) {
+        await startTask(storedCurrentPlan, nextIndex)
+        setView('execute')
+      }
+    } catch (error) {
+      setPlanLifecycleError(error instanceof Error ? error.message : '跳过任务失败')
+    } finally {
+      setIsWritingEvent(false)
     }
-    setSkippedTaskIds((current) =>
-      current.includes(currentTask.id) ? current : [...current, currentTask.id],
-    )
-    moveToNextTask()
   }
 
   async function handleCompleteTask() {
-    if (!currentTask) {
+    if (!currentTask || !storedCurrentPlan) {
       return
     }
-    setCompletedTaskIds((current) =>
-      current.includes(currentTask.id) ? current : [...current, currentTask.id],
-    )
-    setActualSpentCents((current) => current + actualExpenseCents)
-    if (
-      expenseDeltaCents !== 0 &&
-      currentTaskIndex < activePlan.tasks.length - 1 &&
-      USE_PLAN_VERSION_API &&
-      storedCurrentPlan
-    ) {
-      setIsPreparingV2(true)
-      setAdvanceAfterDecision(true)
-      setPlanLifecycleError('')
-      try {
+    setIsWritingEvent(true)
+    setPlanLifecycleError('')
+    try {
+      await recordExecutionEvent(
+        storedCurrentPlan.planId,
+        currentTask.id,
+        'EXPENSE',
+        actualExpenseCents,
+      )
+      await recordExecutionEvent(
+        storedCurrentPlan.planId,
+        currentTask.id,
+        'COMPLETE',
+      )
+      if (
+        expenseDeltaCents !== 0 &&
+        currentTaskIndex < activePlan.tasks.length - 1 &&
+        USE_PLAN_VERSION_API
+      ) {
+        setIsPreparingV2(true)
+        setAdvanceAfterDecision(true)
         await preparePlanV2('EXPENSE_CHANGE', expenseDifferenceLabel, currentTaskIndex)
-      } catch (error) {
-        setAdvanceAfterDecision(false)
-        setPlanLifecycleError(error instanceof Error ? error.message : '生成 Plan V2 失败')
-      } finally {
         setIsPreparingV2(false)
+        return
       }
-      return
+      const nextIndex = currentTaskIndex + 1
+      if (storedCurrentPlan.days[0].tasks[nextIndex]) {
+        await startTask(storedCurrentPlan, nextIndex)
+        setView('execute')
+      }
+    } catch (error) {
+      setAdvanceAfterDecision(false)
+      setIsPreparingV2(false)
+      setPlanLifecycleError(error instanceof Error ? error.message : '完成任务失败')
+    } finally {
+      setIsWritingEvent(false)
     }
-    moveToNextTask()
   }
 
   async function handleExecutionFeedback() {
@@ -877,7 +982,7 @@ export function WorkspacePage() {
           : `<figure><video controls src="${asset.dataUrl}"></video><figcaption>${escapeHtml(asset.name)}</figcaption></figure>`,
         ).join('')
       : '<p>本次旅行没有保存照片或视频。</p>'
-    const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>行知旅伴旅行总结</title><style>body{font-family:system-ui,sans-serif;max-width:960px;margin:40px auto;padding:0 24px;color:#172033}h1{font-size:36px}section{margin-top:32px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border-bottom:1px solid #e5eaf1;text-align:left}.media{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.media img,.media video{width:100%;max-height:360px;object-fit:cover;border-radius:12px}figcaption{margin-top:6px;color:#667085;font-size:12px}</style></head><body><h1>${escapeHtml(draft?.cityName ?? '北京')}旅行总结</h1><p>完成 ${completedTaskIds.length}/${activePlan.tasks.length} 个任务，跳过 ${skippedTaskIds.length} 个任务，实际花费 ${formatMoney(actualSpentCents)}。</p><section><h2>实际行程</h2><table><thead><tr><th>#</th><th>地点</th><th>时间</th><th>状态</th></tr></thead><tbody>${taskRows}</tbody></table></section><section><h2>旅行影像</h2><div class="media">${mediaHtml}</div></section></body></html>`
+    const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>行知旅伴旅行总结</title><style>body{font-family:system-ui,sans-serif;max-width:960px;margin:40px auto;padding:0 24px;color:#172033}h1{font-size:36px}section{margin-top:32px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border-bottom:1px solid #e5eaf1;text-align:left}.media{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.media img,.media video{width:100%;max-height:360px;object-fit:cover;border-radius:12px}figcaption{margin-top:6px;color:#667085;font-size:12px}</style></head><body><h1>${escapeHtml(draft?.cityName ?? '北京')}旅行总结</h1><p>完成 ${summary?.completedTaskIds.length ?? completedTaskIds.length}/${summary?.totalTasks ?? activePlan.tasks.length} 个任务，跳过 ${summary?.skippedTaskIds.length ?? skippedTaskIds.length} 个任务，实际花费 ${formatMoney(summary?.actualCostCents ?? actualSpentCents)}。</p><section><h2>实际行程</h2><table><thead><tr><th>#</th><th>地点</th><th>时间</th><th>状态</th></tr></thead><tbody>${taskRows}</tbody></table></section><section><h2>旅行影像</h2><div class="media">${mediaHtml}</div></section></body></html>`
     const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }))
     const anchor = document.createElement('a')
     anchor.href = url
@@ -1297,9 +1402,23 @@ export function WorkspacePage() {
                   <div><strong>{expenseDifferenceLabel}</strong><small>提交后 Agent 将检查剩余路线是否仍满足预算和关怀约束。</small></div>
                 </div>
                 <div className="execution-form-actions">
-                  <button className="button button--ghost" disabled={isPreparingV2} onClick={handleSkipTask} type="button">跳过此任务</button>
-                  <button className="button button--primary" disabled={isPreparingV2} onClick={() => void handleCompleteTask()} type="button">
-                    {isPreparingV2
+                  <button
+                    className="button button--ghost"
+                    disabled={isPreparingV2 || isWritingEvent}
+                    onClick={() => void handleSkipTask()}
+                    type="button"
+                  >
+                    {isWritingEvent ? '正在保存…' : '跳过此任务'}
+                  </button>
+                  <button
+                    className="button button--primary"
+                    disabled={isPreparingV2 || isWritingEvent}
+                    onClick={() => void handleCompleteTask()}
+                    type="button"
+                  >
+                    {isWritingEvent
+                      ? '正在保存事件…'
+                      : isPreparingV2
                       ? '正在生成 Plan V2…'
                       : currentTaskIndex === activePlan.tasks.length - 1
                       ? '完成行程并查看总结'
@@ -1370,10 +1489,10 @@ export function WorkspacePage() {
               <p>行程已经结束。每一次完成、跳过、反馈和拍摄记录都已保存在这份总结中。</p>
             </div>
             <div className="summary-metrics">
-              <article><span>任务完成</span><strong>{completedTaskIds.length}<small>/{activePlan.tasks.length}</small></strong><i style={{ width: `${(completedTaskIds.length / activePlan.tasks.length) * 100}%` }} /></article>
-              <article><span>实际花费</span><strong>{formatMoney(actualSpentCents)}</strong><small>计划 {formatMoney(activePlan.totalCostCents)} · {actualSpentCents >= activePlan.totalCostCents ? '+' : '-'}{formatMoney(Math.abs(actualSpentCents - activePlan.totalCostCents))}</small></article>
+              <article><span>任务完成</span><strong>{summary?.completedTaskIds.length ?? completedTaskIds.length}<small>/{summary?.totalTasks ?? activePlan.tasks.length}</small></strong><i style={{ width: `${((summary?.completedTaskIds.length ?? completedTaskIds.length) / (summary?.totalTasks ?? activePlan.tasks.length)) * 100}%` }} /></article>
+              <article><span>实际花费</span><strong>{formatMoney(summary?.actualCostCents ?? actualSpentCents)}</strong><small>计划 {formatMoney(summary?.plannedCostCents ?? activePlan.totalCostCents)} · {(summary?.differenceCents ?? (actualSpentCents - activePlan.totalCostCents)) >= 0 ? '+' : '-'}{formatMoney(Math.abs(summary?.differenceCents ?? (actualSpentCents - activePlan.totalCostCents)))}</small></article>
               <article><span>关怀满足率</span><strong>100<small>%</small></strong><small>4 项硬约束全部满足</small></article>
-              <article><span>Agent 调整</span><strong>{executionAdjustmentCount}<small>次</small></strong><small>根据实际消费与途中反馈更新</small></article>
+              <article><span>最终版本</span><strong>V{summary?.currentPlanVersion ?? storedCurrentPlan?.version ?? 1}</strong><small>{summary ? `${summary.planHistory.length} 个版本可追溯` : `${executionAdjustmentCount} 次调整`}</small></article>
             </div>
             <div className="memory-route">
               <div className="panel-heading"><div><span className="section-kicker">ACTUAL TIMELINE</span><h2>实际旅程</h2></div><Route size={22} /></div>
@@ -1387,6 +1506,20 @@ export function WorkspacePage() {
                 </div>
               ))}
             </div>
+            {summary && (
+              <div className="summary-history">
+                <div className="panel-heading">
+                  <div><span className="section-kicker">PLAN HISTORY</span><h2>版本变化</h2></div>
+                </div>
+                {summary.planHistory.map((item) => (
+                  <div className="summary-history__row" key={item.planId}>
+                    <span>Plan V{item.version}</span>
+                    <strong>{item.status}</strong>
+                    <small>{item.reason}</small>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="summary-media">
               <div className="panel-heading">
                 <div><span className="section-kicker">TRAVEL MEDIA</span><h2>旅行影像</h2></div>

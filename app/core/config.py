@@ -19,6 +19,17 @@ class Settings(BaseSettings):
     amap_place_cache_ttl_seconds: int = Field(default=86_400, ge=60)
     amap_route_cache_ttl_seconds: int = Field(default=1_800, ge=60)
     plan_version_db_path: Path = Path("data/plan_versions.sqlite3")
+    cors_allowed_origins: str = (
+        "http://localhost:5173,http://127.0.0.1:5173"
+    )
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [
+            origin.strip()
+            for origin in self.cors_allowed_origins.split(",")
+            if origin.strip()
+        ]
 
 
 @lru_cache

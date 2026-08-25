@@ -329,13 +329,14 @@ VITE_API_BASE_URL=http://localhost:8000
 VITE_USE_MOCK_API=false
 ```
 
-目前自然语言草稿接口尚未登记。关闭 Mock 后调用 `tripApi.createDraft()` 会显式抛出：
+自然语言草稿已接入真实接口：
 
 ```text
-TRIP_DRAFT_ENDPOINT_UNREGISTERED
+POST /api/v1/trips/drafts/parse
+POST /api/v1/trips/drafts/confirm
 ```
 
-这是为了避免前端调用未经后端确认的 URL。
+缺失或歧义字段会显示逐项确认清单；清单未解决时不能进入规划。
 
 ## 11. 权威 Trip Schema
 
@@ -596,7 +597,8 @@ src/api/tripApi.ts
 
 | 方法 | 当前状态 |
 | --- | --- |
-| `createDraft()` | Mock 可用，真实 URL 未登记 |
+| `createDraft()` | 真实解析接口 |
+| `confirmDraft()` | 真实确认接口 |
 | `submitNormalizedTrip()` | 后端确认 URL 后可提交正式 Trip |
 | `generatePlan()` | Mock 可用，真实 URL 待确认 |
 | `confirmConstraints()` | Mock 可用，真实 URL 待确认 |
@@ -607,6 +609,26 @@ src/api/tripApi.ts
 | `createExecutionEvent()` | Mock 可用，真实 URL 待确认 |
 | `updatePlan()` | Mock 可用，真实 URL 待确认 |
 | `getSummary()` | Mock 可用，真实 URL 待确认 |
+
+当前 Sprint 1 已新增真实工作流接口：
+
+```text
+PUT  /api/v1/trips/{tripId}/constraints
+POST /api/v1/trips/{tripId}/constraints/confirm
+GET  /api/v1/trips/{tripId}/constraints
+POST /api/v1/trips/{tripId}/events
+GET  /api/v1/trips/{tripId}/events
+GET  /api/v1/trips/{tripId}/summary
+```
+
+启用：
+
+```env
+VITE_USE_PLAN_VERSION_API=true
+VITE_USE_WORKFLOW_API=true
+```
+
+执行页面的完成、跳过和消费操作会写入真实事件；刷新后从事件流恢复。
 
 接口详细说明见：
 
@@ -690,7 +712,7 @@ python3 -m pytest backend/tests/test_trip_schema.py
 
 - 当前只实现单人单日页面流程
 - 多人入口尚未开放
-- 正式 HTTP URL 尚未登记
+- 媒体对象存储等 Sprint 2 URL 尚未登记
 - T007 编译器与正式计划/执行 HTTP 接口尚未接入前端
 - 页面刷新后 Mock 执行状态会重置
 - Mock 素材刷新后会丢失
