@@ -83,13 +83,19 @@ async def test_city_code_enters_provider_request_and_unknown_price_is_not_zero(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("cost", "expected_cents"),
+    [("0", 0), ("12.30", 1230), ("1e20", 10**22)],
+)
 async def test_price_reference_is_normalized_to_integer_cents(
     tmp_path,
     beijing: CityContext,
+    cost: str,
+    expected_cents: int,
 ) -> None:
     service = build_service(
         tmp_path,
-        SearchClient(place_payload(provider_city_code="010", ad_code="110101", cost="12.30")),
+        SearchClient(place_payload(provider_city_code="010", ad_code="110101", cost=cost)),
     )
 
     result = await service.search_places(
@@ -100,7 +106,7 @@ async def test_price_reference_is_normalized_to_integer_cents(
         page_size=20,
     )
 
-    assert result.places[0].priceReference.amountCents == 1230
+    assert result.places[0].priceReference.amountCents == expected_cents
     assert result.places[0].priceReference.provenance.sourceStatus is SourceStatus.ONLINE
 
 
@@ -243,7 +249,18 @@ async def test_same_named_poi_cache_is_isolated_by_city_code_and_matches_key_sna
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "cost",
-    ["", [], "not-a-price", "-1", "NaN", "Infinity", "-Infinity"],
+    [
+        "",
+        [],
+        "not-a-price",
+        "-1",
+        "NaN",
+        "Infinity",
+        "-Infinity",
+        "1e10000",
+        "1e999999",
+        "-1e10000",
+    ],
 )
 async def test_missing_or_invalid_provider_price_stays_unknown(
     tmp_path,
