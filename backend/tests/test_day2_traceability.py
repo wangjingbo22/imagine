@@ -14,6 +14,15 @@ TRACE_PATH = (
     / "sprint1"
     / "lin_canhan_day2.json"
 )
+DAY1_TRACE_PATH = (
+    REPO_ROOT
+    / "docs"
+    / "traceability"
+    / "sprint1"
+    / "lin_canhan_day1.json"
+)
+INTEGRATED_MAIN_COMMIT = "4538540cbbc7b0b93c24eb60b48d7c89eb2173a9"
+INTEGRATION_ADAPTATION_COMMIT = "85f6f63cf168d36d375a4a2585954c1e47ae8144"
 EXPECTED_TASKS = {
     "S1-T011": {
         "pbiId": "PBI-04-A",
@@ -108,13 +117,67 @@ def test_external_boundaries_and_commit_evidence_are_honest() -> None:
     assert (REPO_ROOT / boundary["definedIn"]).is_file()
     assert (REPO_ROOT / boundary["evidence"]).is_file()
 
-    implementation_commit = trace["implementationCommit"]
-    assert re.fullmatch(r"[0-9a-f]{40}", implementation_commit)
-    subprocess.run(
-        ["git", "cat-file", "-e", f"{implementation_commit}^{{commit}}"],
-        cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    assert trace["integratedMainCommit"] == INTEGRATED_MAIN_COMMIT
+    assert trace["integrationAdaptationCommit"] == INTEGRATION_ADAPTATION_COMMIT
+    for commit_key in (
+        "implementationCommit",
+        "integratedMainCommit",
+        "integrationAdaptationCommit",
+    ):
+        commit = trace[commit_key]
+        assert re.fullmatch(r"[0-9a-f]{40}", commit)
+        subprocess.run(
+            ["git", "cat-file", "-e", f"{commit}^{{commit}}"],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
     assert all(value is None for value in trace["externalEvidence"].values())
+
+
+def test_cross_task_integrations_are_machine_traceable() -> None:
+    trace = _trace()
+    linkages = {
+        (item["sourceTaskId"], item["targetTaskId"]): item
+        for item in trace["crossTaskLinkages"]
+    }
+    assert set(linkages) == {
+        ("S1-T010", "S1-T011"),
+        ("S1-T013", "S1-T018"),
+        ("S1-T016", "S1-T018"),
+    }
+
+    facility = linkages[("S1-T010", "S1-T011")]
+    assert facility["contract"] == "Route.facilityEvidence"
+    assert "exactly one item for each FacilityType" in facility["behavior"]
+    assert "never promoted to PASS" in facility["behavior"]
+
+    registration = linkages[("S1-T013", "S1-T018")]
+    assert registration["contract"] == "PlanVersionService.register_proposed"
+    assert "PLAN_VERSION_ALREADY_EXISTS" in registration["behavior"]
+
+    expenses = linkages[("S1-T016", "S1-T018")]
+    assert expenses["contract"] == "ExecutionEvent.EXPENSE.amountCents"
+    assert "without double counting" in expenses["behavior"]
+
+    for linkage in linkages.values():
+        referenced = (
+            linkage["sourceFiles"]
+            + linkage["consumerFiles"]
+            + linkage["testFiles"]
+        )
+        assert len(referenced) == len(set(referenced))
+        for relative_path in referenced:
+            assert (REPO_ROOT / relative_path).is_file(), relative_path
+
+
+def test_day1_trace_keeps_the_day2_continuation_pointer() -> None:
+    day1 = json.loads(DAY1_TRACE_PATH.read_text(encoding="utf-8"))
+
+    assert day1["day2Continuation"] == {
+        "status": "IMPLEMENTED_IN_SEPARATE_TRACE",
+        "trace": "docs/traceability/sprint1/lin_canhan_day2.json",
+        "tasks": ["S1-T011", "S1-T018", "S1-T022"],
+    }
+    assert (REPO_ROOT / day1["day2Continuation"]["trace"]).is_file()

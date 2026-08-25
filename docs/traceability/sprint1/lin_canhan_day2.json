@@ -9,6 +9,8 @@
     "verifiedAt": "2026-08-25"
   },
   "implementationCommit": "1837e288686aa30c215eb01ea97e21682fba0360",
+  "integratedMainCommit": "4538540cbbc7b0b93c24eb60b48d7c89eb2173a9",
+  "integrationAdaptationCommit": "85f6f63cf168d36d375a4a2585954c1e47ae8144",
   "tasks": [
     {
       "taskId": "S1-T011",
@@ -49,6 +51,8 @@
         "all-hard-route-time-care-and-budget-results-must-pass",
         "integer-cent-budget-is-recomputed-from-place-and-route-facts",
         "unknown-price-or-source-remains-needs-confirmation-not-zero-or-pass",
+        "t010-facility-evidence-requires-four-unique-types-and-unknown-remains-needs-confirmation",
+        "confirmed-t010-facility-fail-is-preserved-as-a-soft-plan-snapshot",
         "complete-pass-candidate-bridges-to-existing-v1-and-v2-plan-contracts",
         "mutated-candidate-request-or-pass-snapshot-fails-closed"
       ]
@@ -69,12 +73,15 @@
         "backend/app/services/planning/replanning_adapter.py",
         "backend/app/schemas/execution.py",
         "backend/app/schemas/plan.py",
+        "app/application/workflow_service.py",
+        "app/infrastructure/workflow_store.py",
         "app/application/plan_service.py",
         "app/infrastructure/plan_store.py"
       ],
       "testFiles": [
         "backend/tests/test_minimum_disruption_replanning.py",
-        "backend/tests/test_planning_replanning_integration.py"
+        "backend/tests/test_planning_replanning_integration.py",
+        "backend/tests/test_day2_duplicate_plan_registration.py"
       ],
       "fixtures": [
         "backend/tests/snapshots/t018_no_feasible.json"
@@ -84,9 +91,11 @@
         "candidate-id-version-parent-trip-and-frozen-prefix-are-validated",
         "budget-time-route-and-care-hard-domains-must-all-pass",
         "actual-expense-plus-known-remaining-cost-is-revalidated-without-double-counting",
+        "t016-integer-cent-expense-events-feed-t018-budget-revalidation",
         "ranking-prefers-minimum-modified-task-count-then-satisfaction-loss",
         "equal-score-ties-are-deterministic",
         "selected-v2-registers-in-real-sqlite-as-proposed-and-enters-replan-review",
+        "t013-rejects-duplicate-selected-v2-registration-atomically",
         "no-feasible-result-reports-rule-ids-and-actionable-relaxations",
         "missing-trusted-facts-tampering-and-forged-pass-snapshots-fail-closed"
       ]
@@ -168,7 +177,8 @@
       ],
       "testFiles": [
         "backend/tests/test_minimum_disruption_replanning.py",
-        "backend/tests/test_planning_replanning_integration.py"
+        "backend/tests/test_planning_replanning_integration.py",
+        "backend/tests/test_day2_duplicate_plan_registration.py"
       ],
       "fixtureFiles": [
         "backend/tests/snapshots/t018_no_feasible.json"
@@ -196,6 +206,62 @@
       "downstreamTasks": ["S1-T024"]
     }
   ],
+  "crossTaskLinkages": [
+    {
+      "sourceTaskId": "S1-T010",
+      "targetTaskId": "S1-T011",
+      "contract": "Route.facilityEvidence",
+      "behavior": "exactly one item for each FacilityType is required; NEEDS_CONFIRMATION or UNKNOWN becomes a blocking warning, while confirmed FAIL is retained as a SOFT snapshot and never promoted to PASS",
+      "sourceFiles": [
+        "app/domain/models.py",
+        "app/application/amap_service.py"
+      ],
+      "consumerFiles": [
+        "backend/app/services/planning/models.py",
+        "backend/app/services/planning/planner.py",
+        "backend/app/services/planning/replanning_adapter.py"
+      ],
+      "testFiles": [
+        "tests/test_t010_facility_evidence.py",
+        "backend/tests/test_candidate_planner.py"
+      ]
+    },
+    {
+      "sourceTaskId": "S1-T013",
+      "targetTaskId": "S1-T018",
+      "contract": "PlanVersionService.register_proposed",
+      "behavior": "a selected V2 registers once; duplicate registration returns PLAN_VERSION_ALREADY_EXISTS with HTTP 409 and leaves the persisted trip state unchanged",
+      "sourceFiles": [
+        "app/application/plan_service.py",
+        "app/infrastructure/plan_store.py"
+      ],
+      "consumerFiles": [
+        "backend/app/services/replanning/selector.py"
+      ],
+      "testFiles": [
+        "tests/test_plan_versions.py",
+        "backend/tests/test_day2_duplicate_plan_registration.py"
+      ]
+    },
+    {
+      "sourceTaskId": "S1-T016",
+      "targetTaskId": "S1-T018",
+      "contract": "ExecutionEvent.EXPENSE.amountCents",
+      "behavior": "integer-cent expense events feed actual-spent plus remaining-plan budget revalidation without double counting",
+      "sourceFiles": [
+        "backend/app/schemas/execution.py",
+        "app/infrastructure/workflow_store.py"
+      ],
+      "consumerFiles": [
+        "backend/app/services/planning/replanning_adapter.py",
+        "backend/app/services/replanning/selector.py"
+      ],
+      "testFiles": [
+        "tests/test_execution_expenses.py",
+        "backend/tests/test_planning_replanning_integration.py"
+      ]
+    }
+  ],
   "integrationBoundaries": {
     "S1-T017": {
       "status": "UPSTREAM_IMPLEMENTATION_ABSENT_PORT_ONLY",
@@ -219,10 +285,11 @@
   },
   "traceabilityTest": "backend/tests/test_day2_traceability.py",
   "localVerification": {
+    "status": "VERIFIED_AFTER_MAIN_INTEGRATION",
     "backendCommand": "python -B -m pytest -p no:cacheprovider -q",
-    "backendResult": "215 passed in 3.80s",
+    "backendResult": "239 passed in 4.13s",
     "focusedCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_candidate_planner.py backend/tests/test_minimum_disruption_replanning.py backend/tests/test_planning_replanning_integration.py backend/tests/test_s1_t022_summary_paths.py",
-    "focusedResult": "33 passed in 1.10s",
+    "focusedResult": "40 passed in 1.30s",
     "frontendBuild": "npm run build passed",
     "frontendLint": "npm run lint passed"
   },
