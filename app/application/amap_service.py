@@ -2,7 +2,7 @@ import hashlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, DecimalException, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from app.core.errors import AppError
@@ -501,9 +501,12 @@ def _yuan_to_cents(value: Any) -> int | None:
         amount = Decimal(text)
     except InvalidOperation:
         return None
-    if amount < 0:
+    if not amount.is_finite() or amount < 0:
         return None
-    return int((amount * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    try:
+        return int((amount * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    except DecimalException:
+        return None
 
 
 def _price_fact(value: Any, kind: str, provenance: Provenance) -> PriceFact:
