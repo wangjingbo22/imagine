@@ -1,0 +1,76 @@
+{
+  "pathId": "accepted_v2",
+  "decision": "ACCEPT",
+  "beforeDecisionEvents": [
+    {
+      "taskId": "task-1",
+      "plan": "V1",
+      "eventType": "EXPENSE",
+      "amountCents": 600,
+      "idempotencyKey": "accepted-v2-expense-task-1"
+    },
+    {
+      "taskId": "task-1",
+      "plan": "V1",
+      "eventType": "COMPLETE",
+      "idempotencyKey": "accepted-v2-complete-task-1"
+    }
+  ],
+  "afterDecisionEvents": [
+    {
+      "taskId": "task-2",
+      "plan": "V2",
+      "eventType": "EXPENSE",
+      "amountCents": 11800,
+      "idempotencyKey": "accepted-v2-expense-task-2"
+    },
+    {
+      "taskId": "task-2",
+      "plan": "V2",
+      "eventType": "COMPLETE",
+      "idempotencyKey": "accepted-v2-complete-task-2"
+    },
+    {
+      "taskId": "task-4",
+      "plan": "V2",
+      "eventType": "EXPENSE",
+      "amountCents": 14000,
+      "idempotencyKey": "accepted-v2-expense-task-4"
+    },
+    {
+      "taskId": "task-4",
+      "plan": "V2",
+      "eventType": "COMPLETE",
+      "idempotencyKey": "accepted-v2-complete-task-4"
+    },
+    {
+      "taskId": "task-5",
+      "plan": "V2",
+      "eventType": "EXPENSE",
+      "amountCents": 1000,
+      "idempotencyKey": "accepted-v2-expense-task-5"
+    },
+    {
+      "taskId": "task-5",
+      "plan": "V2",
+      "eventType": "COMPLETE",
+      "idempotencyKey": "accepted-v2-complete-task-5"
+    }
+  ],
+  "expected": {
+    "tripStatus": "COMPLETED",
+    "plannedCostCents": 27400,
+    "actualCostCents": 27400,
+    "differenceCents": 0,
+    "totalTasks": 4,
+    "currentPlanVersion": 2,
+    "currentPlan": "V2",
+    "planStatuses": {
+      "V1": "SUPERSEDED",
+      "V2": "CURRENT"
+    },
+    "completedTaskIds": ["task-1", "task-2", "task-4", "task-5"],
+    "skippedTaskIds": [],
+    "eventCount": 8
+  }
+}

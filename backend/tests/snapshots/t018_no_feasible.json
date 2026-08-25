@@ -1,0 +1,43 @@
+{
+  "status": "NO_FEASIBLE_CANDIDATE",
+  "selectedPlan": null,
+  "frozenTaskIds": [
+    "task-1"
+  ],
+  "assessments": [
+    {
+      "candidatePlanId": "20000000-0000-4000-8000-000000000013",
+      "feasible": false,
+      "rank": null,
+      "modifiedTaskCount": 1,
+      "satisfactionLoss": 2,
+      "tieBreakKey": "bd60d28c034d9dd6a000bdef5f5dee59a0b8a339679826fb8734aad3735c1f99",
+      "affectedRuleIds": [
+        "CARE.ROUTE.TRANSFER_LIMIT"
+      ]
+    },
+    {
+      "candidatePlanId": "20000000-0000-4000-8000-000000000014",
+      "feasible": false,
+      "rank": null,
+      "modifiedTaskCount": 1,
+      "satisfactionLoss": 3,
+      "tieBreakKey": "8b2b678770f04138c5303cdad99b68cb393d9035ec44e861d90279ca9955960b",
+      "affectedRuleIds": [
+        "CARE.ROUTE.STAIRS_FORBIDDEN"
+      ]
+    }
+  ],
+  "affectedRuleIds": [
+    "CARE.ROUTE.STAIRS_FORBIDDEN",
+    "CARE.ROUTE.TRANSFER_LIMIT"
+  ],
+  "relaxations": [
+    {
+      "candidatePlanId": "20000000-0000-4000-8000-000000000013",
+      "ruleId": "CARE.ROUTE.TRANSFER_LIMIT",
+      "domain": "ROUTE",
+      "description": "可在用户确认后将最大换乘数从 2 调整为 3"
+    }
+  ]
+}

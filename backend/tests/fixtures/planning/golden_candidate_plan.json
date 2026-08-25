@@ -1,0 +1,463 @@
+{
+  "request": {
+    "schemaVersion": "1.0",
+    "trip": {
+      "schemaVersion": "1.0",
+      "tripId": "11111111-1111-4111-8111-111111111111",
+      "mode": "SINGLE",
+      "status": "PLANNING",
+      "cityContext": {
+        "countryCode": "CN",
+        "cityCode": "110000",
+        "cityName": "北京市",
+        "center": {
+          "longitude": 116.407387,
+          "latitude": 39.904179
+        },
+        "providerConfig": {
+          "provider": "AMAP",
+          "coordinateSystem": "GCJ02"
+        }
+      },
+      "startDate": "2026-09-05",
+      "endDate": "2026-09-05",
+      "currency": "CNY",
+      "totalBudgetCents": 35000,
+      "participants": [
+        {
+          "participantId": "22222222-2222-4222-8222-222222222222",
+          "nickname": "亲子旅客",
+          "budgetCapCents": 35000,
+          "preferences": [],
+          "assistanceProfile": {
+            "type": "PARENT_CHILD",
+            "childAge": 8,
+            "walkLimits": {
+              "maxContinuousMeters": 1000,
+              "maxDailyMeters": 3000
+            },
+            "maxTransfers": 2,
+            "restInterval": 180,
+            "napWindow": {
+              "start": "13:00:00",
+              "end": "14:00:00"
+            },
+            "avoidStairs": false
+          }
+        }
+      ],
+      "days": [
+        {
+          "dayIndex": 0,
+          "date": "2026-09-05",
+          "dailyBudgetCents": 32000,
+          "startLocationText": "北京林业大学",
+          "endLocationText": "北京林业大学",
+          "timeWindow": {
+            "start": "09:00:00",
+            "end": "20:00:00"
+          }
+        }
+      ]
+    },
+    "startLocation": {
+      "locationText": "北京林业大学",
+      "cityCode": "110000",
+      "location": {
+        "longitude": 116.35,
+        "latitude": 39.99
+      },
+      "provenance": {
+        "provider": "AMAP",
+        "sourceStatus": "ONLINE",
+        "fetchedAt": "2026-09-05T00:00:00Z",
+        "isStale": false
+      }
+    },
+    "endLocation": {
+      "locationText": "北京林业大学",
+      "cityCode": "110000",
+      "location": {
+        "longitude": 116.35,
+        "latitude": 39.99
+      },
+      "provenance": {
+        "provider": "AMAP",
+        "sourceStatus": "ONLINE",
+        "fetchedAt": "2026-09-05T00:00:00Z",
+        "isStale": false
+      }
+    },
+    "taskFacts": [
+      {
+        "taskId": "task-museum",
+        "order": 1,
+        "title": "参观城市博物馆",
+        "category": "CULTURE",
+        "startAt": "09:30:00",
+        "endAt": "11:30:00",
+        "endLocationText": "城市博物馆",
+        "cityCode": "110000",
+        "place": {
+          "placeId": "poi-museum",
+          "name": "城市博物馆",
+          "cityCode": "110000",
+          "location": {
+            "longitude": 116.397,
+            "latitude": 39.91
+          },
+          "priceReference": {
+            "amountCents": 5000,
+            "currency": "CNY",
+            "kind": "admission",
+            "provenance": {
+              "provider": "AMAP",
+              "sourceStatus": "ONLINE",
+              "fetchedAt": "2026-09-05T00:00:00Z",
+              "isStale": false
+            }
+          },
+          "provenance": {
+            "provider": "AMAP",
+            "sourceStatus": "ONLINE",
+            "fetchedAt": "2026-09-05T00:00:00Z",
+            "isStale": false
+          }
+        },
+        "route": {
+          "routeId": "route-home-museum",
+          "mode": "TRANSIT",
+          "origin": {
+            "longitude": 116.35,
+            "latitude": 39.99
+          },
+          "destination": {
+            "longitude": 116.397,
+            "latitude": 39.91
+          },
+          "distanceMeters": 10000,
+          "durationSeconds": 1800,
+          "walkingDistanceMeters": 300,
+          "transferCount": 1,
+          "steps": [],
+          "priceReference": {
+            "amountCents": 300,
+            "currency": "CNY",
+            "kind": "transit",
+            "provenance": {
+              "provider": "AMAP",
+              "sourceStatus": "ONLINE",
+              "fetchedAt": "2026-09-05T00:00:00Z",
+              "isStale": false
+            }
+          },
+          "provenance": {
+            "provider": "AMAP",
+            "sourceStatus": "ONLINE",
+            "fetchedAt": "2026-09-05T00:00:00Z",
+            "isStale": false
+          }
+        },
+        "elapsedSinceRestMinutes": 30,
+        "note": "上午文化活动"
+      },
+      {
+        "taskId": "task-lunch",
+        "order": 2,
+        "title": "午餐",
+        "category": "DINING",
+        "startAt": "11:45:00",
+        "endAt": "12:45:00",
+        "endLocationText": "京味餐厅",
+        "cityCode": "110000",
+        "place": {
+          "placeId": "poi-restaurant",
+          "name": "京味餐厅",
+          "cityCode": "110000",
+          "location": {
+            "longitude": 116.4,
+            "latitude": 39.91
+          },
+          "priceReference": {
+            "amountCents": 6500,
+            "currency": "CNY",
+            "kind": "meal",
+            "provenance": {
+              "provider": "AMAP",
+              "sourceStatus": "ONLINE",
+              "fetchedAt": "2026-09-05T00:00:00Z",
+              "isStale": false
+            }
+          },
+          "provenance": {
+            "provider": "AMAP",
+            "sourceStatus": "ONLINE",
+            "fetchedAt": "2026-09-05T00:00:00Z",
+            "isStale": false
+          }
+        },
+        "route": {
+          "routeId": "route-museum-lunch",
+          "mode": "WALKING",
+          "origin": {
+            "longitude": 116.397,
+            "latitude": 39.91
+          },
+          "destination": {
+            "longitude": 116.4,
+            "latitude": 39.91
+          },
+          "distanceMeters": 200,
+          "durationSeconds": 600,
+          "walkingDistanceMeters": null,
+          "transferCount": null,
+          "steps": [],
+          "priceReference": {
+            "amountCents": 0,
+            "currency": "CNY",
+            "kind": "walking",
+            "provenance": {
+              "provider": "AMAP",
+              "sourceStatus": "ONLINE",
+              "fetchedAt": "2026-09-05T00:00:00Z",
+              "isStale": false
+            }
+          },
+          "provenance": {
+            "provider": "AMAP",
+            "sourceStatus": "ONLINE",
+            "fetchedAt": "2026-09-05T00:00:00Z",
+            "isStale": false
+          }
+        },
+        "elapsedSinceRestMinutes": 165,
+        "note": "午休窗前结束"
+      },
+      {
+        "taskId": "task-park",
+        "order": 3,
+        "title": "公园漫游",
+        "category": "LEISURE",
+        "startAt": "14:15:00",
+        "endAt": "16:00:00",
+        "endLocationText": "城市公园",
+        "cityCode": "110000",
+        "place": {
+          "placeId": "poi-park",
+          "name": "城市公园",
+          "cityCode": "110000",
+          "location": {
+            "longitude": 116.41,
+            "latitude": 39.92
+          },
+          "priceReference": {
+            "amountCents": 0,
+            "currency": "CNY",
+            "kind": "admission",
+            "provenance": {
+              "provider": "AMAP",
+              "sourceStatus": "ONLINE",
+              "fetchedAt": "2026-09-05T00:00:00Z",
+              "isStale": false
+            }
+          },
+          "provenance": {
+            "provider": "AMAP",
+            "sourceStatus": "ONLINE",
+            "fetchedAt": "2026-09-05T00:00:00Z",
+            "isStale": false
+          }
+        },
+        "route": {
+          "routeId": "route-lunch-park",
+          "mode": "DRIVING",
+          "origin": {
+            "longitude": 116.4,
+            "latitude": 39.91
+          },
+          "destination": {
+            "longitude": 116.41,
+            "latitude": 39.92
+          },
+          "distanceMeters": 5000,
+          "durationSeconds": 900,
+          "walkingDistanceMeters": null,
+          "transferCount": null,
+          "steps": [],
+          "priceReference": {
+            "amountCents": 1200,
+            "currency": "CNY",
+            "kind": "taxi",
+            "provenance": {
+              "provider": "AMAP",
+              "sourceStatus": "ONLINE",
+              "fetchedAt": "2026-09-05T00:00:00Z",
+              "isStale": false
+            }
+          },
+          "provenance": {
+            "provider": "AMAP",
+            "sourceStatus": "ONLINE",
+            "fetchedAt": "2026-09-05T00:00:00Z",
+            "isStale": false
+          }
+        },
+        "elapsedSinceRestMinutes": 15,
+        "note": "午休窗后出发"
+      },
+      {
+        "taskId": "task-return",
+        "order": 4,
+        "title": "返回住处",
+        "category": "RETURN",
+        "startAt": "17:00:00",
+        "endAt": "18:00:00",
+        "endLocationText": "北京林业大学",
+        "cityCode": "110000",
+        "place": {
+          "placeId": "poi-home",
+          "name": "北京林业大学",
+          "cityCode": "110000",
+          "location": {
+            "longitude": 116.35,
+            "latitude": 39.99
+          },
+          "priceReference": {
+            "amountCents": 0,
+            "currency": "CNY",
+            "kind": "return-place",
+            "provenance": {
+              "provider": "AMAP",
+              "sourceStatus": "ONLINE",
+              "fetchedAt": "2026-09-05T00:00:00Z",
+              "isStale": false
+            }
+          },
+          "provenance": {
+            "provider": "AMAP",
+            "sourceStatus": "ONLINE",
+            "fetchedAt": "2026-09-05T00:00:00Z",
+            "isStale": false
+          }
+        },
+        "route": {
+          "routeId": "route-park-home",
+          "mode": "TRANSIT",
+          "origin": {
+            "longitude": 116.41,
+            "latitude": 39.92
+          },
+          "destination": {
+            "longitude": 116.35,
+            "latitude": 39.99
+          },
+          "distanceMeters": 10000,
+          "durationSeconds": 1800,
+          "walkingDistanceMeters": 100,
+          "transferCount": 1,
+          "steps": [],
+          "priceReference": {
+            "amountCents": 300,
+            "currency": "CNY",
+            "kind": "transit",
+            "provenance": {
+              "provider": "AMAP",
+              "sourceStatus": "ONLINE",
+              "fetchedAt": "2026-09-05T00:00:00Z",
+              "isStale": false
+            }
+          },
+          "provenance": {
+            "provider": "AMAP",
+            "sourceStatus": "ONLINE",
+            "fetchedAt": "2026-09-05T00:00:00Z",
+            "isStale": false
+          }
+        },
+        "elapsedSinceRestMinutes": 60,
+        "note": "在截止时间前返程"
+      }
+    ],
+    "confirmedConstraints": [
+      {
+        "field": "walkLimits.maxContinuousMeters",
+        "operator": "LTE",
+        "value": 1000,
+        "scope": "ROUTE_SEGMENT",
+        "hardness": "HARD"
+      },
+      {
+        "field": "walkLimits.maxDailyMeters",
+        "operator": "LTE",
+        "value": 3000,
+        "scope": "DAY",
+        "hardness": "HARD"
+      },
+      {
+        "field": "maxTransfers",
+        "operator": "LTE",
+        "value": 2,
+        "scope": "ROUTE",
+        "hardness": "HARD"
+      },
+      {
+        "field": "restInterval",
+        "operator": "LTE",
+        "value": 180,
+        "scope": "ROUTE",
+        "hardness": "HARD"
+      },
+      {
+        "field": "napWindow",
+        "operator": "BLOCK",
+        "value": {
+          "start": "13:00:00",
+          "end": "14:00:00"
+        },
+        "scope": "DAY",
+        "hardness": "HARD"
+      },
+      {
+        "field": "return",
+        "operator": "ARRIVE_BY",
+        "value": {
+          "endLocationPath": "days[0].endLocationText",
+          "deadlinePath": "days[0].timeWindow.end"
+        },
+        "scope": "DAY",
+        "hardness": "HARD"
+      }
+    ]
+  },
+  "expected": {
+    "candidateId": "candidate-0d1b2b57bf9b00bec0181a14",
+    "taskIds": [
+      "task-museum",
+      "task-lunch",
+      "task-park",
+      "task-return"
+    ],
+    "taskCostCents": [5300, 6500, 1200, 300],
+    "metrics": {
+      "totalCostCents": 13300,
+      "knownTotalCostCents": 13300,
+      "unknownAmountCount": 0,
+      "budgetLimitCents": 32000,
+      "knownBudgetBufferCents": 18700,
+      "totalWalkMeters": 600,
+      "transferCount": 2,
+      "validationStatus": "PASS"
+    },
+    "constraintRuleIds": [
+      "CARE.ROUTE.WALK_SEGMENT_LIMIT",
+      "CARE.ROUTE.WALK_DAILY_LIMIT",
+      "CARE.ROUTE.TRANSFER_LIMIT",
+      "CARE.ROUTE.REST_INTERVAL",
+      "CARE.DAY.NAP_WINDOW",
+      "CARE.DAY.RETURN_BY",
+      "PLAN.BUDGET.KNOWN_SUBTOTAL"
+    ],
+    "proposedPlanId": "0d1b2b57-bf9b-40be-8018-1a141101c738",
+    "proposedSourceCount": 18
+  }
+}

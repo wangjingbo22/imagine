@@ -1,0 +1,67 @@
+{
+  "pathId": "no_v2",
+  "decision": "NONE",
+  "beforeDecisionEvents": [],
+  "afterDecisionEvents": [
+    {
+      "taskId": "task-1",
+      "plan": "V1",
+      "eventType": "EXPENSE",
+      "amountCents": 600,
+      "idempotencyKey": "no-v2-expense-task-1"
+    },
+    {
+      "taskId": "task-1",
+      "plan": "V1",
+      "eventType": "COMPLETE",
+      "idempotencyKey": "no-v2-complete-task-1"
+    },
+    {
+      "taskId": "task-2",
+      "plan": "V1",
+      "eventType": "EXPENSE",
+      "amountCents": 13800,
+      "idempotencyKey": "no-v2-expense-task-2"
+    },
+    {
+      "taskId": "task-2",
+      "plan": "V1",
+      "eventType": "COMPLETE",
+      "idempotencyKey": "no-v2-complete-task-2"
+    },
+    {
+      "taskId": "task-3",
+      "plan": "V1",
+      "eventType": "SKIP",
+      "idempotencyKey": "no-v2-skip-task-3"
+    },
+    {
+      "taskId": "task-4",
+      "plan": "V1",
+      "eventType": "EXPENSE",
+      "amountCents": 15000,
+      "idempotencyKey": "no-v2-expense-task-4"
+    },
+    {
+      "taskId": "task-4",
+      "plan": "V1",
+      "eventType": "COMPLETE",
+      "idempotencyKey": "no-v2-complete-task-4"
+    }
+  ],
+  "expected": {
+    "tripStatus": "COMPLETED",
+    "plannedCostCents": 29800,
+    "actualCostCents": 29400,
+    "differenceCents": -400,
+    "totalTasks": 4,
+    "currentPlanVersion": 1,
+    "currentPlan": "V1",
+    "planStatuses": {
+      "V1": "CURRENT"
+    },
+    "completedTaskIds": ["task-1", "task-2", "task-4"],
+    "skippedTaskIds": ["task-3"],
+    "eventCount": 7
+  }
+}
