@@ -259,7 +259,7 @@ export function WorkspacePage() {
       setCompletedTaskIds([...new Set(completed)])
       setSkippedTaskIds([...new Set(skipped)])
       setActualSpentCents(
-        state.events
+        state.actualBudget?.actualSpentCents ?? state.events
           .filter((event) => event.eventType === 'EXPENSE')
           .reduce((total, event) => total + (event.amountCents ?? 0), 0),
       )
@@ -290,6 +290,26 @@ export function WorkspacePage() {
       }
       if (current) {
         applyTripState(response.data)
+      }
+      const completed = response.data.events
+        .filter((event) => event.eventType === 'COMPLETE')
+        .map((event) => event.taskId)
+      const skipped = response.data.events
+        .filter((event) => event.eventType === 'SKIP')
+        .map((event) => event.taskId)
+      setCompletedTaskIds([...new Set(completed)])
+      setSkippedTaskIds([...new Set(skipped)])
+      setActualSpentCents(response.data.actualBudget?.actualSpentCents ?? 0)
+      if (stored) {
+        const resolved = new Set([...completed, ...skipped])
+        const nextIndex = stored.days[0].tasks.findIndex(
+          (task) => !resolved.has(task.taskId),
+        )
+        const restoredIndex = nextIndex >= 0
+          ? nextIndex
+          : Math.max(0, stored.days[0].tasks.length - 1)
+        setCurrentTaskIndex(restoredIndex)
+        setActualCost(String(stored.days[0].tasks[restoredIndex].costCents / 100))
       }
       if (candidate) {
         setCandidatePlanV2(candidate)
@@ -504,6 +524,10 @@ export function WorkspacePage() {
     locationEvidence?.city.cityContext.cityCode ??
     storedCurrentPlan?.tripSnapshot.cityContext.cityCode ??
     null
+  const facilityEvidence = locationEvidence?.route?.facilityEvidence ?? []
+  const facilityNeedsConfirmation =
+    facilityEvidence.length === 0 ||
+    facilityEvidence.some((item) => item.status === 'NEEDS_CONFIRMATION')
 
   function toggleRecommendationFeedback(option: string) {
     setSelectedFeedbackOptions((current) =>
@@ -540,11 +564,13 @@ export function WorkspacePage() {
     }
     const amountSuffix = eventType === 'EXPENSE' ? `:${amountCents ?? 0}` : ''
     await tripApi.createExecutionEvent(tripId, {
+      schemaVersion: '1.0',
       taskId,
       planVersionId: planId,
       eventType,
       amountCents,
       idempotencyKey: `${planId}:${taskId}:${eventType}${amountSuffix}`,
+      occurredAt: new Date().toISOString(),
     })
     const restored = await tripApi.getTrip(tripId)
     applyTripState(restored.data)
@@ -625,14 +651,25 @@ export function WorkspacePage() {
               description,
               details: {},
             })),
-            {
-              ruleId: 'accessibility-entrance',
-              scope: 'days[0].tasks',
-              hardness: 'SOFT',
-              status: 'NEEDS_CONFIRMATION',
-              description: '无障碍入口信息需现场确认',
-              details: {},
-            },
+            ...(locationEvidence?.route?.facilityEvidence.map((evidence) => ({
+              ruleId: `facility-${evidence.facilityType.toLowerCase().replaceAll('_', '-')}`,
+              scope: 'days[0].routes',
+              hardness: 'SOFT' as const,
+              status: evidence.status,
+              description: evidence.message,
+              details: {
+                sourceStatus: evidence.provenance.sourceStatus,
+                fetchedAt: evidence.provenance.fetchedAt,
+                referenceId: evidence.referenceId,
+              },
+            })) ?? [{
+              ruleId: 'facility-route-evidence-unavailable',
+              scope: 'days[0].routes',
+              hardness: 'SOFT' as const,
+              status: 'NEEDS_CONFIRMATION' as const,
+              description: '路线设施证据尚未返回，需现场或人工来源确认',
+              details: { sourceStatus: 'UNKNOWN' },
+            }]),
           ],
           sourcesSnapshot: [
             {
@@ -1097,12 +1134,26 @@ export function WorkspacePage() {
               <section className="validation-card">
                 <div className="validation-card__head">
                   <span><ShieldCheck size={21} /> 关怀校验</span>
-                  <strong>PASS</strong>
+                  <strong className={facilityNeedsConfirmation ? 'needs-confirmation' : ''}>
+                    {facilityNeedsConfirmation ? '待确认' : 'PASS'}
+                  </strong>
                 </div>
                 {validationRules.map((rule) => (
                   <div className="validation-row" key={rule}><CheckCircle2 size={16} /><span>{rule}</span><small>已满足</small></div>
                 ))}
-                <div className="warning-row"><MapPin size={16} /><span>无障碍入口信息</span><small>待确认</small></div>
+                {facilityEvidence.length > 0 ? facilityEvidence.map((evidence) => (
+                  <div className="warning-row" key={evidence.facilityType}>
+                    <MapPin size={16} />
+                    <span>{evidence.label}<small>{evidence.message}</small></span>
+                    <small>{evidence.status === 'NEEDS_CONFIRMATION' ? '待确认' : evidence.status}</small>
+                  </div>
+                )) : (
+                  <div className="warning-row">
+                    <MapPin size={16} />
+                    <span>电梯、坡道、母婴室、无障碍入口<small>路线设施来源尚未返回</small></span>
+                    <small>待确认</small>
+                  </div>
+                )}
               </section>
               <section className="explanation-card">
                 <div className="explanation-card__head">
@@ -1140,7 +1191,15 @@ export function WorkspacePage() {
                   </strong>
                 </div>
                 <div><Wallet size={15} /><span>计划费用</span><strong>前端估算 · 不冒充实时价格</strong></div>
-                <div><MapPin size={15} /><span>无障碍设施</span><strong className="needs-confirmation">待确认</strong></div>
+                <div>
+                  <MapPin size={15} />
+                  <span>路线设施证据</span>
+                  <strong className={facilityNeedsConfirmation ? 'needs-confirmation' : ''}>
+                    {facilityNeedsConfirmation
+                      ? `${Math.max(1, facilityEvidence.filter((item) => item.status === 'NEEDS_CONFIRMATION').length)} 项待确认`
+                      : '已核验'}
+                  </strong>
+                </div>
               </section>
               <section className="provider-evidence-card">
                 <div className="source-card__head">
@@ -1437,7 +1496,7 @@ export function WorkspacePage() {
                 <div className="progress-bar"><i style={{ width: `${executionProgress}%` }} /></div>
                 <div className="trip-progress-stats">
                   <div><span>已用预算</span><strong>{formatMoney(actualSpentCents)}</strong></div>
-                  <div><span>剩余预算</span><strong>{formatMoney(Math.max(0, budgetCents - actualSpentCents))}</strong></div>
+                  <div><span>剩余预算</span><strong>{formatMoney(budgetCents - actualSpentCents)}</strong></div>
                   <div><span>已步行</span><strong>420m</strong></div>
                   <div><span>计划调整</span><strong>{executionAdjustmentCount} 次</strong></div>
                 </div>

@@ -272,20 +272,13 @@ export const tripApi = {
         currentPlan: null,
         proposedPlans: [],
         events: [],
+        actualBudget: null,
       })
     }
     return request<TripPlanState>(`/api/v1/trips/${tripId}`)
   },
 
   createExecutionEvent(tripId: string, input: ExecutionEventInput) {
-    if (!USE_WORKFLOW_API) {
-      return mockResponse<ExecutionEvent>({
-        eventId: crypto.randomUUID(),
-        tripId,
-        occurredAt: new Date().toISOString(),
-        ...input,
-      })
-    }
     return request<ExecutionEvent>(`/api/v1/trips/${tripId}/events`, {
       method: 'POST',
       body: JSON.stringify(input),

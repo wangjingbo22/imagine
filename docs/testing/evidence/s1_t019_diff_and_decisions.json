@@ -1,0 +1,94 @@
+{
+  "taskId": "S1-T019",
+  "schemaVersion": "1.0",
+  "diff": {
+    "tripId": "00000000-0000-4000-8000-000000000001",
+    "basePlanId": "20000000-0000-4000-8000-000000000001",
+    "candidatePlanId": "20000000-0000-4000-8000-000000000002",
+    "baseVersion": 1,
+    "candidateVersion": 2,
+    "items": [
+      {
+        "category": "PLACE",
+        "changeType": "RETAINED",
+        "key": "task:task-1:title",
+        "label": "中国国家博物馆 · 地点",
+        "before": "中国国家博物馆",
+        "after": "中国国家博物馆"
+      },
+      {
+        "category": "TIME",
+        "changeType": "CHANGED",
+        "key": "task:task-2:time_range",
+        "label": "四季民福 · 前门店 · 时间",
+        "before": "12:05 — 13:20",
+        "after": "12:20 — 13:30"
+      },
+      {
+        "category": "ROUTE",
+        "changeType": "CHANGED",
+        "key": "task:task-4:transport",
+        "label": "什刹海落日漫步 · 路线",
+        "before": "出租车 · 18 分钟",
+        "after": "地铁直达 · 22 分钟"
+      },
+      {
+        "category": "COST",
+        "changeType": "CHANGED",
+        "key": "task:task-2:cost_cents",
+        "label": "四季民福 · 前门店 · 费用（分）",
+        "before": 13800,
+        "after": 11800
+      },
+      {
+        "category": "PLACE",
+        "changeType": "REMOVED",
+        "key": "task:task-3:title",
+        "label": "景山公园 · 地点",
+        "before": "景山公园",
+        "after": null
+      },
+      {
+        "category": "PLACE",
+        "changeType": "ADDED",
+        "key": "task:task-5:title",
+        "label": "北京城市艺术馆 · 地点",
+        "before": null,
+        "after": "北京城市艺术馆"
+      },
+      {
+        "category": "CARE",
+        "changeType": "RETAINED",
+        "key": "constraint:budget-limit",
+        "label": "关怀约束 budget-limit",
+        "before": "PASS｜方案总金额不超过行程预算｜{\"budgetCents\":\"35000\"}",
+        "after": "PASS｜方案总金额不超过行程预算｜{\"budgetCents\":\"35000\"}"
+      },
+      {
+        "category": "CARE",
+        "changeType": "ADDED",
+        "key": "constraint:rest-after-expense",
+        "label": "关怀约束 rest-after-expense",
+        "before": null,
+        "after": "WARNING｜调整后增加一次室内休息｜{\"reason\":\"EXPENSE_CHANGE\"}"
+      }
+    ],
+    "metricsDelta": {
+      "totalCostCents": -2400,
+      "totalWalkMeters": -670,
+      "transferCount": -1
+    }
+  },
+  "acceptState": {
+    "tripStatus": "EXECUTING",
+    "currentPlanId": "20000000-0000-4000-8000-000000000002",
+    "v1Status": "SUPERSEDED",
+    "v2Status": "CURRENT"
+  },
+  "rejectState": {
+    "tripStatus": "EXECUTING",
+    "currentPlanId": "20000000-0000-4000-8000-000000000001",
+    "v1Status": "CURRENT",
+    "v2Status": "REJECTED"
+  }
+}

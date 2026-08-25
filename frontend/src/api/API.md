@@ -239,7 +239,7 @@ src/api/tripContract.ts
 
 `src/api/client.ts` 已支持解析这两类错误，并通过 `ApiError.issues` 暴露字段级问题。
 
-## 7. HTTP 路由状态
+## 7. 自然语言草稿接口
 
 已登记：
 
@@ -268,6 +268,8 @@ src/api/tripContract.ts
 
 计划工作台会实际调用城市解析、同城地点搜索和路线规划，并展示 `cityCode`、来源状态、`fetchedAt` 和未知价格。Provider 返回 `amountCents: null + UNKNOWN` 时，页面固定显示“未知待确认”，不会按 0 元写入预算；当前计划金额仍属于前端估算并显式标注。前端地址栏保留 `tripId`。刷新时恢复 `CURRENT` 或 `PROPOSED`；确认按钮严格按“登记候选 → 确认 CURRENT → 开始执行”的顺序调用。PlanVersion DTO 定义在 `src/domain/trip.ts`，字段名保持 camelCase，不翻译代码契约。
 
+路线 DTO 的 `facilityEvidence[]` 逐项展示电梯、坡道、母婴室和无障碍入口。来源缺失时总状态显示“待确认”，不能显示 `PASS`。
+
 ## 9. Plan V2 Diff 与决策正式接口
 
 设置 `VITE_USE_PLAN_VERSION_API=true` 后：
@@ -279,15 +281,20 @@ src/api/tripContract.ts
 
 前端展示 `PLACE | TIME | ROUTE | COST | CARE` 五类及 `RETAINED | REMOVED | ADDED | CHANGED` 四种变化。接受前不得用候选数据替换当前计划；决策完成后重新调用 `getTrip()`，以服务端唯一 `CURRENT` 为准。
 
-## 10. 待后端确认的接口
+## 10. 执行消费事件正式接口
+
+- `tripApi.createExecutionEvent()` → `POST /api/v1/trips/{tripId}/events`
+- `tripApi.getTrip()` 同时恢复 `events[]` 与 `actualBudget`
+
+消费使用 `EXPENSE` 事件，金额为整数分；页面使用稳定 `idempotencyKey`，刷新后以服务端事件流复算的 `actualSpentCents` 和 `remainingBudgetCents` 为准。
+
+## 11. 待后端确认的接口
 
 以下是前端功能需求，不是已确认契约：
 
-- 自然语言解析与歧义确认
 - Trip 创建/保存
 - AssistanceProfile 确认
 - 计划自动生成与持续反馈
-- 执行事件
 - 照片与视频上传
 - 旅行总结
 

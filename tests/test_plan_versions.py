@@ -220,6 +220,20 @@ def test_plan_snapshot_is_immutable_and_confirm_is_idempotent(tmp_path: Path) ->
     assert immutable.value.code == "PLAN_VERSION_IMMUTABLE"
 
 
+def test_duplicate_plan_version_write_is_rejected(tmp_path: Path) -> None:
+    repository = SqlitePlanVersionRepository(tmp_path / "plan_versions.sqlite3")
+    proposal = parse_proposal()
+    repository.register_proposed(proposal)
+
+    with pytest.raises(PlanStoreError) as duplicate:
+        repository.register_proposed(proposal)
+
+    assert duplicate.value.code == "PLAN_VERSION_ALREADY_EXISTS"
+    restored = repository.get_trip_state(proposal.trip_snapshot.trip_id)
+    assert len(restored.proposed_plans) == 1
+    assert restored.proposed_plans[0].plan_id == proposal.plan_id
+
+
 def test_rejected_plan_cannot_transition_to_current(tmp_path: Path) -> None:
     database_path = tmp_path / "plan_versions.sqlite3"
     repository = SqlitePlanVersionRepository(database_path)

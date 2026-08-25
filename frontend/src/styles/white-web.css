@@ -819,6 +819,18 @@ body,
   color: var(--web-amber);
 }
 
+.validation-card__head strong.needs-confirmation {
+  color: var(--web-amber);
+}
+
+.warning-row > span > small {
+  display: block;
+  margin-top: 3px;
+  color: var(--web-muted);
+  font-size: 8px;
+  line-height: 1.35;
+}
+
 .city-code-chip {
   padding: 4px 7px;
   color: var(--web-blue) !important;

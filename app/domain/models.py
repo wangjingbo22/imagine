@@ -25,6 +25,19 @@ class TravelMode(StrEnum):
     BICYCLING = "BICYCLING"
 
 
+class FacilityType(StrEnum):
+    ELEVATOR = "ELEVATOR"
+    RAMP = "RAMP"
+    NURSING_ROOM = "NURSING_ROOM"
+    ACCESSIBLE_ENTRANCE = "ACCESSIBLE_ENTRANCE"
+
+
+class FacilityEvidenceStatus(StrEnum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+    NEEDS_CONFIRMATION = "NEEDS_CONFIRMATION"
+
+
 class Provenance(BaseModel):
     provider: Literal["AMAP"] = "AMAP"
     sourceStatus: SourceStatus
@@ -93,6 +106,15 @@ class RouteStep(BaseModel):
     transport: str | None = None
 
 
+class FacilityEvidence(BaseModel):
+    facilityType: FacilityType
+    label: NonBlankText
+    status: FacilityEvidenceStatus
+    message: NonBlankText
+    referenceId: NonBlankText
+    provenance: Provenance
+
+
 class Route(BaseModel):
     routeId: NonBlankText
     mode: TravelMode
@@ -103,6 +125,7 @@ class Route(BaseModel):
     walkingDistanceMeters: int | None = Field(default=None, ge=0)
     transferCount: int | None = Field(default=None, ge=0)
     steps: list[RouteStep] = Field(default_factory=list)
+    facilityEvidence: list[FacilityEvidence] = Field(default_factory=list)
     priceReference: PriceFact
     provenance: Provenance
 
