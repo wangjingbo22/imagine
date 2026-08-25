@@ -562,8 +562,12 @@ async def test_replan_uses_actual_expense_and_registers_no_over_budget_v2(
         actual = connection.execute(
             "SELECT amount_cents FROM execution_events WHERE event_type = 'EXPENSE'"
         ).fetchall()
+        trusted_v2_count = connection.execute(
+            "SELECT COUNT(*) FROM trusted_plan_issuances WHERE plan_version = 2"
+        ).fetchone()
     assert versions == [(1, "CURRENT")]
     assert actual == [(50_000,)]
+    assert trusted_v2_count == (0,)
 
 
 @pytest.mark.asyncio
@@ -645,7 +649,7 @@ async def test_two_candidate_replan_is_selected_issued_diffed_and_accepted(
         row for row in issuances if row[1:] == (2, "V2", "VALIDATED")
     ]
     assert issued_v2 == [(selected_plan["planId"], 2, "V2", "ISSUED")]
-    assert len(validated_v2) == 1
+    assert validated_v2 == []
 
 
 @pytest.mark.asyncio

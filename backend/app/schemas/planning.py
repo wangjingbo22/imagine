@@ -42,6 +42,13 @@ class ReplanGenerationRequest(ContractModel):
         return self
 
 
+class EventDrivenReplanRequest(ContractModel):
+    """Strict S1-T017 trigger for server-derived event replanning."""
+
+    schema_version: Literal["1.0"]
+    reason: Literal[PlanVersionReason.EXPENSE_CHANGE]
+
+
 class RegisteredReplan(ContractModel):
     """A T018-selected V2 after it has been registered as PROPOSED."""
 
@@ -55,6 +62,7 @@ class RegisteredReplan(ContractModel):
 
 
 __all__ = [
+    "EventDrivenReplanRequest",
     "RegisteredReplan",
     "ReplanGenerationRequest",
     "ReplanRequestCandidate",

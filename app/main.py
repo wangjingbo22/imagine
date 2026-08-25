@@ -26,6 +26,7 @@ from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.infrastructure.trusted_planning_store import SqliteTrustedPlanningRepository
 from app.infrastructure.workflow_store import SqliteWorkflowRepository
 from app.schemas.validation_error import TripSchemaError, issues_from_pydantic
+from app.services.replanning import SuffixPlanner
 
 
 SWAGGER_CHINESE_SCRIPT = """
@@ -116,6 +117,7 @@ def create_app(
     plan_service: PlanVersionService | None = None,
     workflow_service: WorkflowService | None = None,
     planning_boundary_service: PlanningBoundaryService | None = None,
+    suffix_planner: SuffixPlanner | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     managed_client: AmapClient | None = None
@@ -159,6 +161,7 @@ def create_app(
             trust_repository=SqliteTrustedPlanningRepository(
                 planning_database_path
             ),
+            suffix_planner=suffix_planner,
         )
 
     @asynccontextmanager

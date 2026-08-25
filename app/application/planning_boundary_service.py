@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime
 from hashlib import sha256
@@ -17,14 +18,20 @@ from app.infrastructure.trusted_planning_store import (
     TrustedPlanningStoreError,
     proposal_digest,
 )
+from app.schemas.execution import ExecutionEvent, ExecutionEventType
 from app.schemas.plan import PlanVersion, ProposedPlanVersion
-from app.schemas.planning import RegisteredReplan, ReplanGenerationRequest
+from app.schemas.planning import (
+    EventDrivenReplanRequest,
+    RegisteredReplan,
+    ReplanGenerationRequest,
+)
 from app.services.planning.models import (
     CandidatePlan,
     CandidatePlanRequest,
     CandidatePlanReview,
     CandidateReviewConfirmationRequest,
     CandidateReviewItem,
+    CandidateTaskFact,
 )
 from app.services.planning.planner import (
     CandidatePlanInputError,
@@ -34,11 +41,27 @@ from app.services.planning.planner import (
     generate_candidate_plan,
 )
 from app.services.planning.replanning_adapter import T011ReplanCandidateValidator
+from app.services.replanning import (
+    DeterministicRetainedSuffixPlanner,
+    SuffixPlanner,
+    SuffixPlanningInput,
+)
 from app.services.replanning.models import NoFeasibleReplan, ReplanCandidate
 from app.services.replanning.selector import (
     MinimumDisruptionSelector,
     ReplanningContractError,
 )
+
+
+class _InMemoryTrustedCandidateFacts:
+    def __init__(self, records: Mapping[UUID, CandidatePlanRequest]) -> None:
+        self._records = dict(records)
+
+    def get_candidate_request(
+        self,
+        candidate_plan_id: UUID,
+    ) -> CandidatePlanRequest | None:
+        return self._records.get(candidate_plan_id)
 
 
 class PlanningBoundaryService:
@@ -50,10 +73,14 @@ class PlanningBoundaryService:
         plan_service: PlanVersionService,
         workflow_service: WorkflowService,
         trust_repository: SqliteTrustedPlanningRepository,
+        suffix_planner: SuffixPlanner | None = None,
     ) -> None:
         self.plan_service = plan_service
         self.workflow_service = workflow_service
         self.trust_repository = trust_repository
+        self.suffix_planner = suffix_planner or DeterministicRetainedSuffixPlanner()
+        if not isinstance(self.suffix_planner, SuffixPlanner):
+            raise TypeError("suffix_planner must implement SuffixPlanner")
 
     @staticmethod
     def _require_trip_id(trip_id: UUID, request: CandidatePlanRequest) -> None:
@@ -541,23 +568,43 @@ class PlanningBoundaryService:
                 http_status=422,
             ) from error
 
-    def generate_v2(
+    def generate_v2_from_events(
         self,
         trip_id: UUID,
-        request: ReplanGenerationRequest,
+        request: EventDrivenReplanRequest,
     ) -> RegisteredReplan:
+        current, events = self._load_current_v1_context(trip_id)
+        current_request = self._load_current_candidate_request(trip_id, current)
+        candidate_request, frozen_task_ids = self._event_driven_candidate_request(
+            current=current,
+            current_request=current_request,
+            events=events,
+        )
+        return self._select_and_register_v2(
+            trip_id=trip_id,
+            current=current,
+            events=events,
+            reason=request.reason,
+            locked_task_ids=frozen_task_ids,
+            candidate_inputs=((candidate_request, 0),),
+        )
+
+    def _load_current_v1_context(
+        self,
+        trip_id: UUID,
+    ) -> tuple[PlanVersion, tuple[ExecutionEvent, ...]]:
         state = self.plan_service.get_trip_state(trip_id)
         current = state.current_plan
         if current is None:
             raise AppError(
                 code="REPLAN_CURRENT_PLAN_REQUIRED",
-                message="生成 Plan V2 前必须存在 CURRENT PlanVersion",
+                message="A CURRENT PlanVersion is required before Plan V2 replanning.",
                 http_status=409,
             )
         if current.version != 1:
             raise AppError(
                 code="REPLAN_S1_VERSION_LIMIT",
-                message="Sprint 1 仅支持从服务端签发的 CURRENT Plan V1 生成一次 V2",
+                message="Sprint 1 only supports replanning from CURRENT Plan V1.",
                 http_status=409,
             )
         try:
@@ -568,19 +615,301 @@ class PlanningBoundaryService:
             )
         except TrustedPlanningStoreError as error:
             raise self._trust_error(error) from error
+        return current, tuple(self.workflow_service.list_events(trip_id))
 
-        events = tuple(self.workflow_service.list_events(trip_id))
+    def _load_current_candidate_request(
+        self,
+        trip_id: UUID,
+        current: PlanVersion,
+    ) -> CandidatePlanRequest:
+        try:
+            facts = self.trust_repository.get_candidate_request(current.plan_id)
+        except TrustedPlanningStoreError as error:
+            raise self._trust_error(error) from error
+        if facts is None or facts.trip.trip_id != trip_id:
+            raise AppError(
+                code="PLANNING_FACTS_INVALID",
+                message="CURRENT Plan V1 is missing trusted CandidatePlanRequest facts.",
+                http_status=409,
+            )
+        self._require_current_request_matches_plan(current, facts)
+        return facts
+
+    @staticmethod
+    def _require_current_request_matches_plan(
+        current: PlanVersion,
+        request: CandidatePlanRequest,
+    ) -> None:
+        plan_tasks = tuple(current.days[0].tasks)
+        fact_ids = tuple(fact.task_id for fact in request.task_facts)
+        plan_ids = tuple(task.task_id for task in plan_tasks)
+        fact_orders = tuple(fact.order for fact in request.task_facts)
+        plan_orders = tuple(task.order for task in plan_tasks)
+        if fact_ids != plan_ids or fact_orders != plan_orders:
+            raise AppError(
+                code="REPLAN_CURRENT_FACTS_MISMATCH",
+                message="CURRENT Plan V1 tasks do not match trusted planning facts.",
+                http_status=409,
+                errors=[
+                    {
+                        "planTaskIds": list(plan_ids),
+                        "factTaskIds": list(fact_ids),
+                    }
+                ],
+            )
+
+    def _event_driven_candidate_request(
+        self,
+        *,
+        current: PlanVersion,
+        current_request: CandidatePlanRequest,
+        events: Sequence[ExecutionEvent],
+    ) -> tuple[CandidatePlanRequest, tuple[str, ...]]:
+        self._require_current_request_matches_plan(current, current_request)
+        tasks = tuple(current.days[0].tasks)
+        task_index = {task.task_id: index for index, task in enumerate(tasks)}
+        prefix_length, actual_spent_cents = self._project_event_prefix(
+            current=current,
+            events=events,
+            task_index=task_index,
+        )
+        if prefix_length >= len(tasks):
+            raise AppError(
+                code="REPLAN_SUFFIX_EMPTY",
+                message="No unfinished suffix remains for S1-T017 replanning.",
+                http_status=409,
+            )
+
+        frozen_task_ids = tuple(task.task_id for task in tasks[:prefix_length])
+        suffix_facts = tuple(current_request.task_facts[prefix_length:])
+        planned_suffix = self._plan_suffix(
+            SuffixPlanningInput(
+                task_facts=suffix_facts,
+                frozen_task_ids=frozen_task_ids,
+                actual_spent_cents=actual_spent_cents,
+            ),
+            original_suffix=suffix_facts,
+            start_order=prefix_length + 1,
+        )
+        payload = current_request.model_dump(mode="json", by_alias=True)
+        payload["taskFacts"] = [
+            item.model_dump(mode="json", by_alias=True)
+            for item in (
+                *current_request.task_facts[:prefix_length],
+                *planned_suffix,
+            )
+        ]
+        try:
+            candidate_request = CandidatePlanRequest.model_validate_json(
+                json.dumps(payload, ensure_ascii=False),
+                strict=True,
+            )
+        except ValidationError as error:
+            raise AppError(
+                code="REPLAN_SUFFIX_PLANNER_INVALID",
+                message="Suffix planner output did not produce a valid CandidatePlanRequest.",
+                http_status=422,
+                errors=[{"path": "taskFacts", "message": str(error)}],
+            ) from error
+        return candidate_request, frozen_task_ids
+
+    @staticmethod
+    def _project_event_prefix(
+        *,
+        current: PlanVersion,
+        events: Sequence[ExecutionEvent],
+        task_index: Mapping[str, int],
+    ) -> tuple[int, int]:
+        if not events:
+            raise AppError(
+                code="REPLAN_EVENTS_REQUIRED",
+                message="Event-driven replanning requires at least one execution event.",
+                http_status=409,
+            )
+
+        frozen_indexes: list[int] = []
+        expense_task_ids: set[str] = set()
+        completed_task_ids: set[str] = set()
+        actual_spent_cents = 0
+        for index, event in enumerate(events):
+            if event.trip_id != current.trip_snapshot.trip_id:
+                raise AppError(
+                    code="REPLAN_EVENT_TRIP_MISMATCH",
+                    message="Execution event belongs to another Trip.",
+                    http_status=409,
+                    errors=[{"path": f"events[{index}].tripId"}],
+                )
+            if event.plan_version_id != current.plan_id:
+                raise AppError(
+                    code="REPLAN_EVENT_PLAN_MISMATCH",
+                    message="Execution event does not belong to CURRENT Plan V1.",
+                    http_status=409,
+                    errors=[{"path": f"events[{index}].planVersionId"}],
+                )
+            if event.task_id not in task_index:
+                raise AppError(
+                    code="REPLAN_EVENT_TASK_NOT_FOUND",
+                    message="Execution event task is not in CURRENT Plan V1.",
+                    http_status=409,
+                    errors=[{"path": f"events[{index}].taskId"}],
+                )
+            if event.event_type is ExecutionEventType.EXPENSE:
+                if event.amount_cents is None:
+                    raise AppError(
+                        code="REPLAN_EXPENSE_AMOUNT_REQUIRED",
+                        message="EXPENSE events must include amountCents.",
+                        http_status=409,
+                    )
+                expense_task_ids.add(event.task_id)
+                actual_spent_cents += event.amount_cents
+            elif event.event_type is ExecutionEventType.COMPLETE:
+                completed_task_ids.add(event.task_id)
+                frozen_indexes.append(task_index[event.task_id])
+            elif event.event_type in {ExecutionEventType.START, ExecutionEventType.SKIP}:
+                frozen_indexes.append(task_index[event.task_id])
+
+        missing_expense = tuple(
+            sorted(completed_task_ids - expense_task_ids, key=task_index.__getitem__)
+        )
+        if missing_expense:
+            raise AppError(
+                code="REPLAN_EXPENSE_INCOMPLETE",
+                message="Every COMPLETE task must have an explicit EXPENSE event.",
+                http_status=409,
+                errors=[{"taskIds": list(missing_expense)}],
+            )
+
+        if not expense_task_ids:
+            raise AppError(
+                code="REPLAN_EXPENSE_REQUIRED",
+                message="EXPENSE_CHANGE replanning requires an EXPENSE event.",
+                http_status=409,
+            )
+
+        prefix_length = max(frozen_indexes) + 1 if frozen_indexes else 0
+        return prefix_length, actual_spent_cents
+
+    def _plan_suffix(
+        self,
+        planning_input: SuffixPlanningInput,
+        *,
+        original_suffix: Sequence[CandidateTaskFact],
+        start_order: int,
+    ) -> tuple[CandidateTaskFact, ...]:
+        try:
+            planned = self.suffix_planner.plan_suffix(planning_input)
+        except Exception as error:
+            raise AppError(
+                code="REPLAN_SUFFIX_PLANNER_FAILED",
+                message="Suffix planner failed while producing a candidate suffix.",
+                http_status=422,
+            ) from error
+        return self._normalize_suffix_facts(
+            planned,
+            original_suffix=original_suffix,
+            frozen_task_ids=planning_input.frozen_task_ids,
+            start_order=start_order,
+        )
+
+    @classmethod
+    def _normalize_suffix_facts(
+        cls,
+        planned: object,
+        *,
+        original_suffix: Sequence[CandidateTaskFact],
+        frozen_task_ids: Sequence[str],
+        start_order: int,
+    ) -> tuple[CandidateTaskFact, ...]:
+        if not isinstance(planned, Sequence) or isinstance(planned, (str, bytes)):
+            raise cls._suffix_planner_invalid(
+                "suffix",
+                "Suffix planner must return a sequence of CandidateTaskFact objects.",
+            )
+        if len(planned) != len(original_suffix):
+            raise cls._suffix_planner_invalid(
+                "suffix",
+                "Suffix planner must return exactly the unfinished suffix length.",
+            )
+
+        frozen = set(frozen_task_ids)
+        original_order_by_task = {
+            fact.task_id: fact.order for fact in original_suffix
+        }
+        seen: set[str] = set()
+        output: list[CandidateTaskFact] = []
+        for offset, item in enumerate(planned):
+            fact = cls._strict_task_fact(item, path=f"suffix[{offset}]")
+            expected_order = start_order + offset
+            if fact.order != expected_order:
+                raise cls._suffix_planner_invalid(
+                    f"suffix[{offset}].order",
+                    "Suffix planner must preserve contiguous suffix order.",
+                )
+            if fact.task_id in frozen:
+                raise cls._suffix_planner_invalid(
+                    f"suffix[{offset}].taskId",
+                    "Suffix planner must not return frozen tasks.",
+                )
+            original_order = original_order_by_task.get(fact.task_id)
+            if original_order is not None and original_order != fact.order:
+                raise cls._suffix_planner_invalid(
+                    f"suffix[{offset}].taskId",
+                    "Existing suffix task ids cannot move across order slots.",
+                )
+            if fact.task_id in seen:
+                raise cls._suffix_planner_invalid(
+                    f"suffix[{offset}].taskId",
+                    "Suffix planner returned duplicate task ids.",
+                )
+            seen.add(fact.task_id)
+            output.append(fact)
+        return tuple(output)
+
+    @staticmethod
+    def _strict_task_fact(value: object, *, path: str) -> CandidateTaskFact:
+        try:
+            if not isinstance(value, CandidateTaskFact):
+                raise TypeError("expected CandidateTaskFact")
+            raw = value.model_dump_json(by_alias=True, warnings="error")
+            return CandidateTaskFact.model_validate_json(raw, strict=True)
+        except (AttributeError, TypeError, ValueError, ValidationError) as error:
+            raise PlanningBoundaryService._suffix_planner_invalid(
+                path,
+                str(error),
+            ) from error
+
+    @staticmethod
+    def _suffix_planner_invalid(path: str, message: str) -> AppError:
+        return AppError(
+            code="REPLAN_SUFFIX_PLANNER_INVALID",
+            message="Suffix planner returned invalid output.",
+            http_status=422,
+            errors=[{"path": path, "message": message}],
+        )
+
+    def _select_and_register_v2(
+        self,
+        *,
+        trip_id: UUID,
+        current: PlanVersion,
+        events: Sequence[ExecutionEvent],
+        reason: Any,
+        locked_task_ids: Sequence[str],
+        candidate_inputs: Sequence[tuple[CandidatePlanRequest, int]],
+    ) -> RegisteredReplan:
         candidates: list[ReplanCandidate] = []
+        candidate_requests: dict[UUID, CandidatePlanRequest] = {}
+        satisfaction_loss_by_plan_id: dict[UUID, int] = {}
         generation_failures: list[dict[str, Any]] = []
-        for index, candidate_input in enumerate(request.candidates):
-            self._require_trip_id(trip_id, candidate_input.request)
+        for index, (candidate_request, satisfaction_loss) in enumerate(candidate_inputs):
+            self._require_trip_id(trip_id, candidate_request)
             try:
-                generated = generate_candidate_plan(candidate_input.request)
+                generated = generate_candidate_plan(candidate_request)
                 proposal = candidate_to_proposed_plan_version_v2(
                     generated,
-                    candidate_input.request,
+                    candidate_request,
                     current,
-                    reason=request.reason,
+                    reason=reason,
                 )
             except CandidatePlanRejected as error:
                 generation_failures.append(
@@ -606,39 +935,34 @@ class PlanningBoundaryService:
                 )
                 continue
 
-            try:
-                self.trust_repository.stage_candidate(
-                    plan=proposal,
-                    request=candidate_input.request,
-                    boundary_kind="V2",
-                    validation=self._proposal_validation(proposal),
-                )
-            except TrustedPlanningStoreError as error:
-                raise self._trust_error(error) from error
+            candidate_requests[proposal.plan_id] = candidate_request
+            satisfaction_loss_by_plan_id[proposal.plan_id] = satisfaction_loss
             candidates.append(
                 ReplanCandidate(
                     plan=proposal,
-                    satisfaction_loss=candidate_input.satisfaction_loss,
+                    satisfaction_loss=satisfaction_loss,
                 )
             )
 
         if not candidates:
             raise AppError(
                 code="REPLAN_NO_FEASIBLE_CANDIDATE",
-                message="所有候选均未通过服务端 T011 校验",
+                message="No candidate passed server-side T011 validation.",
                 http_status=422,
                 errors=generation_failures,
             )
 
         selector = MinimumDisruptionSelector(
-            T011ReplanCandidateValidator(self.trust_repository)
+            T011ReplanCandidateValidator(
+                _InMemoryTrustedCandidateFacts(candidate_requests)
+            )
         )
         try:
             outcome = selector.select(
                 current_plan=current,
                 candidates=tuple(candidates),
                 events=events,
-                locked_task_ids=request.locked_task_ids,
+                locked_task_ids=locked_task_ids,
             )
         except ReplanningContractError as error:
             raise self._contract_error(error) from error
@@ -646,7 +970,7 @@ class PlanningBoundaryService:
         if isinstance(outcome, NoFeasibleReplan):
             raise AppError(
                 code="REPLAN_NO_FEASIBLE_CANDIDATE",
-                message="T018 未找到满足执行冻结前缀和 HARD 约束的候选",
+                message="T018 found no candidate satisfying frozen-prefix and HARD constraints.",
                 http_status=422,
                 errors=[
                     *generation_failures,
@@ -671,11 +995,8 @@ class PlanningBoundaryService:
             if item.candidate_plan_id == selected_plan_id
         )
         assert assessment.modified_task_count is not None
-        selected_input = next(
-            item for item in candidates if item.plan.plan_id == selected_plan_id
-        )
-
-        stored = self._register_generated(outcome.selected_plan)
+        selected_request = candidate_requests[selected_plan_id]
+        selected_satisfaction_loss = satisfaction_loss_by_plan_id[selected_plan_id]
         selection_validation = {
             **self._proposal_validation(outcome.selected_plan),
             "selector": "T018_MINIMUM_DISRUPTION",
@@ -689,6 +1010,13 @@ class PlanningBoundaryService:
             ],
         }
         try:
+            self.trust_repository.stage_candidate(
+                plan=outcome.selected_plan,
+                request=selected_request,
+                boundary_kind="V2",
+                validation=selection_validation,
+            )
+            stored = self._register_generated(outcome.selected_plan)
             self.trust_repository.mark_issued(
                 stored,
                 validation=selection_validation,
@@ -699,10 +1027,29 @@ class PlanningBoundaryService:
         return RegisteredReplan(
             plan=stored,
             disruption_score=assessment.modified_task_count,
-            satisfaction_loss=selected_input.satisfaction_loss,
+            satisfaction_loss=selected_satisfaction_loss,
             frozen_task_ids=outcome.frozen_task_ids,
             assessments=outcome.assessments,
             validation_report=outcome.validation_report,
+        )
+
+    def generate_v2(
+        self,
+        trip_id: UUID,
+        request: ReplanGenerationRequest,
+    ) -> RegisteredReplan:
+        current, events = self._load_current_v1_context(trip_id)
+        candidate_inputs = tuple(
+            (candidate_input.request, candidate_input.satisfaction_loss)
+            for candidate_input in request.candidates
+        )
+        return self._select_and_register_v2(
+            trip_id=trip_id,
+            current=current,
+            events=events,
+            reason=request.reason,
+            locked_task_ids=request.locked_task_ids,
+            candidate_inputs=candidate_inputs,
         )
 
     def require_v1_confirmation(self, trip_id: UUID, plan_id: UUID) -> None:

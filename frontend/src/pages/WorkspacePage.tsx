@@ -46,7 +46,6 @@ import type {
   PlanSnapshot,
   PlanningConstraint,
   PlanVersionDiff,
-  PlanVersionReason,
   Provenance,
   SourceStatus,
   StoredPlanVersion,
@@ -55,18 +54,20 @@ import type {
   TripSummary,
 } from '../domain/trip'
 import {
-  buildAmapReplanCandidate,
   loadAmapPlan,
   type AmapPlanResult,
   type LocationEvidence,
 } from '../services/amapPlan'
 import { compileAssistanceConstraints } from '../services/assistanceConstraints'
+import { parseYuanAmountToCents } from '../services/executionReplan'
 import { facilityEvidenceNeedsConfirmation } from '../services/routeRiskFacts'
 import { restoreDraftFromPlanningFacts } from '../services/planningFacts'
 import {
   canRequestS1PlanV2,
   S1_REPLAN_LIMIT_MESSAGE,
 } from '../services/replanPolicy'
+
+const S1_EVENT_REPLAN_ONLY_MESSAGE = 'Sprint1仅支持实际消费变化触发V2'
 
 type WorkspaceView = 'plan' | 'execute' | 'diff' | 'summary'
 
@@ -287,7 +288,6 @@ export function WorkspacePage() {
   const [recommendationRound, setRecommendationRound] = useState(1)
   const [isRegenerating, setIsRegenerating] = useState(false)
   const [appliedFeedback, setAppliedFeedback] = useState<string[]>([])
-  const [executionFeedback, setExecutionFeedback] = useState('')
   const [executionAdjustmentCount, setExecutionAdjustmentCount] = useState(0)
   const [executionNotice, setExecutionNotice] = useState('')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
@@ -540,7 +540,8 @@ export function WorkspacePage() {
   const currentTask = activePlan.tasks[currentTaskIndex]
   const nextTask = activePlan.tasks[currentTaskIndex + 1]
   const selectedTask = activePlan.tasks.find((task) => task.id === selectedTaskId)
-  const actualExpenseCents = Math.max(0, Number(actualCost) || 0) * 100
+  const parsedActualExpenseCents = parseYuanAmountToCents(actualCost)
+  const actualExpenseCents = parsedActualExpenseCents ?? 0
   const expenseDeltaCents = actualExpenseCents - (currentTask?.costCents ?? 0)
   const expenseDifferenceLabel =
     expenseDeltaCents === 0
@@ -814,11 +815,7 @@ export function WorkspacePage() {
     }
   }
 
-  async function preparePlanV2(
-    reason: Exclude<PlanVersionReason, 'INITIAL_PLAN'>,
-    feedback: string,
-    lockedThroughIndex: number,
-  ) {
+  async function preparePlanV2() {
     if (!tripId || !storedCurrentPlan) {
       throw new Error('未恢复当前 Plan V1，暂时不能生成 Plan V2。')
     }
@@ -830,51 +827,7 @@ export function WorkspacePage() {
       return
     }
 
-    const originalTasks = storedCurrentPlan.days[0].tasks
-    const replaceIndex = originalTasks.findIndex((_, index) => index > lockedThroughIndex)
-    if (replaceIndex < 0) {
-      throw new Error('当前没有可调整的未完成任务。')
-    }
-    if (!planningDraft) {
-      throw new Error('缺少服务端签发规划事实，不能重新请求高德地点与路线。')
-    }
-    if (!candidateRequest) {
-      throw new Error('缺少服务端签发 Plan V1 时使用的原始事实，刷新后请重新从新建行程进入。')
-    }
-    const extraQuery = reason === 'EXPENSE_CHANGE'
-      ? '免费景点'
-      : reason === 'FATIGUE'
-        ? '室内景点'
-        : reason === 'DELAY'
-          ? '附近景点'
-          : feedback.slice(0, 30)
-    const providerResult = await buildAmapReplanCandidate(
-      tripId,
-      planningDraft,
-      candidateRequest,
-      undefined,
-      {
-        feedback,
-        lockedThroughIndex,
-        extraQueries: [extraQuery],
-        excludePlaceIds: originalTasks.map((task) => task.taskId),
-        preferredMaxWalkMeters: reason === 'FATIGUE'
-          ? Math.max(100, Math.round(planningDraft.assistanceProfile.maxSegmentWalkMeters * 0.7))
-          : undefined,
-      },
-    )
-    const lockedTaskIds = originalTasks
-      .slice(0, Math.max(0, lockedThroughIndex + 1))
-      .map((task) => task.taskId)
-    const selected = await tripApi.selectReplan(tripId, {
-      schemaVersion: '1.0',
-      reason,
-      lockedTaskIds,
-      candidates: [{
-        request: providerResult.candidateRequest,
-        satisfactionLoss: 0,
-      }],
-    })
+    const selected = await tripApi.replanFromEvents(tripId)
     const diff = await tripApi.getPlanDiff(tripId, selected.data.plan.planId)
     setCandidatePlanV2(selected.data.plan)
     setPlanDiff(diff.data)
@@ -955,9 +908,14 @@ export function WorkspacePage() {
     if (!currentTask || !storedCurrentPlan) {
       return
     }
+    if (parsedActualExpenseCents === null) {
+      setPlanLifecycleError('实际消费金额必须是非负数字。')
+      return
+    }
     setIsWritingEvent(true)
     setPlanLifecycleError('')
     try {
+      const nextIndex = currentTaskIndex + 1
       await recordExecutionEvent(
         storedCurrentPlan.planId,
         currentTask.id,
@@ -977,14 +935,29 @@ export function WorkspacePage() {
       ) {
         setIsPreparingV2(true)
         setAdvanceAfterDecision(true)
-        await preparePlanV2('EXPENSE_CHANGE', expenseDifferenceLabel, currentTaskIndex)
-        setIsPreparingV2(false)
+        try {
+          await preparePlanV2()
+          setIsPreparingV2(false)
+          return
+        } catch (error) {
+          setAdvanceAfterDecision(false)
+          setIsPreparingV2(false)
+          setPlanLifecycleError(error instanceof Error ? error.message : '生成 Plan V2 失败')
+          setExecutionNotice('费用变化已记录；Plan V2 暂不可行，继续执行当前 Plan V1。')
+          if (tripId) {
+            const restored = await tripApi.getTrip(tripId)
+            applyTripState(restored.data)
+            if (restored.data.currentPlan?.days[0].tasks[nextIndex]) {
+              await startTask(restored.data.currentPlan, nextIndex)
+              setView('execute')
+            }
+          }
+        }
         return
       }
       if (expenseDeltaCents !== 0 && !canCreatePlanV2) {
         setExecutionNotice(`费用变化已记录；${S1_REPLAN_LIMIT_MESSAGE} 将继续执行当前计划。`)
       }
-      const nextIndex = currentTaskIndex + 1
       if (storedCurrentPlan.days[0].tasks[nextIndex]) {
         await startTask(storedCurrentPlan, nextIndex)
         setView('execute')
@@ -995,28 +968,6 @@ export function WorkspacePage() {
       setPlanLifecycleError(error instanceof Error ? error.message : '完成任务失败')
     } finally {
       setIsWritingEvent(false)
-    }
-  }
-
-  async function handleExecutionFeedback() {
-    const feedback = executionFeedback.trim()
-    if (!feedback) {
-      return
-    }
-    if (!canCreatePlanV2) {
-      setPlanLifecycleError(S1_REPLAN_LIMIT_MESSAGE)
-      return
-    }
-    setIsPreparingV2(true)
-    setAdvanceAfterDecision(false)
-    setPlanLifecycleError('')
-    setExecutionFeedback('')
-    try {
-      await preparePlanV2('USER_FEEDBACK', feedback, currentTaskIndex)
-    } catch (error) {
-      setPlanLifecycleError(error instanceof Error ? error.message : '生成 Plan V2 失败')
-    } finally {
-      setIsPreparingV2(false)
     }
   }
 
@@ -1731,28 +1682,21 @@ export function WorkspacePage() {
                   <span><MessageSquareText size={18} /> 随时反馈给 Agent</span>
                 </div>
                 <textarea
-                  disabled={!canCreatePlanV2}
+                  disabled
                   maxLength={160}
-                  onChange={(event) => setExecutionFeedback(event.target.value)}
-                  placeholder={canCreatePlanV2
-                    ? '例如：有点累了、想提前吃饭、希望减少后面的步行……'
-                    : S1_REPLAN_LIMIT_MESSAGE}
-                  value={executionFeedback}
+                  placeholder={S1_EVENT_REPLAN_ONLY_MESSAGE}
+                  readOnly
+                  value=""
                 />
                 <button
                   className="button button--soft"
-                  disabled={isPreparingV2 || !executionFeedback.trim() || !canCreatePlanV2}
-                  onClick={() => void handleExecutionFeedback()}
+                  disabled
                   type="button"
                 >
-                  {isPreparingV2 ? <LoaderCircle className="spin-icon" size={15} /> : <Send size={15} />}
-                  {isPreparingV2
-                    ? '正在生成候选方案…'
-                    : canCreatePlanV2
-                      ? '生成 Plan V2 候选方案'
-                      : '本迭代已完成 V2 调整'}
+                  <Send size={15} />
+                  实际消费变化才会触发 V2
                 </button>
-                {!canCreatePlanV2 && <p>{S1_REPLAN_LIMIT_MESSAGE}</p>}
+                <p>{S1_EVENT_REPLAN_ONLY_MESSAGE}</p>
                 {executionNotice && <p><CheckCircle2 size={14} /> {executionNotice}</p>}
                 {planLifecycleError && <p className="media-error">{planLifecycleError}</p>}
               </section>

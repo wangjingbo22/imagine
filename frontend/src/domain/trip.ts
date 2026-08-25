@@ -491,6 +491,11 @@ export interface ReplanGenerationRequest {
   candidates: ReplanRequestCandidate[]
 }
 
+export interface EventDrivenReplanRequest {
+  schemaVersion: '1.0'
+  reason: 'EXPENSE_CHANGE'
+}
+
 export type ReplanRuleDomain = 'BUDGET' | 'TIME' | 'ROUTE' | 'CARE'
 
 export interface ReplanRuleCheck {

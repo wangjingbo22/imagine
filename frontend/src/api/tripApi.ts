@@ -28,6 +28,7 @@ import type {
   TripPlanState,
 } from '../domain/trip'
 import { request } from './client'
+import { createExpenseChangeReplanRequest } from '../services/executionReplan'
 
 export const USE_PLAN_VERSION_API =
   (import.meta.env.VITE_USE_PLAN_VERSION_API ?? 'true') === 'true'
@@ -126,6 +127,13 @@ export const tripApi = {
     return request<RegisteredReplan>(`/api/v1/trips/${tripId}/replans`, {
       method: 'POST',
       body: JSON.stringify(input),
+    })
+  },
+
+  replanFromEvents(tripId: string) {
+    return request<RegisteredReplan>(`/api/v1/trips/${tripId}/replans/from-events`, {
+      method: 'POST',
+      body: JSON.stringify(createExpenseChangeReplanRequest()),
     })
   },
 

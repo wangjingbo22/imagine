@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from app.application.planning_boundary_service import PlanningBoundaryService
 from app.core.errors import AppError
 from app.domain.models import ApiResponse
-from app.schemas.planning import ReplanGenerationRequest
+from app.schemas.planning import EventDrivenReplanRequest, ReplanGenerationRequest
 from app.schemas.validation_error import TripSchemaError, issues_from_pydantic
 from app.services.planning.models import (
     CandidatePlanRequest,
@@ -127,6 +127,29 @@ async def generate_plan_v2(
     except ValidationError as error:
         raise TripSchemaError(issues_from_pydantic(error.errors())) from error
     return ApiResponse(data=service.generate_v2(trip_id, replan_request))
+
+
+@router.post(
+    "/trips/{trip_id}/replans/from-events",
+    summary="Generate Plan V2 from persisted execution events",
+    description=(
+        "S1-T017 EXPENSE_CHANGE boundary. The browser sends no candidates, "
+        "locked ids, facts, or free-text feedback."
+    ),
+)
+async def generate_plan_v2_from_events(
+    trip_id: UUID,
+    request: Request,
+    service: PlanningBoundaryService = Depends(get_planning_boundary),
+) -> ApiResponse:
+    try:
+        replan_request = EventDrivenReplanRequest.model_validate_json(
+            await request.body(),
+            strict=True,
+        )
+    except ValidationError as error:
+        raise TripSchemaError(issues_from_pydantic(error.errors())) from error
+    return ApiResponse(data=service.generate_v2_from_events(trip_id, replan_request))
 
 
 __all__ = ["router"]
