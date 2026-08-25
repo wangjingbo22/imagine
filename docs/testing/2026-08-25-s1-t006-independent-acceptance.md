@@ -200,8 +200,8 @@ Python 必须为 `>=3.11`，pytest 必须可用，依赖探针必须打印 `s1-t
 | `QA-S01` | 目标 commit 已冻结 | `$analysisCommit..$targetCommit` | 第 9.1 节全部范围命令 | 变更路径是白名单子集且计划产物齐全；冻结契约无 diff；禁飞区无改动 | `Important` |
 | `QA-S02` | 四个生产文件可审查 | budget/adapter/import 与危险表达式扫描 | 第 9.3 节 | 无 `amount or 0`、`totalCostCents`、Provider/I/O/evaluator 调用、新依赖、secret | `Critical` |
 | `QA-E01` | 实现提交齐全 | 缓存快照与测试文件 | 第 9.2 节 | JSON 精确、可独立重算、无敏感字段；所有计划测试文件存在 | `Important` |
-| `QA-E02` | 定向测试可收集 | 五个 T006/T009 测试文件 | 第 8.1 节 | 至少 42 个用例全部通过；0 skip/xfail/deselect/collection error | `Important` |
-| `QA-E03` | 定向通过 | 仓库全部 pytest | 第 8.2 节 | 至少 152 passed；0 failed/error/skip/xfail/deselect | `Important` |
+| `QA-E02` | 定向测试可收集 | 五个 T006/T009 测试文件 | 第 8.1 节 | 至少 48 个用例全部通过；0 skip/xfail/deselect/collection error | `Important` |
+| `QA-E03` | 定向通过 | 仓库全部 pytest | 第 8.2 节 | 至少 158 passed；0 failed/error/skip/xfail/deselect | `Important` |
 | `QA-E04` | 所有行为与范围门禁通过 | commit 列表、状态、实现 RED/GREEN 材料 | 第 9.4 节 | HEAD 等于交接 SHA；工作树干净；实现证据可追溯；`PR: pending external push/creation` 直至真实 PR 存在 | `Important` |
 
 ## 7. 独立黑盒预言机
@@ -381,7 +381,10 @@ async def main() -> None:
         else:
             raise AssertionError("cross-city cache fallback escaped")
 
-    invalid_costs = ["", [], "not-a-price", "-1", "NaN", "Infinity", "-Infinity"]
+    invalid_costs = [
+        "", [], "not-a-price", "-1", "NaN", "Infinity", "-Infinity",
+        "1e10000", "1e999999", "-1e10000",
+    ]
     for index, cost in enumerate(invalid_costs):
         with tempfile.TemporaryDirectory() as directory:
             result = await service(Path(directory), Client(payload(
@@ -390,6 +393,16 @@ async def main() -> None:
             fact = result.places[0].priceReference
             assert fact.amountCents is None
             assert fact.provenance.sourceStatus is SourceStatus.UNKNOWN
+
+    valid_costs = [("0", 0), ("12.30", 1230), ("1e20", 10**22)]
+    for index, (cost, expected_cents) in enumerate(valid_costs):
+        with tempfile.TemporaryDirectory() as directory:
+            result = await service(Path(directory), Client(payload(
+                provider_city="010", ad_code="110101", place_id=f"known-price-{index}", cost=cost
+            ))).search_places(beijing, **query)
+            fact = result.places[0].priceReference
+            assert fact.amountCents == expected_cents
+            assert fact.provenance.sourceStatus is SourceStatus.ONLINE
 
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -635,7 +648,7 @@ print("s1-t006-route-t009-probe-ok")
 & $python -m pytest -p no:cacheprovider -ra -q tests/test_place_service.py tests/test_price_fact.py tests/test_budget.py tests/test_route_risk_adapter.py backend/tests/test_route_risk.py
 ```
 
-冻结计划预计目标集合至少 `42` 个 pytest case：原地点 4、新 T006 25、既有 T009 13。实际数量可因经审查的新测试增加，但不得低于 42；`failed/error/skipped/xfailed/xpassed/deselected` 均须为 0。
+第二轮修复后的目标集合不得低于 `48` 个 pytest case；相对上一轮 43 个集合，超大有限价格与合法科学计数法回归新增 5 个参数化 case。`failed/error/skipped/xfailed/xpassed/deselected` 均须为 0。
 
 ### 8.2 全量 pytest
 
@@ -644,7 +657,7 @@ print("s1-t006-route-t009-probe-ok")
 & $python -m pytest -p no:cacheprovider -ra -q
 ```
 
-冻结生产基线为 `127 passed`，实施计划新增 25 个参数展开后的 case，因此全量不得低于 `152 passed`。新增测试可使数字更高；减少、skip、xfail、deselect、collection error 或任何失败均为 `Important`。
+第二轮修复后的全量不得低于 `158 passed`。新增测试可使数字更高；减少、skip、xfail、deselect、collection error 或任何失败均为 `Important`。
 
 ## 9. 快照、diff、范围与交付证据
 
@@ -796,7 +809,7 @@ git status --short --branch
 
 1. 分支、目标 commit、两级祖先和干净工作树通过第 5 节。
 2. `QA-C01`—`QA-R05` 全部满足精确预期；三个独立探针均 exit code 0 并打印唯一标志。
-3. 目标测试至少 42 passed、全量至少 152 passed，且无 failed/error/skip/xfail/xpass/deselect。
+3. 目标测试至少 48 passed、全量至少 158 passed，且无 failed/error/skip/xfail/xpass/deselect。
 4. 缓存快照恰含两行四字段，两个 hash 由 canonical parameters 独立重算一致，无 payload、Key 或时间戳。
 5. PriceFact 双向不变量、unknown/known-zero 区分、逐项预算 warning、稳定顺序和 `knownSubtotalCents` 全部成立。
 6. Route 映射、显式 elapsed、精确 fail-closed field、稳定 JSON 和 T009 `UNKNOWN → NEEDS_CONFIRMATION` 全部成立。
