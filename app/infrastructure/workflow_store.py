@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 from app.infrastructure.plan_store import PlanStoreError
 from app.schemas.execution import (
+    ActualBudgetSummary,
     CreateExecutionEvent,
     ExecutionEvent,
     ExecutionEventType,
@@ -238,7 +239,8 @@ class SqliteWorkflowRepository:
         request: CreateExecutionEvent,
     ) -> ExecutionEvent:
         trip_text = str(trip_id)
-        now = datetime.now(UTC).isoformat()
+        occurred_at = request.occurred_at.astimezone(UTC).isoformat()
+        updated_at = datetime.now(UTC).isoformat()
         with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             duplicate = connection.execute(
@@ -343,7 +345,7 @@ class SqliteWorkflowRepository:
                     request.event_type.value,
                     request.amount_cents,
                     request.idempotency_key,
-                    now,
+                    occurred_at,
                 ),
             )
 
@@ -365,7 +367,7 @@ class SqliteWorkflowRepository:
                         UPDATE trips SET trip_status = 'COMPLETED', updated_at = ?
                         WHERE trip_id = ? AND trip_status = 'EXECUTING'
                         """,
-                        (now, trip_text),
+                        (updated_at, trip_text),
                     )
 
             row = connection.execute(
@@ -387,6 +389,40 @@ class SqliteWorkflowRepository:
                 (str(trip_id),),
             ).fetchall()
         return [self._event_from_row(row) for row in rows]
+
+    def get_budget_summary(self, trip_id: UUID) -> ActualBudgetSummary:
+        trip_text = str(trip_id)
+        with closing(self._connect()) as connection:
+            plan_row = connection.execute(
+                """
+                SELECT * FROM plan_versions
+                WHERE trip_id = ? AND status = 'CURRENT'
+                """,
+                (trip_text,),
+            ).fetchone()
+            if plan_row is None:
+                raise PlanStoreError("PLAN_NOT_CONFIRMED", "未找到 CURRENT PlanVersion")
+        plan = ProposedPlanVersion.model_validate_json(
+            plan_row["snapshot_json"],
+            strict=True,
+        )
+        events = self.list_events(trip_id)
+        expenses = [
+            event.amount_cents
+            for event in events
+            if event.event_type is ExecutionEventType.EXPENSE
+            and event.amount_cents is not None
+        ]
+        actual_spent_cents = sum(expenses)
+        planned_budget_cents = plan.trip_snapshot.total_budget_cents
+        return ActualBudgetSummary(
+            trip_id=trip_id,
+            plan_version_id=plan.plan_id,
+            planned_budget_cents=planned_budget_cents,
+            actual_spent_cents=actual_spent_cents,
+            remaining_budget_cents=planned_budget_cents - actual_spent_cents,
+            expense_event_count=len(expenses),
+        )
 
     def get_summary(self, trip_id: UUID) -> TripExecutionSummary:
         trip_text = str(trip_id)

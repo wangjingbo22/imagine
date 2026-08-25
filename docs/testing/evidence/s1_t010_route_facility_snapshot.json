@@ -1,0 +1,48 @@
+{
+  "taskId": "S1-T010",
+  "schemaVersion": "1.0",
+  "routeSnapshot": {
+    "routeId": "walking-beijing-fixture",
+    "cityCode": "110000",
+    "mode": "WALKING",
+    "distanceMeters": 2196,
+    "durationSeconds": 1757,
+    "sourceStatus": "ONLINE",
+    "fetchedAt": "2026-08-25T01:54:46Z"
+  },
+  "facilityEvidence": [
+    {
+      "facilityType": "ELEVATOR",
+      "label": "电梯",
+      "status": "NEEDS_CONFIRMATION",
+      "sourceStatus": "UNKNOWN",
+      "missingReason": "高德路线快照未提供电梯事实，需现场或人工来源确认"
+    },
+    {
+      "facilityType": "RAMP",
+      "label": "坡道",
+      "status": "NEEDS_CONFIRMATION",
+      "sourceStatus": "UNKNOWN",
+      "missingReason": "高德路线快照未提供坡道事实，需现场或人工来源确认"
+    },
+    {
+      "facilityType": "NURSING_ROOM",
+      "label": "母婴室",
+      "status": "NEEDS_CONFIRMATION",
+      "sourceStatus": "UNKNOWN",
+      "missingReason": "高德路线快照未提供母婴室事实，需现场或人工来源确认"
+    },
+    {
+      "facilityType": "ACCESSIBLE_ENTRANCE",
+      "label": "无障碍入口",
+      "status": "NEEDS_CONFIRMATION",
+      "sourceStatus": "UNKNOWN",
+      "missingReason": "高德路线快照未提供无障碍入口事实，需现场或人工来源确认"
+    }
+  ],
+  "uiAssertions": {
+    "overallStatus": "NEEDS_CONFIRMATION",
+    "showsPassForMissingFacilities": false,
+    "claimsNationwideAccessibility": false
+  }
+}

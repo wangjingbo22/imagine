@@ -10,6 +10,9 @@ from app.domain.models import (
     AddressResolution,
     CityContext,
     CityResolution,
+    FacilityEvidence,
+    FacilityEvidenceStatus,
+    FacilityType,
     Place,
     PlaceCollection,
     PriceFact,
@@ -418,11 +421,40 @@ class AmapLocationService:
                     walkingDistanceMeters=_optional_integer(item.get("walking_distance")),
                     transferCount=_transfers(item, mode),
                     steps=steps,
+                    facilityEvidence=_unknown_facility_evidence(route_id, provenance),
                     priceReference=price,
                     provenance=provenance,
                 )
             )
         return routes
+
+
+def _unknown_facility_evidence(
+    route_id: str,
+    route_provenance: Provenance,
+) -> list[FacilityEvidence]:
+    """Expose missing facility facts without turning missing evidence into PASS."""
+
+    unknown = route_provenance.model_copy(
+        update={"sourceStatus": SourceStatus.UNKNOWN}
+    )
+    labels = (
+        (FacilityType.ELEVATOR, "电梯"),
+        (FacilityType.RAMP, "坡道"),
+        (FacilityType.NURSING_ROOM, "母婴室"),
+        (FacilityType.ACCESSIBLE_ENTRANCE, "无障碍入口"),
+    )
+    return [
+        FacilityEvidence(
+            facilityType=facility_type,
+            label=label,
+            status=FacilityEvidenceStatus.NEEDS_CONFIRMATION,
+            message=f"高德路线快照未提供{label}事实，需现场或人工来源确认",
+            referenceId=route_id,
+            provenance=unknown,
+        )
+        for facility_type, label in labels
+    ]
 
 
 def _assert_same_city(

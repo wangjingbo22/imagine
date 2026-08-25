@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field, UUID4, model_validator
+from pydantic import ConfigDict, Field, StrictInt, UUID4, model_validator
 
 from .trip import ContractModel
 
@@ -26,14 +26,18 @@ class CreateExecutionEvent(ContractModel):
         loc_by_alias=True,
     )
 
+    schema_version: Literal["1.0"] = "1.0"
     task_id: Annotated[str, Field(min_length=1, max_length=64)]
     plan_version_id: UUID4
     event_type: ExecutionEventType
-    amount_cents: Annotated[int, Field(ge=0)] | None = None
+    amount_cents: Annotated[StrictInt, Field(ge=0)] | None = None
     idempotency_key: Annotated[str, Field(min_length=1, max_length=160)]
+    occurred_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @model_validator(mode="after")
     def validate_amount(self) -> "CreateExecutionEvent":
+        if self.occurred_at.tzinfo is None:
+            raise ValueError("occurredAt must include a timezone")
         if self.event_type is ExecutionEventType.EXPENSE:
             if self.amount_cents is None:
                 raise ValueError("EXPENSE event requires amountCents")
@@ -43,6 +47,7 @@ class CreateExecutionEvent(ContractModel):
 
 
 class ExecutionEvent(ContractModel):
+    schema_version: Literal["1.0"] = "1.0"
     event_id: UUID4
     trip_id: UUID4
     task_id: str
@@ -53,7 +58,17 @@ class ExecutionEvent(ContractModel):
     occurred_at: datetime
 
 
+class ActualBudgetSummary(ContractModel):
+    trip_id: UUID4
+    plan_version_id: UUID4 | None = None
+    planned_budget_cents: Annotated[int, Field(ge=0)]
+    actual_spent_cents: Annotated[int, Field(ge=0)]
+    remaining_budget_cents: int
+    expense_event_count: Annotated[int, Field(ge=0)]
+
+
 __all__ = [
+    "ActualBudgetSummary",
     "CreateExecutionEvent",
     "ExecutionEvent",
     "ExecutionEventType",

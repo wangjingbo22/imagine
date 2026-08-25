@@ -145,8 +145,10 @@ class SqlitePlanVersionRepository:
                         existing_plan["trip_id"] == trip_id
                         and existing_plan["snapshot_json"] == snapshot_json
                     ):
-                        self._commit(connection)
-                        return self._plan_from_row(existing_plan)
+                        raise PlanStoreError(
+                            "PLAN_VERSION_ALREADY_EXISTS",
+                            "同一 PlanVersion 已写入，不允许重复登记",
+                        )
                     raise PlanStoreError(
                         "PLAN_VERSION_IMMUTABLE",
                         "同一 planId 已保存为不同快照，PlanVersion 不允许原地修改",

@@ -108,7 +108,7 @@
   每项必须保留稳定的 `ruleId`、`routeSegment`、`observed` 与 `suggestion`。
 - Schema 错误使用 `TRIP_SCHEMA_INVALID`；歧义确认使用
   `TRIP_CONFIRMATION_REQUIRED`，两者均返回字段级 `errors[]`。
-- Trip 创建 HTTP URL 尚未登记；城市查询与 Plan V1 状态接口分别见第 9、10 节。自然语言解析、媒体与总结接口继续保持 Mock。
+- Trip 创建 HTTP URL 尚未登记；自然语言解析、城市查询与 Plan V1 状态接口已经登记。媒体与总结接口继续保持 Mock。
 - 前端对齐说明见 `frontend/src/api/API.md`。
 
 ## 9. PBI-02-A 城市地点、路线与可信来源（Schema 1.0）
@@ -156,6 +156,8 @@ Schema 校验失败沿用人工确认结构：
 - `/api/v1/geocoding/reverse`：坐标转地址并核对城市。
 - `/api/v1/routes/plan`：`WALKING | TRANSIT | DRIVING | BICYCLING` 路线规划。
 
+路线返回的 `facilityEvidence[]` 固定逐项表达电梯、坡道、母婴室和无障碍入口事实。Provider 未提供设施来源时，项目返回 `status: NEEDS_CONFIRMATION + sourceStatus: UNKNOWN`，不得显示为 `PASS`。
+
 ### 9.4 安全与幂等
 
 - 高德 Key 只允许从 `AMAP_WEB_SERVICE_KEY` 环境变量读取。
@@ -181,7 +183,7 @@ Schema 校验失败沿用人工确认结构：
 - `PlanVersion.status`：`PROPOSED | CURRENT | REJECTED | SUPERSEDED`。
 - 初始确认链路：`Trip.PLAN_REVIEW + PlanVersion.PROPOSED -> Trip.CONFIRMED + PlanVersion.CURRENT -> Trip.EXECUTING`。
 - 同一 Trip 最多一个 `CURRENT`，由数据库部分唯一索引和事务共同保证。
-- 已保存 PlanVersion 不允许原地替换快照；相同 `planId` 和完全相同请求可幂等重放。
+- 已保存 PlanVersion 不允许重复登记或原地替换快照；相同 `planId` 和完全相同请求返回 `PLAN_VERSION_ALREADY_EXISTS`。确认接口本身保持幂等。
 - `days` 当前固定单日；每天 3—4 个任务，`order` 必须从 1 连续递增。
 - 任务金额、步行距离、预算缓冲必须与 `metrics` 精确相等；所有硬约束必须为 `PASS`。
 - 未确认的 `PROPOSED` 绝不能进入执行状态，大模型也不得直接写状态。
@@ -190,6 +192,7 @@ Schema 校验失败沿用人工确认结构：
 
 - `PLAN_NOT_CONFIRMED`：没有 `CURRENT` 版本，不允许开始执行（HTTP 409）。
 - `PLAN_STATE_TRANSITION_INVALID`：非法 Trip/PlanVersion 状态迁移（HTTP 409）。
+- `PLAN_VERSION_ALREADY_EXISTS`：同一 PlanVersion 重复登记（HTTP 409）。
 - `PLAN_VERSION_IMMUTABLE`、`TRIP_SNAPSHOT_IMMUTABLE`：尝试原地更换已保存快照（HTTP 409）。
 - `PLAN_CURRENT_CONFLICT`、`PLAN_VERSION_CONFLICT`：唯一 CURRENT 或版本号冲突（HTTP 409）。
 - `PLAN_TRIP_MISMATCH`：路径 Trip 与 Plan 不匹配（HTTP 409）。
@@ -245,6 +248,8 @@ Schema 校验失败沿用人工确认结构：
 
 请求字段：`taskId`、`planVersionId`、`eventType`、`amountCents`、`idempotencyKey`。
 事件类型固定为 `START | COMPLETE | SKIP | EXPENSE`。相同幂等键和相同请求返回原事件；相同键不同请求返回 `EVENT_IDEMPOTENCY_CONFLICT`。
+
+`schemaVersion` 固定为 `1.0`；`occurredAt` 必须包含时区。`EXPENSE` 必须提供非负整数分 `amountCents`，其他事件禁止携带金额。实际消费从 Trip 的全部 `EXPENSE` 事件复算，`remainingBudgetCents = plannedBudgetCents - actualSpentCents`，允许负数表示超支；刷新页面通过 Trip 状态中的 `events` 与 `actualBudget` 恢复。
 
 ### 12.3 基础总结
 
