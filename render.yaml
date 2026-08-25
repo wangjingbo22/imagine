@@ -22,4 +22,4 @@ services:
     healthCheckPath: /
     envVars:
       - key: API_UPSTREAM
-        value: https://xingzhi-travel-api.onrender.com
+        value: https://imagine-mp7v.onrender.com
