@@ -35,6 +35,8 @@ export function restoreDraftFromPlanningFacts(
     travelDate: request.trip.startDate,
     startTime: request.trip.days[0].timeWindow.start.slice(0, 5),
     endTime: request.trip.days[0].timeWindow.end.slice(0, 5),
+    startLocationText: request.trip.days[0].startLocationText,
+    endLocationText: request.trip.days[0].endLocationText,
     budgetCents: request.trip.totalBudgetCents,
     interests: preferenceValues(request, 'INTEREST'),
     mustVisit: preferenceValues(request, 'MUST_VISIT'),

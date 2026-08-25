@@ -66,6 +66,8 @@ test('signed planning facts restore search inputs after a browser refresh', () =
     travelDate: '2026-08-25',
     startTime: '09:00',
     endTime: '20:00',
+    startLocationText: '北京市中心',
+    endLocationText: '故宫',
     budgetCents: 35_000,
     interests: ['博物馆'],
     mustVisit: ['故宫'],

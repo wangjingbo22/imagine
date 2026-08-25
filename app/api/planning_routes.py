@@ -8,7 +8,10 @@ from app.core.errors import AppError
 from app.domain.models import ApiResponse
 from app.schemas.planning import ReplanGenerationRequest
 from app.schemas.validation_error import TripSchemaError, issues_from_pydantic
-from app.services.planning.models import CandidatePlanRequest
+from app.services.planning.models import (
+    CandidatePlanRequest,
+    CandidateReviewConfirmationRequest,
+)
 
 
 router = APIRouter(prefix="/api/v1", tags=["服务端规划与重规划"])
@@ -62,6 +65,45 @@ async def generate_plan_v1(
     except ValidationError as error:
         raise TripSchemaError(issues_from_pydantic(error.errors())) from error
     return ApiResponse(data=service.generate_v1(trip_id, candidate_request))
+
+
+@router.get(
+    "/trips/{trip_id}/plan-reviews/{review_id}",
+    summary="恢复待确认的候选事实",
+    description="返回服务端持久化的价格、设施和来源确认清单。",
+)
+async def get_plan_review(
+    trip_id: UUID,
+    review_id: str,
+    service: PlanningBoundaryService = Depends(get_planning_boundary),
+) -> ApiResponse:
+    return ApiResponse(data=service.get_review(trip_id, review_id))
+
+
+@router.post(
+    "/trips/{trip_id}/plan-reviews/{review_id}/confirm",
+    summary="确认候选事实并签发 Plan V1",
+    description=(
+        "逐项验证用户确认，将来源标记为 USER_CONFIRMED，服务端重新计算全部约束；"
+        "只有完整 PASS 才签发 Plan V1。重复提交相同内容保持幂等。"
+    ),
+)
+async def confirm_plan_review(
+    trip_id: UUID,
+    review_id: str,
+    request: Request,
+    service: PlanningBoundaryService = Depends(get_planning_boundary),
+) -> ApiResponse:
+    try:
+        confirmation = CandidateReviewConfirmationRequest.model_validate_json(
+            await request.body(),
+            strict=True,
+        )
+    except ValidationError as error:
+        raise TripSchemaError(issues_from_pydantic(error.errors())) from error
+    return ApiResponse(
+        data=service.confirm_review(trip_id, review_id, confirmation)
+    )
 
 
 @router.post(

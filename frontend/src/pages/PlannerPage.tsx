@@ -56,6 +56,9 @@ export function PlannerPage() {
   const [travelDate, setTravelDate] = useState('2026-08-26')
   const [startTime, setStartTime] = useState('09:00')
   const [endTime, setEndTime] = useState('20:00')
+  const [startLocationText, setStartLocationText] = useState('北京市中心')
+  const [endLocationText, setEndLocationText] = useState('北京市中心')
+  const [endSameAsStart, setEndSameAsStart] = useState(true)
   const [budget, setBudget] = useState('350')
   const [interests, setInterests] = useState(['历史文化', '特色餐饮', '城市漫步'])
   const [mustVisitInput, setMustVisitInput] = useState('')
@@ -78,6 +81,8 @@ export function PlannerPage() {
     travelDate,
     startTime,
     endTime,
+    startLocationText: startLocationText.trim(),
+    endLocationText: (endSameAsStart ? startLocationText : endLocationText).trim(),
     budgetCents: Math.round(Number(budget) * 100),
     interests,
     mustVisit: mustVisitInput.trim() ? [mustVisitInput.trim()] : [],
@@ -95,6 +100,8 @@ export function PlannerPage() {
     budget,
     cityName,
     endTime,
+    endLocationText,
+    endSameAsStart,
     interests,
     maxSegmentWalkMeters,
     maxTransfers,
@@ -102,6 +109,7 @@ export function PlannerPage() {
     request,
     restIntervalMinutes,
     startTime,
+    startLocationText,
     travelDate,
   ])
   const assistanceProfile = useMemo(
@@ -133,13 +141,22 @@ export function PlannerPage() {
 
   function handleCityNameChange(nextCityName: string) {
     const previousCityName = cityName.trim()
+    const previousDefaultLocation = `${previousCityName}市中心`
+    const nextDefaultLocation = `${nextCityName.trim()}市中心`
     setCityName(nextCityName)
+    setStartLocationText((current) => current === previousDefaultLocation ? nextDefaultLocation : current)
+    setEndLocationText((current) => current === previousDefaultLocation ? nextDefaultLocation : current)
     setRequest((current) => {
       const previousDefault = `我一个人在${previousCityName}玩一天，喜欢历史和特色餐饮，希望少走路，晚上 8 点前结束。`
       return current === previousDefault
         ? `我一个人在${nextCityName.trim()}玩一天，喜欢历史和特色餐饮，希望少走路，晚上 8 点前结束。`
         : current
     })
+  }
+
+  function handleStartLocationChange(value: string) {
+    setStartLocationText(value)
+    if (endSameAsStart) setEndLocationText(value)
   }
 
   async function handleSubmit() {
@@ -163,6 +180,8 @@ export function PlannerPage() {
         travelDate: travelDate || null,
         startTime: startTime || null,
         endTime: endTime || null,
+        startLocationText: startLocationText.trim() || null,
+        endLocationText: (endSameAsStart ? startLocationText : endLocationText).trim() || null,
         budgetCents: Number.isFinite(budgetNumber) && budgetNumber > 0
           ? Math.round(budgetNumber * 100)
           : null,
@@ -187,7 +206,8 @@ export function PlannerPage() {
       const parsed = response.data.parsed
       if (
         !parsed.cityName || !parsed.travelDate || !parsed.startTime ||
-        !parsed.endTime || parsed.budgetCents === null
+        !parsed.endTime || !parsed.startLocationText ||
+        !parsed.endLocationText || parsed.budgetCents === null
       ) {
         throw new Error('解析结果缺少生成统一 Trip 所需字段。')
       }
@@ -197,6 +217,8 @@ export function PlannerPage() {
         travelDate: parsed.travelDate,
         startTime: parsed.startTime,
         endTime: parsed.endTime,
+        startLocationText: parsed.startLocationText,
+        endLocationText: parsed.endLocationText,
         budgetCents: parsed.budgetCents,
         interests: parsed.interests,
         mustVisit: parsed.mustVisit,
@@ -275,11 +297,44 @@ export function PlannerPage() {
           </div>
 
           <div className="form-grid">
-            <label className="input-card">
+            <div className="input-card">
               <span><MapPin size={18} /> 目标城市</span>
               <input value={cityName} onChange={(event) => handleCityNameChange(event.target.value)} />
               <small>提交后解析 cityCode 与中心坐标</small>
+            </div>
+            <label className="input-card">
+              <span><MapPin size={18} /> 当天真实起点</span>
+              <input
+                aria-label="当天真实起点"
+                placeholder="酒店、车站或详细地址"
+                value={startLocationText}
+                onChange={(event) => handleStartLocationChange(event.target.value)}
+              />
+              <small>会在目标城市内通过高德解析坐标</small>
             </label>
+            <div className="input-card">
+              <span><MapPin size={18} /> 当天结束地点</span>
+              <input
+                aria-label="当天结束地点"
+                disabled={endSameAsStart}
+                placeholder="酒店、车站或详细地址"
+                value={endSameAsStart ? startLocationText : endLocationText}
+                onChange={(event) => setEndLocationText(event.target.value)}
+              />
+              <small>
+                <label className="inline-check">
+                  <input
+                    checked={endSameAsStart}
+                    onChange={(event) => {
+                      setEndSameAsStart(event.target.checked)
+                      if (event.target.checked) setEndLocationText(startLocationText)
+                    }}
+                    type="checkbox"
+                  />
+                  终点与起点相同
+                </label>
+              </small>
+            </div>
             <label className="input-card">
               <span><CalendarDays size={18} /> 出行日期</span>
               <input type="date" value={travelDate} onChange={(event) => setTravelDate(event.target.value)} />

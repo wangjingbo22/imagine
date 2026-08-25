@@ -93,6 +93,24 @@ async def test_unconfirmed_draft_is_rejected_before_planning() -> None:
 
 
 @pytest.mark.asyncio
+async def test_explicit_start_and_end_locations_are_written_to_trip() -> None:
+    payload = json.loads(
+        (FIXTURE_DIR / "complete.json").read_text(encoding="utf-8")
+    )["request"]
+    payload["startLocationText"] = "北京南站"
+    payload["endLocationText"] = "北京林业大学"
+    service = TripDraftParserService(FixtureCityResolver())
+
+    result = await service.parse(TripDraftParseRequest.model_validate(payload))
+
+    assert result.trip is not None
+    assert result.parsed.start_location_text == "北京南站"
+    assert result.parsed.end_location_text == "北京林业大学"
+    assert result.trip.days[0].start_location_text == "北京南站"
+    assert result.trip.days[0].end_location_text == "北京林业大学"
+
+
+@pytest.mark.asyncio
 async def test_parse_and_confirm_http_endpoints_enforce_confirmation_gate(
     tmp_path: Path,
 ) -> None:

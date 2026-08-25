@@ -3,6 +3,7 @@ import { ApiError } from '../api/client'
 import type {
   AddressResolution,
   CandidateEndpointFact,
+  CandidatePlanReview,
   CandidatePlanRequest,
   CandidatePlanningTrip,
   CandidateTaskFact,
@@ -49,6 +50,7 @@ export interface AmapPlanResult {
 export interface PlanningIssue {
   code: string
   message: string
+  review: CandidatePlanReview | null
 }
 
 export interface AmapReplanCandidateResult {
@@ -576,11 +578,16 @@ function confirmationIssue(error: unknown): PlanningIssue | null {
   )) {
     return null
   }
+  const detail = error.details[0]
+  const review = detail?.review && typeof detail.review === 'object'
+    ? detail.review as CandidatePlanReview
+    : null
   return {
     code: String(error.code),
     message: error.code === 'CANDIDATE_CONFIRMATION_REQUIRED'
       ? '服务端发现价格、设施或来源证据仍为未知；补齐可信事实前不能确认该计划。'
       : `服务端硬约束校验未通过：${error.message}`,
+    review,
   }
 }
 

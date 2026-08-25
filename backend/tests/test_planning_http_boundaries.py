@@ -301,6 +301,138 @@ async def test_v1_generation_recomputes_unknown_price_and_hard_walk_failure(
 
 
 @pytest.mark.asyncio
+async def test_pending_price_review_is_persisted_confirmed_and_idempotent(
+    tmp_path: Path,
+) -> None:
+    app, database_path = _app_and_database(tmp_path)
+    request = _candidate_request()
+    trip_id = request["trip"]["tripId"]
+    price = request["taskFacts"][0]["place"]["priceReference"]
+    price["amountCents"] = None
+    price["provenance"]["sourceStatus"] = "UNKNOWN"
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        await _save_and_confirm_constraints(client, request)
+        generated = await client.post(
+            f"/api/v1/trips/{trip_id}/plan-versions/generate",
+            json=request,
+        )
+        assert generated.status_code == 422, generated.text
+        review = generated.json()["errors"][0]["review"]
+        review_id = review["reviewId"]
+        assert review["status"] == "PENDING"
+        assert [item["valueType"] for item in review["items"]] == [
+            "PRICE_CENTS"
+        ]
+
+        restored = await client.get(
+            f"/api/v1/trips/{trip_id}/plan-reviews/{review_id}"
+        )
+        payload = {
+            "schemaVersion": "1.0",
+            "confirmations": [
+                {
+                    "itemId": review["items"][0]["itemId"],
+                    "amountCents": 0,
+                    "facilityStatus": None,
+                    "sourceConfirmed": None,
+                    "note": "用户确认为免费",
+                }
+            ],
+        }
+        confirmed = await client.post(
+            f"/api/v1/trips/{trip_id}/plan-reviews/{review_id}/confirm",
+            json=payload,
+        )
+        retried = await client.post(
+            f"/api/v1/trips/{trip_id}/plan-reviews/{review_id}/confirm",
+            json=payload,
+        )
+        changed = deepcopy(payload)
+        changed["confirmations"][0]["amountCents"] = 100
+        conflict = await client.post(
+            f"/api/v1/trips/{trip_id}/plan-reviews/{review_id}/confirm",
+            json=changed,
+        )
+
+    assert restored.status_code == 200, restored.text
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["data"]["metrics"]["validationStatus"] == "PASS"
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["data"]["planId"] == confirmed.json()["data"]["planId"]
+    assert conflict.status_code == 409, conflict.text
+    assert conflict.json()["code"] == "PLANNING_REVIEW_ALREADY_CONFIRMED"
+    with sqlite3.connect(database_path) as connection:
+        row = connection.execute(
+            "SELECT review_state, issued_plan_id FROM candidate_plan_reviews"
+        ).fetchone()
+    assert row == ("CONFIRMED", confirmed.json()["data"]["planId"])
+
+
+@pytest.mark.asyncio
+async def test_facility_review_preserves_user_confirmed_absence_as_soft_fact(
+    tmp_path: Path,
+) -> None:
+    app, _ = _app_and_database(tmp_path)
+    request = _candidate_request()
+    trip_id = request["trip"]["tripId"]
+    request["taskFacts"][0]["taskId"] = "task.with.coordinate.116.3"
+    facility = request["taskFacts"][0]["route"]["facilityEvidence"][2]
+    assert facility["facilityType"] == "NURSING_ROOM"
+    facility["status"] = "NEEDS_CONFIRMATION"
+    facility["provenance"]["sourceStatus"] = "UNKNOWN"
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        await _save_and_confirm_constraints(client, request)
+        pending = await client.post(
+            f"/api/v1/trips/{trip_id}/plan-versions/generate",
+            json=request,
+        )
+        review = pending.json()["errors"][0]["review"]
+        confirmed = await client.post(
+            f"/api/v1/trips/{trip_id}/plan-reviews/{review['reviewId']}/confirm",
+            json={
+                "schemaVersion": "1.0",
+                "confirmations": [
+                    {
+                        "itemId": review["items"][0]["itemId"],
+                        "amountCents": None,
+                        "facilityStatus": "FAIL",
+                        "sourceConfirmed": None,
+                        "note": "现场确认没有母婴室",
+                    }
+                ],
+            },
+        )
+
+    assert pending.status_code == 422, pending.text
+    assert review["items"][0]["valueType"] == "FACILITY_STATUS"
+    assert review["items"][0]["label"].startswith("参观城市博物馆")
+    assert confirmed.status_code == 200, confirmed.text
+    data = confirmed.json()["data"]
+    assert data["metrics"]["validationStatus"] == "PASS"
+    facility_snapshot = next(
+        item
+        for item in data["constraintsSnapshot"]
+        if item["ruleId"].endswith("NURSING_ROOM")
+    )
+    assert facility_snapshot["hardness"] == "SOFT"
+    assert facility_snapshot["status"] == "FAIL"
+    source = next(
+        item
+        for item in data["sourcesSnapshot"]
+        if item["referenceId"].endswith("routeFacility.NURSING_ROOM")
+    )
+    assert source["sourceStatus"] == "USER_CONFIRMED"
+
+
+@pytest.mark.asyncio
 async def test_issued_v1_can_confirm_start_and_restore_from_sqlite(
     tmp_path: Path,
 ) -> None:

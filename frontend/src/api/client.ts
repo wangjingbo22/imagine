@@ -9,12 +9,19 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000
 export class ApiError extends Error {
   readonly code: number | string
   readonly issues: ValidationIssue[]
+  readonly details: Array<Record<string, unknown>>
 
-  constructor(code: number | string, message: string, issues: ValidationIssue[] = []) {
+  constructor(
+    code: number | string,
+    message: string,
+    issues: ValidationIssue[] = [],
+    details: Array<Record<string, unknown>> = [],
+  ) {
     super(message)
     this.name = 'ApiError'
     this.code = code
     this.issues = issues
+    this.details = details
   }
 }
 
@@ -43,18 +50,24 @@ export async function request<T>(
     },
   })
 
-  const body = (await response.json()) as ApiResponse<T> | TripSchemaErrorResponse
+  const body = (await response.json()) as ApiResponse<T> | TripSchemaErrorResponse | {
+    code?: number | string
+    message?: string
+    errors?: Array<Record<string, unknown>>
+  }
   if (isTripSchemaError(body)) {
     throw new ApiError(
       body.code,
       body.errors.map((issue) => `${issue.path}: ${issue.message}`).join('; '),
       body.errors,
+      body.errors as unknown as Array<Record<string, unknown>>,
     )
   }
 
   if (!response.ok || body.code !== 200) {
-    throw new ApiError(body.code, body.message || `HTTP ${response.status}`)
+    const details = 'errors' in body && Array.isArray(body.errors) ? body.errors : []
+    throw new ApiError(body.code ?? response.status, body.message || `HTTP ${response.status}`, [], details)
   }
 
-  return body
+  return body as ApiResponse<T>
 }

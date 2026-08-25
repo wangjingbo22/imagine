@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue, model_validator
@@ -221,13 +221,62 @@ class CandidatePlan(ContractModel):
         return self
 
 
+class CandidateReviewItem(ContractModel):
+    """One server-derived fact that must be explicitly confirmed by the user."""
+
+    item_id: Annotated[str, Field(min_length=1, max_length=160)]
+    code: Literal["UNKNOWN_PRICE", "UNKNOWN_SOURCE", "UNKNOWN_FACILITY"]
+    reference_id: Annotated[str, Field(min_length=1, max_length=160)]
+    field: Annotated[str, Field(min_length=1, max_length=120)]
+    label: Annotated[str, Field(min_length=1, max_length=200)]
+    value_type: Literal["PRICE_CENTS", "FACILITY_STATUS", "SOURCE_CONFIRMATION"]
+    facility_type: Literal[
+        "ELEVATOR", "RAMP", "NURSING_ROOM", "ACCESSIBLE_ENTRANCE"
+    ] | None = None
+
+
+class CandidatePlanReview(ContractModel):
+    schema_version: Literal["1.0"] = "1.0"
+    review_id: Annotated[str, Field(min_length=1, max_length=80)]
+    trip_id: Annotated[str, Field(min_length=1, max_length=80)]
+    candidate_id: Annotated[str, Field(min_length=1, max_length=80)]
+    status: Literal["PENDING", "CONFIRMED"]
+    created_at: datetime
+    confirmed_at: datetime | None = None
+    items: tuple[CandidateReviewItem, ...] = Field(min_length=1)
+
+
+class CandidateReviewConfirmation(ContractModel):
+    item_id: Annotated[str, Field(min_length=1, max_length=160)]
+    amount_cents: Annotated[int | None, Field(ge=0)] = None
+    facility_status: Literal["PASS", "FAIL"] | None = None
+    source_confirmed: bool | None = None
+    note: Annotated[str, Field(max_length=300)] = ""
+
+
+class CandidateReviewConfirmationRequest(ContractModel):
+    schema_version: Literal["1.0"] = "1.0"
+    confirmations: tuple[CandidateReviewConfirmation, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_items(self) -> "CandidateReviewConfirmationRequest":
+        item_ids = [item.item_id for item in self.confirmations]
+        if len(set(item_ids)) != len(item_ids):
+            raise ValueError("confirmations must contain unique itemId values")
+        return self
+
+
 __all__ = [
     "CandidateConstraintResult",
     "CandidateEndpointFact",
     "CandidatePlan",
     "CandidatePlanMetrics",
     "CandidatePlanRequest",
+    "CandidatePlanReview",
     "CandidatePlanWarning",
+    "CandidateReviewConfirmation",
+    "CandidateReviewConfirmationRequest",
+    "CandidateReviewItem",
     "CandidateTask",
     "CandidateTaskFact",
 ]

@@ -33,6 +33,8 @@ class TripDraftParseRequest(DraftContractModel):
     travel_date: str | None = None
     start_time: str | None = None
     end_time: str | None = None
+    start_location_text: str | None = None
+    end_location_text: str | None = None
     budget_cents: int | None = Field(default=None, ge=0)
     interests: list[str] = Field(default_factory=list)
     must_visit: list[str] = Field(default_factory=list)
@@ -58,6 +60,8 @@ class ParsedTripFields(DraftContractModel):
     travel_date: str | None = None
     start_time: str | None = None
     end_time: str | None = None
+    start_location_text: str | None = None
+    end_location_text: str | None = None
     budget_cents: int | None = None
     interests: list[str] = Field(default_factory=list)
     must_visit: list[str] = Field(default_factory=list)

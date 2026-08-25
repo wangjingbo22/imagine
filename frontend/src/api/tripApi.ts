@@ -3,6 +3,8 @@ import type {
   AddressResolution,
   AssistanceProfile,
   CandidatePlanRequest,
+  CandidatePlanReview,
+  CandidateReviewConfirmationInput,
   CityResolution,
   CityContext,
   ConstraintConfirmationResult,
@@ -90,6 +92,26 @@ export const tripApi = {
       {
         method: 'POST',
         body: JSON.stringify(candidate),
+      },
+    )
+  },
+
+  getPlanReview(tripId: string, reviewId: string) {
+    return request<CandidatePlanReview>(
+      `/api/v1/trips/${tripId}/plan-reviews/${reviewId}`,
+    )
+  },
+
+  confirmPlanReview(
+    tripId: string,
+    reviewId: string,
+    confirmations: CandidateReviewConfirmationInput[],
+  ) {
+    return request<StoredPlanVersion>(
+      `/api/v1/trips/${tripId}/plan-reviews/${reviewId}/confirm`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ schemaVersion: '1.0', confirmations }),
       },
     )
   },

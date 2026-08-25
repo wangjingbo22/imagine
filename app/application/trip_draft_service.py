@@ -95,6 +95,18 @@ class TripDraftParserService:
         if budget_cents is None:
             items.append(_missing("budget", "budgetCents", "请确认本次行程总预算"))
 
+        default_location = f"{city_name}市中心" if city_name else None
+        start_location_text = (
+            _non_blank(request.start_location_text)
+            or _extract_start_location(text)
+            or default_location
+        )
+        end_location_text = (
+            _non_blank(request.end_location_text)
+            or _extract_end_location(text)
+            or start_location_text
+        )
+
         interests = _unique(request.interests or _extract_interests(text))
         if not interests:
             items.append(_missing("interests", "interests", "请至少确认一项兴趣"))
@@ -118,6 +130,8 @@ class TripDraftParserService:
             travel_date=travel_date.isoformat() if travel_date else None,
             start_time=start_time,
             end_time=end_time,
+            start_location_text=start_location_text,
+            end_location_text=end_location_text,
             budget_cents=budget_cents,
             interests=interests,
             must_visit=must_visit,
@@ -135,6 +149,7 @@ class TripDraftParserService:
             )
 
         assert city_name and travel_date and start_time and end_time
+        assert start_location_text and end_location_text
         assert budget_cents is not None
         city = (await self._city_resolver.resolve_city(city_name)).cityContext
         participant_id = uuid4()
@@ -209,8 +224,8 @@ class TripDraftParserService:
                     day_index=0,
                     date=travel_date,
                     daily_budget_cents=budget_cents,
-                    start_location_text=f"{city.city_name.removesuffix('市')}市中心",
-                    end_location_text=f"{city.city_name.removesuffix('市')}市中心",
+                    start_location_text=start_location_text,
+                    end_location_text=end_location_text,
                     time_window={"start": f"{start_time}:00", "end": f"{end_time}:00"},
                 )
             ],
@@ -427,6 +442,30 @@ def _extract_places(text: str, kind: str) -> list[str]:
         else r"(?:不要去|避开)\s*([^，,。.;；]+)"
     )
     return [match.group(1).strip() for match in re.finditer(pattern, text)]
+
+
+def _extract_start_location(text: str) -> str | None:
+    patterns = (
+        r"(?:从|起点(?:是|为)?)\s*([^，,。.;；]{2,40}?)\s*(?:出发|开始)",
+        r"(?:住在|入住)\s*([^，,。.;；]{2,40})",
+    )
+    return _first_location_match(text, patterns)
+
+
+def _extract_end_location(text: str) -> str | None:
+    patterns = (
+        r"(?:回到|返回)\s*([^，,。.;；]{2,40})",
+        r"终点(?:是|为)?\s*([^，,。.;；]{2,40})",
+    )
+    return _first_location_match(text, patterns)
+
+
+def _first_location_match(text: str, patterns: tuple[str, ...]) -> str | None:
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip()
+    return None
 
 
 def _missing(item_id: str, path: str, message: str) -> ConfirmationItem:

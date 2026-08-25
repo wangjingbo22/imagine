@@ -15,6 +15,7 @@ import type { LocationEvidence } from '../services/amapPlan'
 interface RouteOverviewProps {
   cityName: string
   evidence: LocationEvidence | null
+  startLocationText?: string | null
 }
 
 const modeLabels: Record<TravelMode, string> = {
@@ -98,6 +99,7 @@ function populateMap(
   amap: AMapNamespace,
   map: AMapMapInstance,
   evidence: LocationEvidence,
+  startLocationText: string,
 ) {
   const overlays: AMapOverlay[] = []
   for (const route of evidence.routes) {
@@ -117,7 +119,7 @@ function populateMap(
   }
 
   const origin = evidence.routes[0]?.origin ?? evidence.city.cityContext.center
-  overlays.push(addStop(amap, map, origin, '起', '行程起点', null, true))
+  overlays.push(addStop(amap, map, origin, '起', startLocationText, null, true))
   evidence.places.forEach((place, index) => {
     overlays.push(addStop(
       amap,
@@ -135,6 +137,7 @@ function populateMap(
 function AmapRouteCanvas({
   cityName,
   evidence,
+  startLocationText,
   expanded = false,
 }: RouteOverviewProps & { expanded?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -161,7 +164,7 @@ function AmapRouteCanvas({
         })
         map.addControl(new amap.Scale())
         map.addControl(new amap.ToolBar({ position: 'RB', offset: new amap.Pixel(10, 42) }))
-        populateMap(amap, map, evidence)
+        populateMap(amap, map, evidence, startLocationText || '行程起点')
         window.setTimeout(() => map?.resize(), 0)
       })
       .catch((error: unknown) => {
@@ -174,7 +177,7 @@ function AmapRouteCanvas({
       disposed = true
       map?.destroy()
     }
-  }, [evidence, expanded])
+  }, [evidence, expanded, startLocationText])
 
   if (!evidence || evidence.routes.length === 0) {
     return (
@@ -216,7 +219,7 @@ function AmapRouteCanvas({
   )
 }
 
-export function RouteOverview({ cityName, evidence }: RouteOverviewProps) {
+export function RouteOverview({ cityName, evidence, startLocationText }: RouteOverviewProps) {
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -228,7 +231,7 @@ export function RouteOverview({ cityName, evidence }: RouteOverviewProps) {
             <Maximize2 size={13} /> 查看大图
           </button>
         </div>
-        <AmapRouteCanvas cityName={cityName} evidence={evidence} />
+        <AmapRouteCanvas cityName={cityName} evidence={evidence} startLocationText={startLocationText} />
       </section>
       {expanded && createPortal((
         <div className="route-map-dialog" role="dialog" aria-label={`${cityName}路线大图`} aria-modal="true">
@@ -242,7 +245,7 @@ export function RouteOverview({ cityName, evidence }: RouteOverviewProps) {
                 <X size={20} />
               </button>
             </div>
-            <AmapRouteCanvas cityName={cityName} evidence={evidence} expanded />
+            <AmapRouteCanvas cityName={cityName} evidence={evidence} startLocationText={startLocationText} expanded />
           </div>
         </div>
       ), document.body)}

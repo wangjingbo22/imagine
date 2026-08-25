@@ -39,6 +39,8 @@ import { AppShell } from '../components/AppShell'
 import { RouteOverview } from '../components/RouteOverview'
 import type {
   CandidatePlanRequest,
+  CandidatePlanReview,
+  CandidateReviewConfirmationInput,
   CreateSingleDayTrip,
   ExecutionEvent,
   PlanSnapshot,
@@ -217,9 +219,12 @@ function toDisplayPlan(plan: StoredPlanVersion): PlanSnapshot {
       durationMinutes: task.durationMinutes,
       transport: task.transport,
       costCents: task.costCents,
-      priceKnown: !task.note.includes('未知价格仍需确认'),
+      priceKnown: true,
       walkMeters: task.walkMeters,
-      note: task.note,
+      note: task.note.replace(
+        '仅累计 Provider 已返回的金额，未知价格仍需确认',
+        '费用已由用户确认并经服务端复算',
+      ),
       status: index === 0 ? 'completed' : index === 1 ? 'current' : 'upcoming',
       coordinates: coordinates[index] ?? [50, 50],
     })),
@@ -300,6 +305,11 @@ export function WorkspacePage() {
   const [planningIssue, setPlanningIssue] = useState(
     navigationState?.amapPlanResult?.planningIssue ?? null,
   )
+  const [candidateReview, setCandidateReview] = useState<CandidatePlanReview | null>(
+    navigationState?.amapPlanResult?.planningIssue?.review ?? null,
+  )
+  const [reviewValues, setReviewValues] = useState<Record<string, string>>({})
+  const [isConfirmingEvidence, setIsConfirmingEvidence] = useState(false)
   const [planningTripSnapshot, setPlanningTripSnapshot] = useState<
     CandidatePlanRequest['trip'] | StoredPlanVersion['tripSnapshot'] | null
   >(
@@ -462,6 +472,7 @@ export function WorkspacePage() {
       setCandidateRequest(result.candidateRequest)
       setPlanningTripSnapshot(result.candidateRequest.trip)
       setPlanningIssue(result.planningIssue)
+      setCandidateReview(result.planningIssue?.review ?? null)
       setPersistedPlanId(result.registeredPlan?.planId ?? null)
       setLocationEvidenceError('')
     }).catch((error: unknown) => {
@@ -514,11 +525,15 @@ export function WorkspacePage() {
     )
   }
   const activePlan = availablePlan
+  const serverPlanReady = Boolean(persistedPlanId) &&
+    activePlan.validationStatus === 'PASS' &&
+    !planningIssue
+  const hasIssuedPassPlan = serverPlanReady
   const remainingBudgetCents = Math.max(0, budgetCents - activePlan.totalCostCents)
   const budgetUsagePercent = budgetCents > 0
     ? Math.min(100, Math.round(activePlan.totalCostCents / budgetCents * 100))
     : 0
-  const unknownPriceCount = locationEvidence
+  const unknownPriceCount = hasIssuedPassPlan ? 0 : locationEvidence
     ? locationEvidence.places.filter((place) => place.priceReference.amountCents === null).length +
       locationEvidence.routes.filter((route) => route.priceReference.amountCents === null).length
     : activePlan.tasks.filter((task) => task.priceKnown === false).length
@@ -579,13 +594,10 @@ export function WorkspacePage() {
     (route) => route.facilityEvidence,
   ) ?? []
   const facilityEvidence = routeFacilityEvidence
-  const facilityNeedsConfirmation = Boolean(locationEvidence) && (
+  const facilityNeedsConfirmation = !hasIssuedPassPlan && Boolean(locationEvidence) && (
     facilityEvidence.length === 0 ||
     facilityEvidence.some(facilityEvidenceNeedsConfirmation)
   )
-  const serverPlanReady = Boolean(persistedPlanId) &&
-    activePlan.validationStatus === 'PASS' &&
-    !planningIssue
   const canCreatePlanV2 = canRequestS1PlanV2(
     storedCurrentPlan?.version ?? null,
     executionAdjustmentCount,
@@ -647,6 +659,7 @@ export function WorkspacePage() {
       setCandidateRequest(result.candidateRequest)
       setPlanningTripSnapshot(result.candidateRequest.trip)
       setPlanningIssue(result.planningIssue)
+      setCandidateReview(result.planningIssue?.review ?? null)
       setPersistedPlanId(result.registeredPlan?.planId ?? null)
       setRecommendationRound((current) => current + 1)
       setAppliedFeedback(feedback)
@@ -729,6 +742,75 @@ export function WorkspacePage() {
       setPlanLifecycleError(error instanceof Error ? error.message : '确认 Plan V1 失败')
     } finally {
       setIsConfirmingPlan(false)
+    }
+  }
+
+  async function handleConfirmEvidence() {
+    if (!tripId || !candidateReview) return
+    const confirmations: CandidateReviewConfirmationInput[] = []
+    for (const item of candidateReview.items) {
+      const raw = reviewValues[item.itemId]?.trim() ?? ''
+      if (!raw) {
+        setPlanLifecycleError(`请先完成“${item.label}”的确认。`)
+        return
+      }
+      if (item.valueType === 'PRICE_CENTS') {
+        const amountYuan = Number(raw)
+        if (!Number.isFinite(amountYuan) || amountYuan < 0) {
+          setPlanLifecycleError(`“${item.label}”金额必须是不小于 0 的数字。`)
+          return
+        }
+        confirmations.push({
+          itemId: item.itemId,
+          amountCents: Math.round(amountYuan * 100),
+          facilityStatus: null,
+          sourceConfirmed: null,
+          note: amountYuan === 0 ? '用户确认为免费或无额外费用' : '用户确认金额',
+        })
+      } else if (item.valueType === 'FACILITY_STATUS') {
+        if (raw !== 'PASS' && raw !== 'FAIL') {
+          setPlanLifecycleError(`请确认“${item.label}”存在或不存在。`)
+          return
+        }
+        confirmations.push({
+          itemId: item.itemId,
+          amountCents: null,
+          facilityStatus: raw,
+          sourceConfirmed: null,
+          note: raw === 'PASS' ? '用户确认设施存在' : '用户确认设施不存在',
+        })
+      } else {
+        confirmations.push({
+          itemId: item.itemId,
+          amountCents: null,
+          facilityStatus: null,
+          sourceConfirmed: raw === 'CONFIRMED',
+          note: '用户确认数据来源',
+        })
+      }
+    }
+
+    setIsConfirmingEvidence(true)
+    setPlanLifecycleError('')
+    try {
+      const response = await tripApi.confirmPlanReview(
+        tripId,
+        candidateReview.reviewId,
+        confirmations,
+      )
+      const stored = response.data
+      setProviderPlan(toDisplayPlan(stored))
+      setPersistedPlanId(stored.planId)
+      setPlanningTripSnapshot(stored.tripSnapshot)
+      setPlanningIssue(null)
+      setCandidateReview(null)
+      const facts = await tripApi.getPlanningFacts(tripId)
+      setCandidateRequest(facts.data)
+      setPlanLifecycleError('价格、设施与来源事实已由服务端重新校验，Plan V1 已获得 PASS。')
+    } catch (error) {
+      setPlanLifecycleError(error instanceof Error ? error.message : '候选事实确认失败')
+    } finally {
+      setIsConfirmingEvidence(false)
     }
   }
 
@@ -1096,7 +1178,11 @@ export function WorkspacePage() {
             </section>
 
             <aside className="insight-column">
-              <RouteOverview cityName={activePlan.cityName} evidence={locationEvidence} />
+              <RouteOverview
+                cityName={activePlan.cityName}
+                evidence={locationEvidence}
+                startLocationText={candidateRequest?.trip.days[0].startLocationText ?? null}
+              />
               <section className="metric-card">
                 <div className="metric-card__head"><span>Provider 已知费用</span><strong>{formatMoney(activePlan.totalCostCents)} / {formatMoney(budgetCents)}</strong></div>
                 <div className="progress-bar"><i style={{ width: `${budgetUsagePercent}%` }} /></div>
@@ -1124,8 +1210,19 @@ export function WorkspacePage() {
                 {facilityEvidence.length > 0 ? facilityEvidence.map((evidence, index) => (
                   <div className="warning-row" key={`${evidence.referenceId}-${evidence.facilityType}-${index}`}>
                     <MapPin size={16} />
-                    <span>{evidence.label}<small>{evidence.message}</small></span>
-                    <small>{facilityEvidenceNeedsConfirmation(evidence) ? '待确认' : evidence.status}</small>
+                    <span>
+                      {evidence.label}
+                      <small>
+                        {serverPlanReady
+                          ? '用户确认结果已保存，服务端已重新校验'
+                          : evidence.message}
+                      </small>
+                    </span>
+                    <small>
+                      {serverPlanReady
+                        ? '用户已确认'
+                        : facilityEvidenceNeedsConfirmation(evidence) ? '待确认' : evidence.status}
+                    </small>
                   </div>
                 )) : (
                   <div className="warning-row">
@@ -1140,6 +1237,106 @@ export function WorkspacePage() {
                   </p>
                 )}
               </section>
+              {candidateReview && (
+                <section className="evidence-review-card" aria-live="polite">
+                  <div className="source-card__head">
+                    <span><ShieldCheck size={18} /> 补齐可信事实</span>
+                    <strong>{candidateReview.items.length} 项待确认</strong>
+                  </div>
+                  <p>高德没有返回这些事实。请按实际情况填写；提交后由服务端重新计算，页面不能自行改成 PASS。</p>
+                  {candidateReview.items.some((item) => item.valueType === 'FACILITY_STATUS') && (
+                    <div className="evidence-review-bulk">
+                      <span>设施批量确认：</span>
+                      <button
+                        onClick={() => setReviewValues((current) => ({
+                          ...current,
+                          ...Object.fromEntries(candidateReview.items
+                            .filter((item) => item.valueType === 'FACILITY_STATUS')
+                            .map((item) => [item.itemId, 'PASS'])),
+                        }))}
+                        type="button"
+                      >全部现场确认存在</button>
+                      <button
+                        onClick={() => setReviewValues((current) => ({
+                          ...current,
+                          ...Object.fromEntries(candidateReview.items
+                            .filter((item) => item.valueType === 'FACILITY_STATUS')
+                            .map((item) => [item.itemId, 'FAIL'])),
+                        }))}
+                        type="button"
+                      >全部现场确认未发现</button>
+                    </div>
+                  )}
+                  <div className="evidence-review-list">
+                    {candidateReview.items.map((item) => (
+                      <div className="evidence-review-row" key={item.itemId}>
+                        <label htmlFor={`review-${item.itemId}`}>{item.label}</label>
+                        {item.valueType === 'PRICE_CENTS' ? (
+                          <div className="evidence-price-input">
+                            <span>¥</span>
+                            <input
+                              id={`review-${item.itemId}`}
+                              min="0"
+                              placeholder="填写实际或估算金额"
+                              step="0.01"
+                              type="number"
+                              value={reviewValues[item.itemId] ?? ''}
+                              onChange={(event) => setReviewValues((current) => ({
+                                ...current,
+                                [item.itemId]: event.target.value,
+                              }))}
+                            />
+                            <button
+                              onClick={() => setReviewValues((current) => ({
+                                ...current,
+                                [item.itemId]: '0',
+                              }))}
+                              type="button"
+                            >
+                              确认为免费
+                            </button>
+                          </div>
+                        ) : item.valueType === 'FACILITY_STATUS' ? (
+                          <select
+                            id={`review-${item.itemId}`}
+                            value={reviewValues[item.itemId] ?? ''}
+                            onChange={(event) => setReviewValues((current) => ({
+                              ...current,
+                              [item.itemId]: event.target.value,
+                            }))}
+                          >
+                            <option value="">请选择</option>
+                            <option value="PASS">现场确认存在</option>
+                            <option value="FAIL">现场确认不存在</option>
+                          </select>
+                        ) : (
+                          <button
+                            className={reviewValues[item.itemId] === 'CONFIRMED' ? 'is-confirmed' : ''}
+                            id={`review-${item.itemId}`}
+                            onClick={() => setReviewValues((current) => ({
+                              ...current,
+                              [item.itemId]: 'CONFIRMED',
+                            }))}
+                            type="button"
+                          >
+                            {reviewValues[item.itemId] === 'CONFIRMED' ? '已确认来源' : '确认该来源'}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    className="button button--primary evidence-review-submit"
+                    disabled={isConfirmingEvidence}
+                    onClick={() => void handleConfirmEvidence()}
+                    type="button"
+                  >
+                    {isConfirmingEvidence
+                      ? <><LoaderCircle className="spin-icon" size={16} /> 服务端重新校验中…</>
+                      : <><Check size={16} /> 提交确认并重新校验</>}
+                  </button>
+                </section>
+              )}
               <section className="explanation-card">
                 <div className="explanation-card__head">
                   <span><Sparkles size={18} /> Agent 推荐理由</span>
@@ -1168,7 +1365,9 @@ export function WorkspacePage() {
                   <CircleDollarSign size={15} />
                   <span>Provider 价格</span>
                   <strong className={priceProvenance?.sourceStatus === 'UNKNOWN' ? 'needs-confirmation' : ''}>
-                    {knownPrice?.amountCents !== null && knownPrice?.amountCents !== undefined
+                    {serverPlanReady
+                      ? 'Provider 原值 + 用户确认 · 已完整'
+                      : knownPrice?.amountCents !== null && knownPrice?.amountCents !== undefined
                       ? `${formatMoney(knownPrice.amountCents)} · ${sourceStatusLabels[knownPrice.provenance.sourceStatus]}`
                       : priceProvenance
                         ? '未知待确认'
@@ -1186,7 +1385,9 @@ export function WorkspacePage() {
                   <MapPin size={15} />
                   <span>路线设施证据</span>
                   <strong className={facilityNeedsConfirmation ? 'needs-confirmation' : ''}>
-                    {facilityNeedsConfirmation
+                    {serverPlanReady
+                      ? '用户确认后服务端已复算'
+                      : facilityNeedsConfirmation
                       ? `${Math.max(1, facilityEvidence.filter(facilityEvidenceNeedsConfirmation).length)} 项待确认`
                       : '已核验'}
                   </strong>
@@ -1215,7 +1416,9 @@ export function WorkspacePage() {
                             <span>{formatSource(place.provenance)}</span>
                             <b className={place.priceReference.amountCents === null ? 'needs-confirmation' : ''}>
                               {place.priceReference.amountCents === null
-                                ? '价格未知待确认'
+                                ? serverPlanReady
+                                  ? '用户已确认并复算'
+                                  : '价格未知待确认'
                                 : `参考 ${formatMoney(place.priceReference.amountCents)}`}
                             </b>
                           </div>
@@ -1227,7 +1430,9 @@ export function WorkspacePage() {
                         <Route size={17} />
                         <span>
                           <strong>
-                            {index === 0 ? '城市中心' : locationEvidence.places[index - 1]?.name}
+                            {index === 0
+                              ? candidateRequest?.trip.days[0].startLocationText ?? '行程起点'
+                              : locationEvidence.places[index - 1]?.name}
                             {' → '}{locationEvidence.places[index]?.name}
                           </strong>
                           <small>
