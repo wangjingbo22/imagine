@@ -14,7 +14,6 @@ import {
   Image,
   LoaderCircle,
   Layers3,
-  Map,
   MapPin,
   MessageSquareText,
   Navigation,
@@ -37,6 +36,7 @@ import { useLocation } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { tripApi, USE_PLAN_VERSION_API } from '../api/tripApi'
 import { AppShell } from '../components/AppShell'
+import { RouteOverview } from '../components/RouteOverview'
 import type {
   CandidatePlanRequest,
   CreateSingleDayTrip,
@@ -1096,23 +1096,7 @@ export function WorkspacePage() {
             </section>
 
             <aside className="insight-column">
-              <section className="map-card">
-                <div className="map-card__toolbar">
-                  <span><Map size={16} /> 路线总览</span>
-                  <button type="button">查看大图</button>
-                </div>
-                <div className="map-canvas">
-                  <span className="map-road map-road--one" />
-                  <span className="map-road map-road--two" />
-                  <span className="map-river" />
-                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                    <path d="M22 71 C30 62, 34 62, 43 58 S54 42, 61 34 S72 28, 78 19" />
-                  </svg>
-                  {activePlan.tasks.map((task) => (
-                    <span className="map-pin" key={task.id} style={{ left: `${task.coordinates[0]}%`, top: `${task.coordinates[1]}%` }}>{task.order}</span>
-                  ))}
-                </div>
-              </section>
+              <RouteOverview cityName={activePlan.cityName} evidence={locationEvidence} />
               <section className="metric-card">
                 <div className="metric-card__head"><span>Provider 已知费用</span><strong>{formatMoney(activePlan.totalCostCents)} / {formatMoney(budgetCents)}</strong></div>
                 <div className="progress-bar"><i style={{ width: `${budgetUsagePercent}%` }} /></div>

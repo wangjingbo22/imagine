@@ -489,6 +489,22 @@ def _coordinates(value: Any) -> GeoPoint:
         raise AppError("PROVIDER_DATA_INVALID", "高德坐标字段格式无效", 502, False) from exc
 
 
+def _polyline(value: Any) -> list[GeoPoint]:
+    """Normalize an Amap semicolon-delimited GCJ-02 route polyline."""
+
+    points: list[GeoPoint] = []
+    for item in _text(value).split(";"):
+        if not item:
+            continue
+        try:
+            points.append(_coordinates(item))
+        except AppError:
+            # A malformed optional shape point must not discard an otherwise
+            # usable route. The route still exposes its trusted endpoints.
+            continue
+    return points
+
+
 def _list(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
@@ -581,6 +597,7 @@ def _route_steps(item: dict[str, Any], mode: TravelMode) -> list[RouteStep]:
                         distanceMeters=_optional_integer(line.get("distance")),
                         durationSeconds=_optional_integer(line.get("duration")),
                         transport="TRANSIT",
+                        polyline=_polyline(line.get("polyline")),
                     )
                 )
         return steps
@@ -594,6 +611,7 @@ def _step(item: dict[str, Any], transport: str) -> RouteStep:
         distanceMeters=_optional_integer(item.get("distance")),
         durationSeconds=_optional_integer(item.get("duration")),
         transport=transport,
+        polyline=_polyline(item.get("polyline")),
     )
 
 

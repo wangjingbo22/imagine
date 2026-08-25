@@ -104,6 +104,7 @@ class RouteStep(BaseModel):
     distanceMeters: int | None = Field(default=None, ge=0)
     durationSeconds: int | None = Field(default=None, ge=0)
     transport: str | None = None
+    polyline: list[GeoPoint] = Field(default_factory=list)
 
 
 class FacilityEvidence(BaseModel):

@@ -81,23 +81,66 @@ const interestKeywords: Record<string, string> = {
 }
 
 const fallbackQueries = ['旅游景点', '博物馆', '公园', '餐饮服务']
+const planningRadiusMeters = 25_000
+// The student's AMap quota is effectively one request per second. Keep every
+// browser-driven Provider operation below that limit so non-cached cities do
+// not fail while Beijing happens to succeed from cache.
+const providerMinimumIntervalMs = 1_150
+const inFlightPlans = new Map<string, InFlightPlan>()
+
+type PhaseListener = (phase: AmapPlanningPhase, detail: string) => void
+
+interface InFlightPlan {
+  promise: Promise<AmapPlanResult>
+  listeners: Set<PhaseListener>
+  latestPhase: { phase: AmapPlanningPhase; detail: string } | null
+}
+
+let providerQueue: Promise<void> = Promise.resolve()
+let lastProviderRequestAt = 0
 
 function delay(milliseconds: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds))
 }
 
+function scheduleProviderOperation<T>(operation: () => Promise<T>) {
+  const scheduled = providerQueue.then(async () => {
+    const waitMilliseconds = Math.max(
+      0,
+      providerMinimumIntervalMs - (Date.now() - lastProviderRequestAt),
+    )
+    if (waitMilliseconds > 0) {
+      await delay(waitMilliseconds)
+    }
+    lastProviderRequestAt = Date.now()
+    return operation()
+  })
+  providerQueue = scheduled.then(() => undefined, () => undefined)
+  return scheduled
+}
+
+function isRetryableProviderError(error: unknown) {
+  if (error instanceof ApiError) {
+    return error.code === 'AMAP_RATE_LIMITED' ||
+      error.code === 'PROVIDER_UNAVAILABLE' ||
+      error.code === 'PROVIDER_TIMEOUT' ||
+      error.code === 503
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  return /CUQPS|QPS|EXCEEDED_THE_LIMIT|访问过于频繁|服务繁忙|暂时不可用|请求超时/i.test(message)
+}
+
 async function providerCall<T>(operation: () => Promise<T>): Promise<T> {
   let lastError: unknown
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
-      return await operation()
+      return await scheduleProviderOperation(operation)
     } catch (error) {
       lastError = error
-      const message = error instanceof Error ? error.message : String(error)
-      if (!/CUQPS|QPS|EXCEEDED_THE_LIMIT/i.test(message) || attempt === 3) {
+      if (!isRetryableProviderError(error) || attempt === 4) {
         throw error
       }
-      await delay(450 * (attempt + 1))
+      await delay(650 * (attempt + 1))
     }
   }
   throw lastError
@@ -163,8 +206,10 @@ async function collectPlaces(
   for (const query of queries) {
     try {
       const result = await providerCall(() => searchByQuery(tripId, city, query))
-      buckets.push(result.filter(
-        (place) => !excludedIds.has(place.placeId) && !isAvoided(place, fragments),
+      buckets.push(result.filter((place) =>
+        directDistanceMeters(city.cityContext.center, place.location) <= planningRadiusMeters &&
+        !excludedIds.has(place.placeId) &&
+        !isAvoided(place, fragments),
       ))
       successfulQueries.push(query)
       await delay(180)
@@ -179,8 +224,10 @@ async function collectPlaces(
     }
     try {
       buckets.push(
-        (await providerCall(() => searchByQuery(tripId, city, query))).filter(
-          (place) => !excludedIds.has(place.placeId) && !isAvoided(place, fragments),
+        (await providerCall(() => searchByQuery(tripId, city, query))).filter((place) =>
+          directDistanceMeters(city.cityContext.center, place.location) <= planningRadiusMeters &&
+          !excludedIds.has(place.placeId) &&
+          !isAvoided(place, fragments),
         ),
       )
       successfulQueries.push(query)
@@ -537,7 +584,7 @@ function confirmationIssue(error: unknown): PlanningIssue | null {
   }
 }
 
-export async function loadAmapPlan(
+async function createAmapPlan(
   tripId: string,
   draft: TripDraftInput,
   onPhase?: (phase: AmapPlanningPhase, detail: string) => void,
@@ -768,4 +815,65 @@ export async function buildAmapReplanCandidate(
     knownCostCents: plan.totalCostCents,
     unknownPriceCount: countUnknownPrices(candidateRequest),
   }
+}
+
+function planRequestKey(
+  tripId: string,
+  draft: TripDraftInput,
+  options: AmapPlanOptions,
+) {
+  return JSON.stringify({
+    tripId,
+    draft,
+    extraQueries: options.extraQueries ?? [],
+    excludePlaceIds: options.excludePlaceIds ?? [],
+    preferredMaxWalkMeters: options.preferredMaxWalkMeters ?? null,
+    confirmedTrip: options.confirmedTrip ?? null,
+  })
+}
+
+export function loadAmapPlan(
+  tripId: string,
+  draft: TripDraftInput,
+  onPhase?: PhaseListener,
+  options: AmapPlanOptions = {},
+): Promise<AmapPlanResult> {
+  const key = planRequestKey(tripId, draft, options)
+  const existing = inFlightPlans.get(key)
+  if (existing) {
+    if (onPhase) {
+      existing.listeners.add(onPhase)
+      if (existing.latestPhase) {
+        onPhase(existing.latestPhase.phase, existing.latestPhase.detail)
+      }
+    }
+    return existing.promise
+  }
+
+  const listeners = new Set<PhaseListener>()
+  if (onPhase) listeners.add(onPhase)
+  let latestPhase: InFlightPlan['latestPhase'] = null
+  const emitPhase: PhaseListener = (phase, detail) => {
+    latestPhase = { phase, detail }
+    for (const listener of listeners) listener(phase, detail)
+  }
+  const promise = createAmapPlan(tripId, draft, emitPhase, options)
+  const entry: InFlightPlan = {
+    promise,
+    listeners,
+    get latestPhase() {
+      return latestPhase
+    },
+    set latestPhase(value) {
+      latestPhase = value
+    },
+  }
+  inFlightPlans.set(key, entry)
+  const removeCompletedEntry = () => {
+    if (inFlightPlans.get(key)?.promise === promise) {
+      inFlightPlans.delete(key)
+    }
+  }
+  void promise.then(removeCompletedEntry, removeCompletedEntry)
+  return promise
 }

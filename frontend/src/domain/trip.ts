@@ -190,6 +190,7 @@ export interface RouteStep {
   distanceMeters: number | null
   durationSeconds: number | null
   transport: string | null
+  polyline?: GeoPoint[]
 }
 
 export type FacilityType = 'ELEVATOR' | 'RAMP' | 'NURSING_ROOM' | 'ACCESSIBLE_ENTRANCE'

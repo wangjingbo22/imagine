@@ -18,7 +18,7 @@
   <img src="docs/testing/evidence/s1_t002_confirmation_desktop.jpg" alt="行知旅伴需求输入与关怀画像确认页面" width="900">
 </p>
 
-> 当前阶段：**Sprint 1 Beta** —— 单人单日核心闭环已接通，真实地图与公网发布仍在完善。
+> 当前阶段：**Sprint 1 Beta** —— 单人单日核心闭环和真实地图已接通，公网发布仍在完善。
 
 ## 项目简介
 
@@ -59,7 +59,7 @@
   <img src="docs/testing/evidence/s1_t016_expense_refresh_desktop.png" alt="行知旅伴执行与实际消费页面" width="48%">
 </p>
 
-路线相关视图已接入高德地点与路线事实，**地图 Polyline 可视化仍在完善**。上述截图用于展示已验证的需求确认、计划和执行工作台，不代表公网在线体验。
+路线相关视图已接入高德地点、路线事实、道路底图、地点标记和真实 Polyline。上述截图用于展示已验证的需求确认、计划和执行工作台，不代表公网在线体验。
 
 ## 技术架构与技术栈
 
@@ -128,10 +128,14 @@ npm run dev
 
 ```env
 VITE_API_BASE_URL=http://localhost:8000
+VITE_AMAP_JS_API_KEY=你的Web端（JS API）Key
+VITE_AMAP_SECURITY_JS_CODE=你的安全密钥
 VITE_USE_MOCK_API=false
 VITE_USE_PLAN_VERSION_API=true
 VITE_USE_WORKFLOW_API=true
 ```
+
+前端通过后端调用高德 Web 服务：城市解析、同城 POI 检索和逐段路线规划均使用真实接口；路线总览另用高德 Web 端 JS API 显示道路底图、地点标记和路线轨迹。后端 `AMAP_WEB_SERVICE_KEY` 与前端 `VITE_AMAP_JS_API_KEY` 不是同一个 Key。根目录和前端的真实 `.env` 均受 Git 忽略，不能提交；只提交空值 `.env.example` 供同伴复制。
 
 启动后可访问：
 
@@ -142,7 +146,8 @@ VITE_USE_WORKFLOW_API=true
 ### API Key 安全边界
 
 - 高德 Web Service Key 只放在后端根目录 `.env`。
-- 不要把 Key 写入 `frontend/.env`、前端代码、截图或提交到 Git。
+- 高德 Web端（JS API）Key 和安全密钥只放在本地 `frontend/.env`。
+- 两类 Key 用途不同，均不得写入源码、截图或提交到 Git。
 - `.env` 使用本地副本；测试默认使用模拟高德响应，不需要真实 Key。
 
 ## 测试与质量
@@ -177,7 +182,7 @@ npm run build
 - [x] 单候选 Plan V2、V1/V2 Diff、接受与拒绝
 - [x] 计划费用、实际费用和版本历史基础总结
 - [ ] 自然语言具体起终点提取
-- [ ] 真实地图 Polyline 可视化
+- [x] 高德道路底图、地点标记与真实路线 Polyline
 - [ ] 自主多候选生成（T017）
 - [ ] 公网 HTTPS 演示地址
 
@@ -224,7 +229,7 @@ npm run build
 当前版本明确保留以下边界：
 
 - 高德负责地点与路线事实，行知旅伴服务端负责确定性约束校验；不把高德描述成整套旅行计划生成器。
-- 自然语言具体起终点提取、真实地图 Polyline、自主多候选 T017 和公网地址仍未完成。
+- 自然语言具体起终点提取、自主多候选 T017 和公网地址仍未完成。
 - 2—3 人模式属于 Sprint 2，不把当前单人模式描述为多人公平推荐。
 - 当前没有公网在线体验地址，因此不提供在线体验按钮或远端 CI 徽章。
 

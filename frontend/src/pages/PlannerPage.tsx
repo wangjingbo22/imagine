@@ -58,7 +58,7 @@ export function PlannerPage() {
   const [endTime, setEndTime] = useState('20:00')
   const [budget, setBudget] = useState('350')
   const [interests, setInterests] = useState(['历史文化', '特色餐饮', '城市漫步'])
-  const [mustVisitInput, setMustVisitInput] = useState('中国国家博物馆')
+  const [mustVisitInput, setMustVisitInput] = useState('')
   const [avoidInput, setAvoidInput] = useState('排队过久的网红店')
   const [maxSegmentWalkMeters, setMaxSegmentWalkMeters] = useState('500')
   const [maxTransfers, setMaxTransfers] = useState('2')
@@ -129,6 +129,17 @@ export function PlannerPage() {
         ? current.filter((item) => item !== interest)
         : [...current, interest],
     )
+  }
+
+  function handleCityNameChange(nextCityName: string) {
+    const previousCityName = cityName.trim()
+    setCityName(nextCityName)
+    setRequest((current) => {
+      const previousDefault = `我一个人在${previousCityName}玩一天，喜欢历史和特色餐饮，希望少走路，晚上 8 点前结束。`
+      return current === previousDefault
+        ? `我一个人在${nextCityName.trim()}玩一天，喜欢历史和特色餐饮，希望少走路，晚上 8 点前结束。`
+        : current
+    })
   }
 
   async function handleSubmit() {
@@ -266,7 +277,7 @@ export function PlannerPage() {
           <div className="form-grid">
             <label className="input-card">
               <span><MapPin size={18} /> 目标城市</span>
-              <input value={cityName} onChange={(event) => setCityName(event.target.value)} />
+              <input value={cityName} onChange={(event) => handleCityNameChange(event.target.value)} />
               <small>提交后解析 cityCode 与中心坐标</small>
             </label>
             <label className="input-card">

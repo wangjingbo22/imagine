@@ -326,8 +326,12 @@ VITE_USE_MOCK_API=true
 
 ```env
 VITE_API_BASE_URL=http://localhost:8000
+VITE_AMAP_JS_API_KEY=你的Web端（JS API）Key
+VITE_AMAP_SECURITY_JS_CODE=你的安全密钥
 VITE_USE_MOCK_API=false
 ```
+
+`VITE_AMAP_JS_API_KEY` 必须是在高德控制台创建的“Web端（JS API）”Key，不能复用后端 Web 服务 Key。两项真实凭据只填入本地 `.env`/`.env.local`，仓库中的 `.env.example` 必须保持空值。
 
 自然语言草稿已接入真实接口：
 
