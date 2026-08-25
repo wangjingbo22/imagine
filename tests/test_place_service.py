@@ -236,3 +236,65 @@ async def test_same_named_poi_cache_is_isolated_by_city_code_and_matches_key_sna
     ]
     expected_snapshot = json.loads(CACHE_KEY_SNAPSHOT.read_text(encoding="utf-8"))
     assert actual_snapshot == expected_snapshot
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cost",
+    ["", [], "not-a-price", "-1", "NaN", "Infinity", "-Infinity"],
+)
+async def test_missing_or_invalid_provider_price_stays_unknown(
+    tmp_path,
+    beijing: CityContext,
+    cost: str | list[Any],
+) -> None:
+    service = build_service(
+        tmp_path,
+        SearchClient(place_payload(provider_city_code="010", ad_code="110101", cost=cost)),
+    )
+
+    result = await service.search_places(
+        beijing,
+        keywords="城市博物馆",
+        types=[],
+        page=1,
+        page_size=20,
+    )
+
+    price = result.places[0].priceReference
+    assert price.amountCents is None
+    assert price.provenance.sourceStatus is SourceStatus.UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_cached_unknown_price_keeps_unknown_price_provenance(
+    tmp_path,
+    beijing: CityContext,
+) -> None:
+    query = {
+        "keywords": "无票价景点",
+        "types": [],
+        "page": 1,
+        "page_size": 20,
+    }
+    await build_service(
+        tmp_path,
+        SearchClient(place_payload(provider_city_code="010", ad_code="110101", cost="")),
+    ).search_places(beijing, **query)
+    offline = build_service(
+        tmp_path,
+        SearchClient(error=AppError("PROVIDER_TIMEOUT", "timeout", 503, True)),
+    )
+
+    cached = await offline.search_places(beijing, **query)
+
+    assert cached.provenance.sourceStatus is SourceStatus.VERIFIED_CACHE
+    assert cached.places[0].priceReference.amountCents is None
+    assert (
+        cached.places[0].priceReference.provenance.sourceStatus
+        is SourceStatus.UNKNOWN
+    )
+    assert (
+        cached.places[0].priceReference.provenance.fetchedAt
+        == cached.provenance.fetchedAt
+    )

@@ -501,7 +501,7 @@ def _yuan_to_cents(value: Any) -> int | None:
         amount = Decimal(text)
     except InvalidOperation:
         return None
-    if amount < 0:
+    if not amount.is_finite() or amount < 0:
         return None
     return int((amount * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
