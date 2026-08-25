@@ -219,6 +219,7 @@ import hashlib
 import json
 import sqlite3
 import tempfile
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -325,7 +326,7 @@ async def main() -> None:
         assert bj.provenance.sourceStatus is SourceStatus.VERIFIED_CACHE
         assert sh.provenance.sourceStatus is SourceStatus.VERIFIED_CACHE
 
-        with sqlite3.connect(root / "cache.sqlite3") as connection:
+        with closing(sqlite3.connect(root / "cache.sqlite3")) as connection:
             rows = connection.execute(
                 "SELECT provider,operation,city_code,request_hash "
                 "FROM provider_cache WHERE operation='place_search' ORDER BY city_code"
