@@ -1,6 +1,7 @@
 import hashlib
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -30,7 +31,7 @@ class SqliteProviderCache:
         return connection
 
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS provider_cache (
@@ -75,7 +76,7 @@ class SqliteProviderCache:
     ) -> CacheRecord:
         fetched_at = fetched_at or datetime.now(UTC)
         expires_at = fetched_at + timedelta(seconds=ttl_seconds)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 """
                 INSERT INTO provider_cache (
@@ -108,7 +109,7 @@ class SqliteProviderCache:
         city_code: str,
         parameters: dict[str, Any],
     ) -> CacheRecord | None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 """
                 SELECT payload_json, fetched_at, expires_at

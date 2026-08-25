@@ -1,10 +1,20 @@
+import json
+import shutil
+import sqlite3
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from app.core.errors import AppError
 from app.domain.models import CityContext, SourceStatus
+from app.infrastructure.cache import SqliteProviderCache
 from tests.conftest import build_service
+
+
+CACHE_KEY_SNAPSHOT = (
+    Path(__file__).parent / "snapshots" / "s1_t006_cache_keys.json"
+)
 
 
 def place_payload(
@@ -12,15 +22,17 @@ def place_payload(
     provider_city_code: str,
     ad_code: str,
     cost: str | list[Any] = "",
+    place_id: str | None = None,
+    name: str = "测试景点",
 ) -> dict[str, Any]:
     return {
         "status": "1",
         "count": "1",
         "pois": [
             {
-                "id": f"poi-{ad_code}",
-                "name": "测试景点",
-                "address": "测试路1号",
+                "id": place_id or f"poi-{ad_code}",
+                "name": name,
+                "address": "测试路 1 号",
                 "location": "116.397499,39.908722",
                 "citycode": provider_city_code,
                 "adcode": ad_code,
@@ -71,13 +83,19 @@ async def test_city_code_enters_provider_request_and_unknown_price_is_not_zero(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("cost", "expected_cents"),
+    [("0", 0), ("12.30", 1230), ("1e20", 10**22)],
+)
 async def test_price_reference_is_normalized_to_integer_cents(
     tmp_path,
     beijing: CityContext,
+    cost: str,
+    expected_cents: int,
 ) -> None:
     service = build_service(
         tmp_path,
-        SearchClient(place_payload(provider_city_code="010", ad_code="110101", cost="12.30")),
+        SearchClient(place_payload(provider_city_code="010", ad_code="110101", cost=cost)),
     )
 
     result = await service.search_places(
@@ -88,7 +106,7 @@ async def test_price_reference_is_normalized_to_integer_cents(
         page_size=20,
     )
 
-    assert result.places[0].priceReference.amountCents == 1230
+    assert result.places[0].priceReference.amountCents == expected_cents
     assert result.places[0].priceReference.provenance.sourceStatus is SourceStatus.ONLINE
 
 
@@ -153,3 +171,177 @@ async def test_cross_city_provider_result_is_rejected(
         )
 
     assert captured.value.code == "CITY_CONTEXT_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_same_named_poi_cache_is_isolated_by_city_code_and_matches_key_snapshot(
+    tmp_path,
+    beijing: CityContext,
+    shanghai: CityContext,
+) -> None:
+    query = {
+        "keywords": "城市博物馆",
+        "types": [],
+        "page": 1,
+        "page_size": 20,
+    }
+    await build_service(
+        tmp_path,
+        SearchClient(
+            place_payload(
+                provider_city_code="010",
+                ad_code="110101",
+                place_id="same-name-beijing",
+                name="城市博物馆",
+            )
+        ),
+    ).search_places(beijing, **query)
+    await build_service(
+        tmp_path,
+        SearchClient(
+            place_payload(
+                provider_city_code="021",
+                ad_code="310101",
+                place_id="same-name-shanghai",
+                name="城市博物馆",
+            )
+        ),
+    ).search_places(shanghai, **query)
+
+    offline = build_service(
+        tmp_path,
+        SearchClient(error=AppError("PROVIDER_TIMEOUT", "timeout", 503, True)),
+    )
+    cached_beijing = await offline.search_places(beijing, **query)
+    cached_shanghai = await offline.search_places(shanghai, **query)
+
+    assert cached_beijing.provenance.sourceStatus is SourceStatus.VERIFIED_CACHE
+    assert cached_beijing.cityCode == "110000"
+    assert cached_beijing.places[0].placeId == "same-name-beijing"
+    assert cached_beijing.places[0].adCode == "110101"
+    assert cached_shanghai.provenance.sourceStatus is SourceStatus.VERIFIED_CACHE
+    assert cached_shanghai.cityCode == "310000"
+    assert cached_shanghai.places[0].placeId == "same-name-shanghai"
+    assert cached_shanghai.places[0].adCode == "310101"
+
+    with sqlite3.connect(tmp_path / "cache.sqlite3") as connection:
+        rows = connection.execute(
+            """
+            SELECT provider, operation, city_code, request_hash
+            FROM provider_cache
+            WHERE operation = 'place_search'
+            ORDER BY city_code
+            """
+        ).fetchall()
+    actual_snapshot = [
+        {
+            "provider": row[0],
+            "operation": row[1],
+            "cityCode": row[2],
+            "requestHash": row[3],
+        }
+        for row in rows
+    ]
+    expected_snapshot = json.loads(CACHE_KEY_SNAPSHOT.read_text(encoding="utf-8"))
+    assert actual_snapshot == expected_snapshot
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cost",
+    [
+        "",
+        [],
+        "not-a-price",
+        "-1",
+        "NaN",
+        "Infinity",
+        "-Infinity",
+        "1e10000",
+        "1e999999",
+        "-1e10000",
+    ],
+)
+async def test_missing_or_invalid_provider_price_stays_unknown(
+    tmp_path,
+    beijing: CityContext,
+    cost: str | list[Any],
+) -> None:
+    service = build_service(
+        tmp_path,
+        SearchClient(place_payload(provider_city_code="010", ad_code="110101", cost=cost)),
+    )
+
+    result = await service.search_places(
+        beijing,
+        keywords="城市博物馆",
+        types=[],
+        page=1,
+        page_size=20,
+    )
+
+    price = result.places[0].priceReference
+    assert price.amountCents is None
+    assert price.provenance.sourceStatus is SourceStatus.UNKNOWN
+
+
+@pytest.mark.asyncio
+async def test_cached_unknown_price_keeps_unknown_price_provenance(
+    tmp_path,
+    beijing: CityContext,
+) -> None:
+    query = {
+        "keywords": "无票价景点",
+        "types": [],
+        "page": 1,
+        "page_size": 20,
+    }
+    await build_service(
+        tmp_path,
+        SearchClient(place_payload(provider_city_code="010", ad_code="110101", cost="")),
+    ).search_places(beijing, **query)
+    offline = build_service(
+        tmp_path,
+        SearchClient(error=AppError("PROVIDER_TIMEOUT", "timeout", 503, True)),
+    )
+
+    cached = await offline.search_places(beijing, **query)
+
+    assert cached.provenance.sourceStatus is SourceStatus.VERIFIED_CACHE
+    assert cached.places[0].priceReference.amountCents is None
+    assert (
+        cached.places[0].priceReference.provenance.sourceStatus
+        is SourceStatus.UNKNOWN
+    )
+    assert (
+        cached.places[0].priceReference.provenance.fetchedAt
+        == cached.provenance.fetchedAt
+    )
+
+
+def test_sqlite_provider_cache_closes_connections_before_directory_cleanup(
+    tmp_path,
+) -> None:
+    cache_root = tmp_path / "provider-cache"
+    cache = SqliteProviderCache(cache_root / "cache.sqlite3")
+    parameters = {"cityCode": "110000", "keywords": "城市博物馆"}
+    cache.put(
+        provider="AMAP",
+        operation="place_search",
+        city_code="110000",
+        parameters=parameters,
+        payload={"status": "1"},
+        ttl_seconds=60,
+    )
+
+    record = cache.get(
+        provider="AMAP",
+        operation="place_search",
+        city_code="110000",
+        parameters=parameters,
+    )
+
+    assert record is not None
+    assert record.payload == {"status": "1"}
+    shutil.rmtree(cache_root)
+    assert not cache_root.exists()

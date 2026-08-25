@@ -40,8 +40,12 @@ class PriceFact(BaseModel):
 
     @model_validator(mode="after")
     def validate_unknown_price(self) -> "PriceFact":
-        if self.amountCents is None and self.provenance.sourceStatus is not SourceStatus.UNKNOWN:
-            raise ValueError("a missing amount must use UNKNOWN source status")
+        amount_is_unknown = self.amountCents is None
+        status_is_unknown = self.provenance.sourceStatus is SourceStatus.UNKNOWN
+        if amount_is_unknown != status_is_unknown:
+            raise ValueError(
+                "UNKNOWN price must use amountCents=None and known price must not use UNKNOWN"
+            )
         return self
 
 
