@@ -8,6 +8,7 @@ from pydantic import ValidationError
 import pytest
 
 from app.application.plan_service import PlanVersionService
+from app.domain.models import FacilityType
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.schemas.plan import PlanVersionStatus, ProposedPlanVersion
 from app.services.planning import (
@@ -53,9 +54,19 @@ def test_golden_same_city_facts_produce_the_reviewed_candidate() -> None:
     assert [item.rule_id for item in candidate.constraint_results] == expected[
         "constraintRuleIds"
     ]
-    assert all(
-        item.hardness == "HARD" and item.status is ValidationStatus.PASS
+    hard_results = [
+        item for item in candidate.constraint_results if item.hardness == "HARD"
+    ]
+    facility_results = [
+        item
         for item in candidate.constraint_results
+        if item.rule_id.startswith("T010.FACILITY.")
+    ]
+    assert all(item.status is ValidationStatus.PASS for item in hard_results)
+    assert len(facility_results) == 16
+    assert all(
+        item.hardness == "SOFT" and item.status is ValidationStatus.PASS
+        for item in facility_results
     )
     assert candidate.warnings == ()
 
@@ -170,6 +181,137 @@ def test_unknown_price_is_not_zero_and_is_independently_confirmable() -> None:
     with pytest.raises(CandidatePlanInputError) as exc_info:
         candidate_to_proposed_plan_version(candidate, request)
     assert exc_info.value.code == "CANDIDATE_CONFIRMATION_REQUIRED"
+
+
+def test_missing_facility_evidence_is_not_treated_as_pass() -> None:
+    payload = _payload()
+    payload["request"]["taskFacts"][0]["route"]["facilityEvidence"] = []
+    request = _request(payload)
+
+    candidate = generate_candidate_plan(request)
+
+    assert candidate.metrics.validation_status == "NEEDS_CONFIRMATION"
+    assert {item.reference_id for item in candidate.warnings} == {
+        f"task-museum.routeFacility.{facility_type.value}"
+        for facility_type in FacilityType
+    }
+    assert all(item.code == "UNKNOWN_FACILITY" for item in candidate.warnings)
+    assert all("缺少" in item.message for item in candidate.warnings)
+    assert all(
+        item.hardness != "HARD" or item.status is ValidationStatus.PASS
+        for item in candidate.constraint_results
+    )
+
+    with pytest.raises(CandidatePlanInputError) as exc_info:
+        candidate_to_proposed_plan_version(candidate, request)
+    assert exc_info.value.code == "CANDIDATE_CONFIRMATION_REQUIRED"
+
+
+@pytest.mark.parametrize("shape", ["partial", "duplicate"])
+def test_partial_or_duplicate_facility_types_cannot_be_treated_as_pass(
+    shape: str,
+) -> None:
+    payload = _payload()
+    evidence = payload["request"]["taskFacts"][0]["route"]["facilityEvidence"]
+    if shape == "partial":
+        payload["request"]["taskFacts"][0]["route"]["facilityEvidence"] = [
+            evidence[0]
+        ]
+    else:
+        evidence.append(deepcopy(evidence[0]))
+
+    request = _request(payload)
+    candidate = generate_candidate_plan(request)
+
+    assert candidate.metrics.validation_status == "NEEDS_CONFIRMATION"
+    facility_warnings = [
+        item for item in candidate.warnings if item.code == "UNKNOWN_FACILITY"
+    ]
+    if shape == "partial":
+        assert {item.reference_id for item in facility_warnings} == {
+            f"task-museum.routeFacility.{facility_type.value}"
+            for facility_type in (
+                FacilityType.RAMP,
+                FacilityType.NURSING_ROOM,
+                FacilityType.ACCESSIBLE_ENTRANCE,
+            )
+        }
+    else:
+        assert [item.reference_id for item in facility_warnings] == [
+            "task-museum.routeFacility.ELEVATOR"
+        ]
+        assert "重复" in facility_warnings[0].message
+
+    with pytest.raises(CandidatePlanInputError) as exc_info:
+        candidate_to_proposed_plan_version(candidate, request)
+    assert exc_info.value.code == "CANDIDATE_CONFIRMATION_REQUIRED"
+
+
+@pytest.mark.parametrize(
+    ("facility_status", "source_status"),
+    [
+        ("NEEDS_CONFIRMATION", "ONLINE"),
+        ("PASS", "UNKNOWN"),
+    ],
+    ids=["status-needs-confirmation", "source-unknown"],
+)
+def test_each_unconfirmed_facility_fact_has_an_independent_warning(
+    facility_status: str,
+    source_status: str,
+) -> None:
+    payload = _payload()
+    evidence = payload["request"]["taskFacts"][0]["route"]["facilityEvidence"][0]
+    evidence["status"] = facility_status
+    evidence["provenance"]["sourceStatus"] = source_status
+
+    candidate = generate_candidate_plan(_request(payload))
+
+    facility_warnings = [
+        item for item in candidate.warnings if item.code == "UNKNOWN_FACILITY"
+    ]
+    assert len(facility_warnings) == 1
+    assert facility_warnings[0].reference_id == "task-museum.routeFacility.ELEVATOR"
+    assert facility_warnings[0].field == "route.facilityEvidence.ELEVATOR"
+    assert facility_warnings[0].resolution == "NEEDS_CONFIRMATION"
+    assert candidate.metrics.validation_status == "NEEDS_CONFIRMATION"
+    facility_result = next(
+        item
+        for item in candidate.constraint_results
+        if item.rule_id == "T010.FACILITY.task-museum.ELEVATOR"
+    )
+    assert facility_result.hardness == "SOFT"
+    assert facility_result.status is ValidationStatus.NEEDS_CONFIRMATION
+
+
+def test_confirmed_facility_failure_is_preserved_as_a_soft_plan_snapshot() -> None:
+    payload = _payload()
+    evidence = payload["request"]["taskFacts"][0]["route"]["facilityEvidence"][0]
+    evidence["status"] = "FAIL"
+    evidence["message"] = "该路线没有可用电梯"
+    request = _request(payload)
+
+    candidate = generate_candidate_plan(request)
+
+    assert candidate.metrics.validation_status == "PASS"
+    assert candidate.warnings == ()
+    facility_result = next(
+        item
+        for item in candidate.constraint_results
+        if item.rule_id == "T010.FACILITY.task-museum.ELEVATOR"
+    )
+    assert facility_result.hardness == "SOFT"
+    assert facility_result.status is ValidationStatus.FAIL
+    assert facility_result.observed["message"] == "该路线没有可用电梯"
+
+    proposal = candidate_to_proposed_plan_version(candidate, request)
+    snapshot = next(
+        item
+        for item in proposal.constraints_snapshot
+        if item.rule_id == "T010.FACILITY.task-museum.ELEVATOR"
+    )
+    assert snapshot.hardness.value == "SOFT"
+    assert snapshot.status.value == "FAIL"
+    assert snapshot.details["message"] == "该路线没有可用电梯"
 
 
 def test_fixed_input_returns_exactly_one_deterministic_candidate() -> None:
@@ -303,8 +445,29 @@ def test_pass_candidate_converts_and_registers_without_schema_translation(
     ]
     assert all(item.status.value == "PASS" for item in proposal.constraints_snapshot)
     assert len(proposal.sources_snapshot) == expected["proposedSourceCount"]
+    expected_facility_sources = {
+        (
+            f"{task.task_id}.routeFacility.{evidence.facilityType.value}"
+        ): evidence.provenance
+        for task in request.task_facts
+        for evidence in task.route.facilityEvidence
+    }
+    actual_facility_sources = {
+        item.reference_id: item
+        for item in proposal.sources_snapshot
+        if item.reference_id is not None and ".routeFacility." in item.reference_id
+    }
+    assert set(actual_facility_sources) == set(expected_facility_sources)
+    for reference_id, provenance in expected_facility_sources.items():
+        snapshot = actual_facility_sources[reference_id]
+        assert snapshot.provider == provenance.provider
+        assert snapshot.source_status.value == provenance.sourceStatus.value
+        assert snapshot.fetched_at == provenance.fetchedAt
+        assert snapshot.is_stale == provenance.isStale
 
-    service = PlanVersionService(SqlitePlanVersionRepository(tmp_path / "plans.sqlite3"))
+    service = PlanVersionService(
+        SqlitePlanVersionRepository(tmp_path / "plans.sqlite3")
+    )
     stored = service.register_proposed(proposal)
     assert stored.status is PlanVersionStatus.PROPOSED
     assert stored.plan_id == proposal.plan_id

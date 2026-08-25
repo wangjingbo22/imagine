@@ -113,7 +113,7 @@ class CandidateConstraintResult(ContractModel):
 
 
 class CandidatePlanWarning(ContractModel):
-    code: Literal["UNKNOWN_PRICE", "UNKNOWN_SOURCE"]
+    code: Literal["UNKNOWN_PRICE", "UNKNOWN_SOURCE", "UNKNOWN_FACILITY"]
     severity: Literal["WARNING"] = "WARNING"
     resolution: Literal["NEEDS_CONFIRMATION"] = "NEEDS_CONFIRMATION"
     reference_id: Annotated[str, Field(min_length=1, max_length=160)]

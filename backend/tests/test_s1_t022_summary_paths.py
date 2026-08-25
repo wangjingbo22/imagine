@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import json
 from pathlib import Path
 from typing import Any
@@ -57,10 +58,12 @@ async def _post_events(
 ) -> None:
     for configured in events:
         payload = {
+            "schemaVersion": configured["schemaVersion"],
             "taskId": configured["taskId"],
             "planVersionId": plan_ids[configured["plan"]],
             "eventType": configured["eventType"],
             "idempotencyKey": configured["idempotencyKey"],
+            "occurredAt": configured["occurredAt"],
         }
         if "amountCents" in configured:
             payload["amountCents"] = configured["amountCents"]
@@ -177,6 +180,22 @@ async def test_s1_t022_real_summary_path_is_complete_and_traceable(
     assert summary.skipped_task_ids == expected["skippedTaskIds"]
     assert len(summary.events) == expected["eventCount"]
     assert str(state.current_plan.plan_id) == plan_ids[expected["currentPlan"]]
+
+    configured_events = [
+        *scenario["beforeDecisionEvents"],
+        *scenario["afterDecisionEvents"],
+    ]
+    configured_times = [
+        datetime.fromisoformat(item["occurredAt"]).astimezone(UTC)
+        for item in configured_events
+    ]
+    assert all(item["schemaVersion"] == "1.0" for item in configured_events)
+    assert all(item["occurredAt"].endswith("+08:00") for item in configured_events)
+    assert configured_times == sorted(configured_times)
+    assert [event.idempotency_key for event in summary.events] == [
+        item["idempotencyKey"] for item in configured_events
+    ]
+    assert [event.occurred_at for event in summary.events] == configured_times
 
     labels_by_id = {UUID(value): label for label, value in plan_ids.items()}
     actual_statuses = {

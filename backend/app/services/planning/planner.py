@@ -16,7 +16,12 @@ from app.application.route_risk_adapter import (
     route_snapshot_to_risk_input,
 )
 from app.domain.budget import BudgetLine, BudgetStatus, BudgetSummary, summarize_budget
-from app.domain.models import Provenance, SourceStatus
+from app.domain.models import (
+    FacilityEvidenceStatus,
+    FacilityType,
+    Provenance,
+    SourceStatus,
+)
 from app.schemas.constraint import Constraint
 from app.schemas.plan import (
     ConstraintCheckStatus,
@@ -128,9 +133,12 @@ class DeterministicCandidatePlanner:
         route_facts = self._route_facts(valid.task_facts)
         route_results = self._evaluate_route_constraints(route_facts, constraints)
         day_results = self._evaluate_day_constraints(valid, constraints)
-        task_outputs, budget_summary, warnings = self._recompute_tasks(
-            valid.task_facts,
-        )
+        (
+            task_outputs,
+            budget_summary,
+            warnings,
+            facility_results,
+        ) = self._recompute_tasks(valid.task_facts)
         if valid.start_location.provenance.sourceStatus is SourceStatus.UNKNOWN:
             warnings = (
                 CandidatePlanWarning(
@@ -181,7 +189,12 @@ class DeterministicCandidatePlanner:
             ),
         )
 
-        constraint_results = (*route_results, *day_results, budget_result)
+        constraint_results = (
+            *route_results,
+            *day_results,
+            *facility_results,
+            budget_result,
+        )
         failed_hard = tuple(
             item
             for item in constraint_results
@@ -420,10 +433,12 @@ class DeterministicCandidatePlanner:
         tuple[CandidateTask, ...],
         BudgetSummary,
         tuple[CandidatePlanWarning, ...],
+        tuple[CandidateConstraintResult, ...],
     ]:
         all_lines: list[BudgetLine] = []
         tasks: list[CandidateTask] = []
         warnings: list[CandidatePlanWarning] = []
+        facility_results: list[CandidateConstraintResult] = []
 
         for item in task_facts:
             place_reference = f"{item.task_id}.placePrice"
@@ -468,6 +483,70 @@ class DeterministicCandidatePlanner:
                         message="路线来源未知，需要用户确认",
                     )
                 )
+            evidence_by_type = {
+                facility_type: [
+                    evidence
+                    for evidence in item.route.facilityEvidence
+                    if evidence.facilityType is facility_type
+                ]
+                for facility_type in FacilityType
+            }
+            for facility_type, matching_evidence in evidence_by_type.items():
+                facility_reference = (
+                    f"{item.task_id}.routeFacility.{facility_type.value}"
+                )
+                facility_field = f"route.facilityEvidence.{facility_type.value}"
+                if len(matching_evidence) != 1:
+                    warnings.append(
+                        CandidatePlanWarning(
+                            code="UNKNOWN_FACILITY",
+                            reference_id=facility_reference,
+                            field=facility_field,
+                            message=(
+                                "路线缺少该设施证据，需要用户确认"
+                                if not matching_evidence
+                                else "路线包含重复设施证据，需要用户确认"
+                            ),
+                        )
+                    )
+                    continue
+
+                evidence = matching_evidence[0]
+                facility_status = ValidationStatus(evidence.status.value)
+                if evidence.provenance.sourceStatus is SourceStatus.UNKNOWN:
+                    facility_status = ValidationStatus.NEEDS_CONFIRMATION
+                facility_results.append(
+                    CandidateConstraintResult(
+                        rule_id=(
+                            f"T010.FACILITY.{item.task_id}.{facility_type.value}"
+                        ),
+                        scope=f"taskFacts[{item.order - 1}].route.facilityEvidence",
+                        hardness="SOFT",
+                        status=facility_status,
+                        reference_id=facility_reference,
+                        observed={
+                            "facilityType": facility_type.value,
+                            "declaredStatus": evidence.status.value,
+                            "sourceStatus": evidence.provenance.sourceStatus.value,
+                            "providerReferenceId": evidence.referenceId,
+                            "message": evidence.message,
+                        },
+                        suggestion=(
+                            "Confirm the route facility evidence"
+                            if facility_status is ValidationStatus.NEEDS_CONFIRMATION
+                            else None
+                        ),
+                    )
+                )
+                if facility_status is ValidationStatus.NEEDS_CONFIRMATION:
+                    warnings.append(
+                        CandidatePlanWarning(
+                            code="UNKNOWN_FACILITY",
+                            reference_id=facility_reference,
+                            field=facility_field,
+                            message="路线设施状态或来源待确认，需要用户确认",
+                        )
+                    )
 
             route_risk = route_snapshot_to_risk_input(
                 item.route,
@@ -508,7 +587,12 @@ class DeterministicCandidatePlanner:
                 )
             )
 
-        return tuple(tasks), summarize_budget(all_lines), tuple(warnings)
+        return (
+            tuple(tasks),
+            summarize_budget(all_lines),
+            tuple(warnings),
+            tuple(facility_results),
+        )
 
 
 def generate_candidate_plan(request: CandidatePlanRequest) -> CandidatePlan:
@@ -793,6 +877,15 @@ def _build_proposed_plan_version(
                 ),
             )
         )
+        sources_snapshot.extend(
+            _source_snapshot(
+                evidence.provenance,
+                reference_id=(
+                    f"{item.task_id}.routeFacility.{evidence.facilityType.value}"
+                ),
+            )
+            for evidence in item.route.facilityEvidence
+        )
 
     total_cost = candidate.metrics.total_cost_cents
     assert total_cost is not None
@@ -887,6 +980,8 @@ def _constraint_description(item: CandidateConstraintResult) -> str:
         return "候选任务未占用已确认的午休时间窗"
     if item.rule_id == RULE_RETURN:
         return "末项任务在截止时间前抵达已确认的返程地点"
+    if item.rule_id.startswith("T010.FACILITY."):
+        return "T010 路线设施证据及其来源状态"
     return "服务端基于 T006 路线事实与 T009 规则重新校验"
 
 

@@ -140,6 +140,60 @@
           "walkingDistanceMeters": 300,
           "transferCount": 1,
           "steps": [],
+          "facilityEvidence": [
+            {
+              "facilityType": "ELEVATOR",
+              "label": "电梯",
+              "status": "PASS",
+              "message": "已由可信来源核验",
+              "referenceId": "route-home-museum",
+              "provenance": {
+                "provider": "AMAP",
+                "sourceStatus": "ONLINE",
+                "fetchedAt": "2026-09-05T00:00:00Z",
+                "isStale": false
+              }
+            },
+            {
+              "facilityType": "RAMP",
+              "label": "坡道",
+              "status": "PASS",
+              "message": "已由可信来源核验",
+              "referenceId": "route-home-museum",
+              "provenance": {
+                "provider": "AMAP",
+                "sourceStatus": "ONLINE",
+                "fetchedAt": "2026-09-05T00:00:00Z",
+                "isStale": false
+              }
+            },
+            {
+              "facilityType": "NURSING_ROOM",
+              "label": "母婴室",
+              "status": "PASS",
+              "message": "已由可信来源核验",
+              "referenceId": "route-home-museum",
+              "provenance": {
+                "provider": "AMAP",
+                "sourceStatus": "ONLINE",
+                "fetchedAt": "2026-09-05T00:00:00Z",
+                "isStale": false
+              }
+            },
+            {
+              "facilityType": "ACCESSIBLE_ENTRANCE",
+              "label": "无障碍入口",
+              "status": "PASS",
+              "message": "已由可信来源核验",
+              "referenceId": "route-home-museum",
+              "provenance": {
+                "provider": "AMAP",
+                "sourceStatus": "ONLINE",
+                "fetchedAt": "2026-09-05T00:00:00Z",
+                "isStale": false
+              }
+            }
+          ],
           "priceReference": {
             "amountCents": 300,
             "currency": "CNY",
@@ -212,6 +266,60 @@
           "walkingDistanceMeters": null,
           "transferCount": null,
           "steps": [],
+          "facilityEvidence": [
+            {
+              "facilityType": "ELEVATOR",
+              "label": "电梯",
+              "status": "PASS",
+              "message": "已由可信来源核验",
+              "referenceId": "route-museum-lunch",
+              "provenance": {
+                "provider": "AMAP",
+                "sourceStatus": "ONLINE",
+                "fetchedAt": "2026-09-05T00:00:00Z",
+                "isStale": false
+              }
+            },
+            {
+              "facilityType": "RAMP",
+              "label": "坡道",
+              "status": "PASS",
+              "message": "已由可信来源核验",
+              "referenceId": "route-museum-lunch",
+              "provenance": {
+                "provider": "AMAP",
+                "sourceStatus": "ONLINE",
+                "fetchedAt": "2026-09-05T00:00:00Z",
+                "isStale": false
+              }
+            },
+            {
+              "facilityType": "NURSING_ROOM",
+              "label": "母婴室",
+              "status": "PASS",
+              "message": "已由可信来源核验",
+              "referenceId": "route-museum-lunch",
+              "provenance": {
+                "provider": "AMAP",
+                "sourceStatus": "ONLINE",
+                "fetchedAt": "2026-09-05T00:00:00Z",
+                "isStale": false
+              }
+            },
+            {
+              "facilityType": "ACCESSIBLE_ENTRANCE",
+              "label": "无障碍入口",
+              "status": "PASS",
+              "message": "已由可信来源核验",
+              "referenceId": "route-museum-lunch",
+              "provenance": {
+                "provider": "AMAP",
+                "sourceStatus": "ONLINE",
+                "fetchedAt": "2026-09-05T00:00:00Z",
+                "isStale": false
+              }
+            }
+          ],
           "priceReference": {
             "amountCents": 0,
             "currency": "CNY",
@@ -284,6 +392,60 @@
           "walkingDistanceMeters": null,
           "transferCount": null,
           "steps": [],
+          "facilityEvidence": [
+            {
+              "facilityType": "ELEVATOR",
+              "label": "电梯",
+              "status": "PASS",
+              "message": "已由可信来源核验",
+              "referenceId": "route-lunch-park",
+              "provenance": {
+                "provider": "AMAP",
+                "sourceStatus": "ONLINE",
+                "fetchedAt": "2026-09-05T00:00:00Z",
+                "isStale": false
+              }
+            },
+            {
+              "facilityType": "RAMP",
+              "label": "坡道",
+              "status": "PASS",
+              "message": "已由可信来源核验",
+              "referenceId": "route-lunch-park",
+              "provenance": {
+                "provider": "AMAP",
+                "sourceStatus": "ONLINE",
+                "fetchedAt": "2026-09-05T00:00:00Z",
+                "isStale": false
+              }
+            },
+            {
+              "facilityType": "NURSING_ROOM",
+              "label": "母婴室",
+              "status": "PASS",
+              "message": "已由可信来源核验",
+              "referenceId": "route-lunch-park",
+              "provenance": {
+                "provider": "AMAP",
+                "sourceStatus": "ONLINE",
+                "fetchedAt": "2026-09-05T00:00:00Z",
+                "isStale": false
+              }
+            },
+            {
+              "facilityType": "ACCESSIBLE_ENTRANCE",
+              "label": "无障碍入口",
+              "status": "PASS",
+              "message": "已由可信来源核验",
+              "referenceId": "route-lunch-park",
+              "provenance": {
+                "provider": "AMAP",
+                "sourceStatus": "ONLINE",
+                "fetchedAt": "2026-09-05T00:00:00Z",
+                "isStale": false
+              }
+            }
+          ],
           "priceReference": {
             "amountCents": 1200,
             "currency": "CNY",
@@ -356,6 +518,60 @@
           "walkingDistanceMeters": 100,
           "transferCount": 1,
           "steps": [],
+          "facilityEvidence": [
+            {
+              "facilityType": "ELEVATOR",
+              "label": "电梯",
+              "status": "PASS",
+              "message": "已由可信来源核验",
+              "referenceId": "route-park-home",
+              "provenance": {
+                "provider": "AMAP",
+                "sourceStatus": "ONLINE",
+                "fetchedAt": "2026-09-05T00:00:00Z",
+                "isStale": false
+              }
+            },
+            {
+              "facilityType": "RAMP",
+              "label": "坡道",
+              "status": "PASS",
+              "message": "已由可信来源核验",
+              "referenceId": "route-park-home",
+              "provenance": {
+                "provider": "AMAP",
+                "sourceStatus": "ONLINE",
+                "fetchedAt": "2026-09-05T00:00:00Z",
+                "isStale": false
+              }
+            },
+            {
+              "facilityType": "NURSING_ROOM",
+              "label": "母婴室",
+              "status": "PASS",
+              "message": "已由可信来源核验",
+              "referenceId": "route-park-home",
+              "provenance": {
+                "provider": "AMAP",
+                "sourceStatus": "ONLINE",
+                "fetchedAt": "2026-09-05T00:00:00Z",
+                "isStale": false
+              }
+            },
+            {
+              "facilityType": "ACCESSIBLE_ENTRANCE",
+              "label": "无障碍入口",
+              "status": "PASS",
+              "message": "已由可信来源核验",
+              "referenceId": "route-park-home",
+              "provenance": {
+                "provider": "AMAP",
+                "sourceStatus": "ONLINE",
+                "fetchedAt": "2026-09-05T00:00:00Z",
+                "isStale": false
+              }
+            }
+          ],
           "priceReference": {
             "amountCents": 300,
             "currency": "CNY",
@@ -430,7 +646,7 @@
     ]
   },
   "expected": {
-    "candidateId": "candidate-0d1b2b57bf9b00bec0181a14",
+    "candidateId": "candidate-53d38ebd5cca4d8d22320cbb",
     "taskIds": [
       "task-museum",
       "task-lunch",
@@ -455,9 +671,25 @@
       "CARE.ROUTE.REST_INTERVAL",
       "CARE.DAY.NAP_WINDOW",
       "CARE.DAY.RETURN_BY",
+      "T010.FACILITY.task-museum.ELEVATOR",
+      "T010.FACILITY.task-museum.RAMP",
+      "T010.FACILITY.task-museum.NURSING_ROOM",
+      "T010.FACILITY.task-museum.ACCESSIBLE_ENTRANCE",
+      "T010.FACILITY.task-lunch.ELEVATOR",
+      "T010.FACILITY.task-lunch.RAMP",
+      "T010.FACILITY.task-lunch.NURSING_ROOM",
+      "T010.FACILITY.task-lunch.ACCESSIBLE_ENTRANCE",
+      "T010.FACILITY.task-park.ELEVATOR",
+      "T010.FACILITY.task-park.RAMP",
+      "T010.FACILITY.task-park.NURSING_ROOM",
+      "T010.FACILITY.task-park.ACCESSIBLE_ENTRANCE",
+      "T010.FACILITY.task-return.ELEVATOR",
+      "T010.FACILITY.task-return.RAMP",
+      "T010.FACILITY.task-return.NURSING_ROOM",
+      "T010.FACILITY.task-return.ACCESSIBLE_ENTRANCE",
       "PLAN.BUDGET.KNOWN_SUBTOTAL"
     ],
-    "proposedPlanId": "0d1b2b57-bf9b-40be-8018-1a141101c738",
-    "proposedSourceCount": 18
+    "proposedPlanId": "53d38ebd-5cca-4d8d-a232-0cbbf029ccc2",
+    "proposedSourceCount": 34
   }
 }

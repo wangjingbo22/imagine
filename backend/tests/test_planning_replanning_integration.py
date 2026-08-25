@@ -146,8 +146,13 @@ def test_t011_v1_to_t018_selection_to_real_v2_registration(
         check.domain for check in outcome.validation_report.checks
     } == set(ReplanRuleDomain)
     assert all(
-        check.hardness == "HARD" and check.status.value == "PASS"
+        check.status.value == "PASS"
         for check in outcome.validation_report.checks
+    )
+    assert all(
+        check.hardness == "SOFT"
+        for check in outcome.validation_report.checks
+        if check.rule_id.startswith("T010.FACILITY.")
     )
 
     stored = service.register_proposed(outcome.selected_plan)
@@ -242,6 +247,44 @@ def test_recomputed_hard_failure_rejects_forged_pass_snapshot(
     )
 
 
+def test_unconfirmed_facility_evidence_cannot_be_selected_as_plan_v2(
+    tmp_path: Path,
+) -> None:
+    _, current = _current_v1(tmp_path)
+    valid_request = _v2_request()
+    proposed_v2 = _v2_plan(valid_request, current)
+
+    payload = _fixture_payload()
+    payload["request"]["taskFacts"][0]["title"] = "参观城市博物馆（调整后）"
+    payload["request"]["taskFacts"][0]["route"]["priceReference"][
+        "amountCents"
+    ] = 400
+    evidence = payload["request"]["taskFacts"][0]["route"][
+        "facilityEvidence"
+    ][0]
+    evidence["status"] = "NEEDS_CONFIRMATION"
+    evidence["provenance"]["sourceStatus"] = "UNKNOWN"
+    unconfirmed_facts = _request(payload)
+
+    outcome = MinimumDisruptionSelector(
+        T011ReplanCandidateValidator(
+            InMemoryTrustedFacts({proposed_v2.plan_id: unconfirmed_facts})
+        )
+    ).select(
+        current_plan=current,
+        candidates=(ReplanCandidate(plan=proposed_v2, satisfaction_loss=0),),
+    )
+
+    assert isinstance(outcome, NoFeasibleReplan)
+    assert "T011.CARE.AGGREGATE" in outcome.affected_rule_ids
+    assert any(
+        item.rule_id == "T011.CARE.AGGREGATE"
+        and item.domain is ReplanRuleDomain.CARE
+        and "facility evidence" in item.description
+        for item in outcome.relaxations
+    )
+
+
 def test_execution_expense_is_recomputed_with_remaining_plan_budget(
     tmp_path: Path,
 ) -> None:
@@ -270,6 +313,7 @@ def test_execution_expense_is_recomputed_with_remaining_plan_budget(
     assert "REPLAN.BUDGET.ACTUAL_PLUS_REMAINING" in outcome.affected_rule_ids
     assert any(
         item.rule_id == "REPLAN.BUDGET.ACTUAL_PLUS_REMAINING"
+        and item.domain is ReplanRuleDomain.BUDGET
         and "larger budget cap" in item.description
         for item in outcome.relaxations
     )

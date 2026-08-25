@@ -3,58 +3,74 @@
   "decision": "ACCEPT",
   "beforeDecisionEvents": [
     {
+      "schemaVersion": "1.0",
       "taskId": "task-1",
       "plan": "V1",
       "eventType": "EXPENSE",
       "amountCents": 600,
-      "idempotencyKey": "accepted-v2-expense-task-1"
+      "idempotencyKey": "accepted-v2-expense-task-1",
+      "occurredAt": "2026-08-25T09:00:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-1",
       "plan": "V1",
       "eventType": "COMPLETE",
-      "idempotencyKey": "accepted-v2-complete-task-1"
+      "idempotencyKey": "accepted-v2-complete-task-1",
+      "occurredAt": "2026-08-25T09:01:00+08:00"
     }
   ],
   "afterDecisionEvents": [
     {
+      "schemaVersion": "1.0",
       "taskId": "task-2",
       "plan": "V2",
       "eventType": "EXPENSE",
       "amountCents": 11800,
-      "idempotencyKey": "accepted-v2-expense-task-2"
+      "idempotencyKey": "accepted-v2-expense-task-2",
+      "occurredAt": "2026-08-25T10:00:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-2",
       "plan": "V2",
       "eventType": "COMPLETE",
-      "idempotencyKey": "accepted-v2-complete-task-2"
+      "idempotencyKey": "accepted-v2-complete-task-2",
+      "occurredAt": "2026-08-25T10:01:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-4",
       "plan": "V2",
       "eventType": "EXPENSE",
       "amountCents": 14000,
-      "idempotencyKey": "accepted-v2-expense-task-4"
+      "idempotencyKey": "accepted-v2-expense-task-4",
+      "occurredAt": "2026-08-25T10:02:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-4",
       "plan": "V2",
       "eventType": "COMPLETE",
-      "idempotencyKey": "accepted-v2-complete-task-4"
+      "idempotencyKey": "accepted-v2-complete-task-4",
+      "occurredAt": "2026-08-25T10:03:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-5",
       "plan": "V2",
       "eventType": "EXPENSE",
       "amountCents": 1000,
-      "idempotencyKey": "accepted-v2-expense-task-5"
+      "idempotencyKey": "accepted-v2-expense-task-5",
+      "occurredAt": "2026-08-25T10:04:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-5",
       "plan": "V2",
       "eventType": "COMPLETE",
-      "idempotencyKey": "accepted-v2-complete-task-5"
+      "idempotencyKey": "accepted-v2-complete-task-5",
+      "occurredAt": "2026-08-25T10:05:00+08:00"
     }
   ],
   "expected": {

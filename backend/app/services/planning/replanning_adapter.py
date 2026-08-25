@@ -214,7 +214,11 @@ def _replan_report(
     care_statuses = [
         item.status for item in results if item.rule_id.startswith("CARE.")
     ]
-    if any(item.code == "UNKNOWN_SOURCE" for item in warnings):
+    has_unconfirmed_care_evidence = any(
+        item.code in {"UNKNOWN_SOURCE", "UNKNOWN_FACILITY"}
+        for item in warnings
+    )
+    if has_unconfirmed_care_evidence:
         care_statuses.append(ValidationStatus.NEEDS_CONFIRMATION)
     care_status = max(
         care_statuses,
@@ -229,12 +233,13 @@ def _replan_report(
             status=care_status,
             relaxable=(
                 care_status is not ValidationStatus.PASS
-                and any(item.code == "UNKNOWN_SOURCE" for item in warnings)
+                and has_unconfirmed_care_evidence
             ),
             relaxation_hint=(
-                "Confirm unknown route or place sources before selecting Plan V2"
+                "Confirm unknown route, place, or facility evidence before "
+                "selecting Plan V2"
                 if care_status is not ValidationStatus.PASS
-                and any(item.code == "UNKNOWN_SOURCE" for item in warnings)
+                and has_unconfirmed_care_evidence
                 else None
             ),
         )
@@ -259,7 +264,7 @@ def _replan_report(
 
 
 def _result_domain(result: CandidateConstraintResult) -> ReplanRuleDomain:
-    if result.rule_id.startswith("PLAN.BUDGET"):
+    if result.rule_id.startswith(("PLAN.BUDGET", "REPLAN.BUDGET")):
         return ReplanRuleDomain.BUDGET
     if result.rule_id.startswith("CARE.DAY"):
         return ReplanRuleDomain.TIME

@@ -4,49 +4,63 @@
   "beforeDecisionEvents": [],
   "afterDecisionEvents": [
     {
+      "schemaVersion": "1.0",
       "taskId": "task-1",
       "plan": "V1",
       "eventType": "EXPENSE",
       "amountCents": 600,
-      "idempotencyKey": "no-v2-expense-task-1"
+      "idempotencyKey": "no-v2-expense-task-1",
+      "occurredAt": "2026-08-25T09:00:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-1",
       "plan": "V1",
       "eventType": "COMPLETE",
-      "idempotencyKey": "no-v2-complete-task-1"
+      "idempotencyKey": "no-v2-complete-task-1",
+      "occurredAt": "2026-08-25T09:01:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-2",
       "plan": "V1",
       "eventType": "EXPENSE",
       "amountCents": 13800,
-      "idempotencyKey": "no-v2-expense-task-2"
+      "idempotencyKey": "no-v2-expense-task-2",
+      "occurredAt": "2026-08-25T09:02:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-2",
       "plan": "V1",
       "eventType": "COMPLETE",
-      "idempotencyKey": "no-v2-complete-task-2"
+      "idempotencyKey": "no-v2-complete-task-2",
+      "occurredAt": "2026-08-25T09:03:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-3",
       "plan": "V1",
       "eventType": "SKIP",
-      "idempotencyKey": "no-v2-skip-task-3"
+      "idempotencyKey": "no-v2-skip-task-3",
+      "occurredAt": "2026-08-25T09:04:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-4",
       "plan": "V1",
       "eventType": "EXPENSE",
       "amountCents": 15000,
-      "idempotencyKey": "no-v2-expense-task-4"
+      "idempotencyKey": "no-v2-expense-task-4",
+      "occurredAt": "2026-08-25T09:05:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-4",
       "plan": "V1",
       "eventType": "COMPLETE",
-      "idempotencyKey": "no-v2-complete-task-4"
+      "idempotencyKey": "no-v2-complete-task-4",
+      "occurredAt": "2026-08-25T09:06:00+08:00"
     }
   ],
   "expected": {

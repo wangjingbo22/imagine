@@ -3,51 +3,65 @@
   "decision": "REJECT",
   "beforeDecisionEvents": [
     {
+      "schemaVersion": "1.0",
       "taskId": "task-1",
       "plan": "V1",
       "eventType": "EXPENSE",
       "amountCents": 600,
-      "idempotencyKey": "rejected-v2-expense-task-1"
+      "idempotencyKey": "rejected-v2-expense-task-1",
+      "occurredAt": "2026-08-25T09:00:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-1",
       "plan": "V1",
       "eventType": "COMPLETE",
-      "idempotencyKey": "rejected-v2-complete-task-1"
+      "idempotencyKey": "rejected-v2-complete-task-1",
+      "occurredAt": "2026-08-25T09:01:00+08:00"
     }
   ],
   "afterDecisionEvents": [
     {
+      "schemaVersion": "1.0",
       "taskId": "task-2",
       "plan": "V1",
       "eventType": "EXPENSE",
       "amountCents": 13800,
-      "idempotencyKey": "rejected-v2-expense-task-2"
+      "idempotencyKey": "rejected-v2-expense-task-2",
+      "occurredAt": "2026-08-25T10:00:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-2",
       "plan": "V1",
       "eventType": "COMPLETE",
-      "idempotencyKey": "rejected-v2-complete-task-2"
+      "idempotencyKey": "rejected-v2-complete-task-2",
+      "occurredAt": "2026-08-25T10:01:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-3",
       "plan": "V1",
       "eventType": "SKIP",
-      "idempotencyKey": "rejected-v2-skip-task-3"
+      "idempotencyKey": "rejected-v2-skip-task-3",
+      "occurredAt": "2026-08-25T10:02:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-4",
       "plan": "V1",
       "eventType": "EXPENSE",
       "amountCents": 15000,
-      "idempotencyKey": "rejected-v2-expense-task-4"
+      "idempotencyKey": "rejected-v2-expense-task-4",
+      "occurredAt": "2026-08-25T10:03:00+08:00"
     },
     {
+      "schemaVersion": "1.0",
       "taskId": "task-4",
       "plan": "V1",
       "eventType": "COMPLETE",
-      "idempotencyKey": "rejected-v2-complete-task-4"
+      "idempotencyKey": "rejected-v2-complete-task-4",
+      "occurredAt": "2026-08-25T10:04:00+08:00"
     }
   ],
   "expected": {
