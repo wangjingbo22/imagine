@@ -11,7 +11,7 @@
 - 字段级错误：`backend/app/schemas/validation_error.py`
 - 设计说明：`docs/superpowers/specs/2026-08-24-s1-t001-trip-schema-design.md`
 
-本文件、前端 TypeScript 类型和 Mock 必须服从上述文件。未在 `.agent/api_contracts.md` 登记的 HTTP URL 不视为正式接口。
+本文件、前端 TypeScript 类型和实际请求必须服从上述文件。未在 `.agent/api_contracts.md` 登记的 HTTP URL 不视为正式接口。
 
 ## 2. 当前范围
 
@@ -33,7 +33,7 @@ Trip Schema 本身**不包含**：
 - 照片或视频接口
 - 旅行总结接口
 
-其中已经在第 8、9 节登记的城市解析、PlanVersion 状态和 Diff 决策接口可正式调用；其余能力继续使用前端 Mock，未登记 URL 和 DTO 前不得当作正式接口调用。
+已经登记的自然语言草稿、约束确认、城市 Provider、PlanVersion、Diff、执行事件和总结接口均调用本地 FastAPI。未登记 URL 和 DTO 前不得新增虚构接口或固定数据回退。
 
 ## 3. CreateSingleDayTrip
 
@@ -251,7 +251,7 @@ src/api/tripContract.ts
 
 ## 8. 城市 Provider 与 Plan V1 正式接口
 
-设置 `VITE_USE_PLAN_VERSION_API=true` 后，下列调用使用本地 FastAPI，而其他未登记能力仍可保持 Mock：
+设置 `VITE_USE_PLAN_VERSION_API=true` 后，下列调用使用本地 FastAPI；地点和路线结果不得回退为前端固定数据：
 
 - `tripApi.resolveCity()` → `POST /api/v1/cities/resolve`
 - `tripApi.suggestPlaces()` → `POST /api/v1/places/suggestions`
@@ -266,7 +266,7 @@ src/api/tripContract.ts
 - `tripApi.startExecution()` → `POST /api/v1/trips/{tripId}/execution/start`
 - `tripApi.getTrip()` → `GET /api/v1/trips/{tripId}`
 
-计划工作台会实际调用城市解析、同城地点搜索和路线规划，并展示 `cityCode`、来源状态、`fetchedAt` 和未知价格。Provider 返回 `amountCents: null + UNKNOWN` 时，页面固定显示“未知待确认”，不会按 0 元写入预算；当前计划金额仍属于前端估算并显式标注。前端地址栏保留 `tripId`。刷新时恢复 `CURRENT` 或 `PROPOSED`；确认按钮严格按“登记候选 → 确认 CURRENT → 开始执行”的顺序调用。PlanVersion DTO 定义在 `src/domain/trip.ts`，字段名保持 camelCase，不翻译代码契约。
+计划生成会实际调用城市解析、多个同城 POI 关键词检索和逐段路线规划，并展示 `cityCode`、来源状态、`fetchedAt` 和未知价格。页面使用高德返回的真实 POI 名称、地址、坐标、路线距离与时长；关怀约束不满足时改查另一种真实交通方式，不回退固定景点。Provider 返回 `amountCents: null + UNKNOWN` 时，页面显示“未知待确认”，计划总额只累计 Provider 已返回的金额。前端地址栏保留 `tripId`。刷新时恢复 `CURRENT` 或 `PROPOSED`；确认按钮严格按“登记候选 → 确认 CURRENT → 开始执行”的顺序调用。PlanVersion DTO 定义在 `src/domain/trip.ts`，字段名保持 camelCase，不翻译代码契约。
 
 路线 DTO 的 `facilityEvidence[]` 逐项展示电梯、坡道、母婴室和无障碍入口。来源缺失时总状态显示“待确认”，不能显示 `PASS`。
 
@@ -288,14 +288,10 @@ src/api/tripContract.ts
 
 消费使用 `EXPENSE` 事件，金额为整数分；页面使用稳定 `idempotencyKey`，刷新后以服务端事件流复算的 `actualSpentCents` 和 `remainingBudgetCents` 为准。
 
-## 11. 待后端确认的接口
+## 11. 尚未登记的远端接口
 
-以下是前端功能需求，不是已确认契约：
+以下能力目前没有远端 HTTP 契约：
 
-- Trip 创建/保存
-- AssistanceProfile 确认
-- 计划自动生成与持续反馈
 - 照片与视频上传
-- 旅行总结
 
-每个接口必须由负责人补充 URL、请求 DTO、响应 DTO、状态转换和错误码后，才能从 Mock 切换为真实请求。
+照片与视频当前仅保存在浏览器本地；团队若需要跨设备同步，必须先补充 URL、请求 DTO、响应 DTO、状态转换和错误码，不得伪造上传成功。

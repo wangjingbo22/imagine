@@ -63,24 +63,24 @@ export function HomePage() {
             <div className="orbit orbit--two" />
             <article className="floating-card floating-card--plan glass-card">
               <div className="floating-card__top">
-                <span className="mini-label">今日路线 · 北京</span>
-                <span className="pass-chip"><ShieldCheck size={13} /> 已通过校验</span>
+                <span className="mini-label">真实数据生成流程</span>
+                <span className="pass-chip"><ShieldCheck size={13} /> 高德 Web 服务</span>
               </div>
               <div className="route-preview">
                 <span className="route-preview__line" />
-                {['国家博物馆', '前门午餐', '北海公园'].map((place, index) => (
+                {['解析目标城市', '检索同城 POI', '规划逐段路线'].map((place, index) => (
                   <div className="route-preview__stop" key={place}>
                     <span>{index + 1}</span>
                     <div>
                       <strong>{place}</strong>
-                      <small>{['09:40', '12:05', '14:20'][index]}</small>
+                      <small>{['cityCode', 'ONLINE', 'fetchedAt'][index]}</small>
                     </div>
                   </div>
                 ))}
               </div>
               <div className="budget-row">
-                <span>预算余量</span>
-                <strong>¥52</strong>
+                <span>费用状态</span>
+                <strong>未知项待确认</strong>
                 <div><i style={{ width: '84%' }} /></div>
               </div>
             </article>
