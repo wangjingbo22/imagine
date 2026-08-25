@@ -1,0 +1,4 @@
+window.__APP_RUNTIME_CONFIG__ = {
+  amapJsApiKey: "${VITE_AMAP_JS_API_KEY}",
+  amapSecurityJsCode: "${VITE_AMAP_SECURITY_JS_CODE}"
+}

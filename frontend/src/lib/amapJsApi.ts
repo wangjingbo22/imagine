@@ -42,10 +42,16 @@ export interface AMapNamespace {
   ToolBar: AMapSimpleConstructor
 }
 
+interface RuntimeConfig {
+  amapJsApiKey?: string
+  amapSecurityJsCode?: string
+}
+
 declare global {
   interface Window {
     AMap?: AMapNamespace
     _AMapSecurityConfig?: { securityJsCode: string }
+    __APP_RUNTIME_CONFIG__?: RuntimeConfig
     [key: `__amapReady_${string}`]: (() => void) | undefined
   }
 }
@@ -54,9 +60,12 @@ const scriptId = 'amap-js-api-v2'
 let loadPromise: Promise<AMapNamespace> | null = null
 
 export function getAmapJsApiConfig() {
+  const runtimeConfig = window.__APP_RUNTIME_CONFIG__
   return {
-    key: (import.meta.env.VITE_AMAP_JS_API_KEY ?? '').trim(),
-    securityJsCode: (import.meta.env.VITE_AMAP_SECURITY_JS_CODE ?? '').trim(),
+    key: (runtimeConfig?.amapJsApiKey ?? import.meta.env.VITE_AMAP_JS_API_KEY ?? '').trim(),
+    securityJsCode: (
+      runtimeConfig?.amapSecurityJsCode ?? import.meta.env.VITE_AMAP_SECURITY_JS_CODE ?? ''
+    ).trim(),
   }
 }
 
