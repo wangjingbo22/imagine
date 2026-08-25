@@ -1,19 +1,98 @@
-# 2026 林大实训 12 组
+<div align="center">
 
-| 账号 | 姓名 | 职责 |
-| ---- | ---- | ---- |
-| wangjingbo | 王敬博 | Scrum Master |
-| fangfangxiao | 张琪 | QA |
-| rasz12345 | 林粲涵 | QA |
-| c_z_yy | 陈梓元 | PO |
+# 行知旅伴
 
-## 张琪：PBI-02-A 城市地点、路线与可信来源
+<p>面向国内城市、支持预算与关怀约束的单日旅行规划 Agent 原型。</p>
 
-当前本地实现 FastAPI 高德 Web 服务适配及前端真实 Provider 证据面板，范围包含城市解析、地点检索、路线规划、可信来源和按城市隔离的 SQLite 缓存。页面动态展示 `cityCode`、来源时间和未知价格；Provider 未知价格不会以 0 元进入预算，计划费用会明确标为前端估算。
+![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.116%2B-009688?logo=fastapi&logoColor=white)
+![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=20232a)
+![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
+![Sprint 1 Beta](https://img.shields.io/badge/Stage-Sprint%201%20Beta-6f42c1)
 
-### 本地启动
+[项目简介](#项目简介) · [功能特性](#功能特性) · [快速开始](#快速开始) · [路线图](#路线图) · [项目文档](#项目文档)
 
-要求 Python 3.11 或更高版本：
+</div>
+
+<p align="center">
+  <img src="docs/testing/evidence/s1_t002_confirmation_desktop.jpg" alt="行知旅伴需求输入与关怀画像确认页面" width="900">
+</p>
+
+> 当前阶段：**Sprint 1 Beta** —— 单人单日核心闭环已接通，真实地图与公网发布仍在完善。
+
+## 项目简介
+
+行知旅伴面向国内城市的单日旅行规划场景。用户可以用自然语言输入城市、日期、预算、兴趣、地点和关怀需求，系统结合高德地点与路线事实，由服务端进行确定性约束校验，形成可执行的单日计划。
+
+在执行过程中，系统记录任务状态和实际消费；当发生费用变化或用户反馈时，可生成单候选 Plan V2，并由用户决定接受或拒绝。这里的边界很明确：**高德提供地点/路线事实，计划由行知旅伴服务端确定性校验**。项目当前定位为 Agent 原型，不宣称已经接入在线大模型或提供完整自动旅行规划。
+
+## 功能特性
+
+- 自然语言需求解析与歧义确认
+- 普通、亲子、低体力、行动辅助四类关怀画像
+- 高德城市、POI、路线距离、时长与来源事实
+- 步行、换乘、休息、时间和预算的确定性校验
+- 服务端签发并确认 Plan V1
+- 开始、完成、跳过和实际消费执行事件
+- 单候选 Plan V2、V1/V2 Diff、接受与拒绝
+- 计划费用、实际费用、任务状态与版本历史基础总结
+
+## 使用流程
+
+```text
+自然语言需求
+    → 关怀画像确认
+    → 高德地点/路线事实
+    → 约束、路线与预算校验
+    → 唯一 Plan V1
+    → 执行与实际消费
+    → Plan V2 对比与决策
+    → 旅行总结
+```
+
+## 产品演示
+
+以下图片均来自仓库内已核验的验收证据，不含 API Key 或临时调试页。
+
+<p align="center">
+  <img src="docs/testing/evidence/s1_t010_facility_confirmation_desktop.png" alt="行知旅伴计划与设施确认页面" width="48%">
+  <img src="docs/testing/evidence/s1_t016_expense_refresh_desktop.png" alt="行知旅伴执行与实际消费页面" width="48%">
+</p>
+
+路线相关视图已接入高德地点与路线事实，**地图 Polyline 可视化仍在完善**。上述截图用于展示已验证的需求确认、计划和执行工作台，不代表公网在线体验。
+
+## 技术架构与技术栈
+
+```text
+React 19 + TypeScript + Vite 工作台
+                │ HTTP
+                ▼
+FastAPI API
+  ├─ 高德 Web 服务适配：城市、POI、路线事实
+  ├─ 确定性规划与重规划：约束、预算、路线、版本
+  ├─ PlanVersion 与执行事件服务
+  └─ SQLite：Provider 缓存与业务状态
+```
+
+| 层次 | 技术 | 作用 |
+| --- | --- | --- |
+| 前端 | React 19、TypeScript、Vite | 响应式 Web 工作台、需求确认、计划与执行展示 |
+| 后端 | Python 3.11+、FastAPI、Pydantic | API、领域校验、Plan V1/V2 与执行事件 |
+| 外部事实 | 高德 Web 服务 | 城市、地点、路线距离、时长和来源事实 |
+| 本地持久化 | SQLite | Provider 缓存、计划版本和执行事件 |
+| 质量保障 | pytest、Node test、TypeScript、Vite | 后端回归、前端测试与生产构建 |
+
+## 快速开始
+
+### 环境要求
+
+- Python 3.11 或更高版本
+- Node 22
+- 高德开放平台 Web 服务 Key（后端本地调用需要）
+
+### 1. 启动后端
+
+在仓库根目录执行：
 
 ```powershell
 python -m venv .venv
@@ -22,39 +101,30 @@ python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
 ```
 
-在 `.env` 中填写高德开放平台申请的 Web 服务 Key：
+编辑根目录 `.env`，至少填写高德 Web 服务 Key；其余配置可先保留 `.env.example` 中的默认值：
 
 ```env
 AMAP_WEB_SERVICE_KEY=你的Web服务Key
 ```
 
-不要把 `.env` 或真实 Key 提交到 Git。启动服务：
+启动 API：
 
 ```powershell
 uvicorn app.main:app --reload
 ```
 
-接口文档：`http://127.0.0.1:8000/docs`
+### 2. 启动前端
 
-### 测试
+另开一个终端，在仓库根目录执行：
 
 ```powershell
-pytest
+Set-Location frontend
+Copy-Item .env.example .env
+npm ci
+npm run dev
 ```
 
-测试默认使用模拟高德响应，不需要真实 Key，也不会消耗高德调用额度。
-
-## 张琪：PBI-04-B Plan V1 确认与状态守卫
-
-本地实现使用 SQLite 保存不可变的 Plan V1、约束快照和来源快照，并保证同一个 Trip 只有一个 `CURRENT`。未确认方案不能开始执行，前端刷新后可通过地址栏中的 `tripId` 恢复。
-
-默认数据库：`data/plan_versions.sqlite3`。如需修改位置，在 `.env` 设置：
-
-```env
-PLAN_VERSION_DB_PATH=data/plan_versions.sqlite3
-```
-
-前端 `.env` 使用：
+`frontend/.env.example` 已提供本地 API 地址及工作流开关，通常无需修改：
 
 ```env
 VITE_API_BASE_URL=http://localhost:8000
@@ -63,30 +133,101 @@ VITE_USE_PLAN_VERSION_API=true
 VITE_USE_WORKFLOW_API=true
 ```
 
-前端通过后端调用高德 Web 服务：城市解析、同城 POI 检索和逐段路线规划均使用真实接口。`/trips/drafts/confirm` 保存完整权威 Trip，前端规划时原样复用参与者、预算、时间窗及起终点，并把返程建模为回到已确认终点的独立末项。前端只提交 `CandidatePlanRequest`；服务端先核对 T004 画像与权威 Trip，再由 T011 重编译关怀约束并重算路线、时间和预算，留下可信签发摘要后才允许确认 Plan V1。未知价格、设施或来源不会被当作 0 或 `PASS`。高德 Key 只配置在后端根目录 `.env`，不能写入 `frontend/.env` 或提交到 Git。
+启动后可访问：
 
-## 张琪：PBI-05-C V1/V2 Diff 与接受拒绝
+- Web 工作台：<http://localhost:5173>
+- API：<http://127.0.0.1:8000>
+- Swagger：<http://127.0.0.1:8000/docs>
 
-执行中的费用变化或用户反馈会把候选事实提交到 `/replans`。服务端 T011 重新校验候选，T018 结合 `ExecutionEvent` 冻结已完成/跳过/锁定前缀并选择最小扰动方案；只有被选择并签发的 V2 才会登记。服务端随后确定性计算地点、时间、路线、费用和关怀指标的保留、删除、新增与变更，前端用中文 Diff 页面展示。
+### API Key 安全边界
 
-- 接受：旧 `CURRENT` 变为 `SUPERSEDED`，V2 原子切换为唯一 `CURRENT`，Trip 回到 `EXECUTING`。
-- 拒绝：V2 变为 `REJECTED`，原 `CURRENT` 和执行状态保持不变。
-- 同一决策可安全重试；终态后反向决策返回 `409`。
-- LLM/前端不得直接写业务状态，V2 在接受前不得覆盖 V1。
+- 高德 Web Service Key 只放在后端根目录 `.env`。
+- 不要把 Key 写入 `frontend/.env`、前端代码、截图或提交到 Git。
+- `.env` 使用本地副本；测试默认使用模拟高德响应，不需要真实 Key。
 
-## 王敬博：Sprint 1 前端、约束状态与执行闭环
+## 测试与质量
 
-- T004：AssistanceProfile 使用真实 `DRAFT / CONSTRAINT_CONFIRMED` 状态，修改回退、重复确认幂等；未确认画像或未保存权威 Trip 时不能生成 Plan V1。
-- T015：`START / COMPLETE / SKIP / EXPENSE` 事件保存到 SQLite，绑定 task、CURRENT PlanVersion 和幂等键，刷新后可恢复。
-- T020：前端展示服务端 V1/V2 Diff，并通过原子接口接受或拒绝。
-- T021：基础总结由服务端事件流复算实际金额、完成/跳过任务和版本历史。
-- T023：仓库提供 Docker、Nginx SPA 回退、Render HTTPS Blueprint 和 CI；公网 URL 需平台账号创建服务后补录。
+在仓库根目录完成后端测试：
 
-详细文档：
-
-```text
-docs/superpowers/plans/2026-08-25-wang-jingbo-sprint1-completion.md
-docs/testing/2026-08-25-wang-jingbo-sprint1-acceptance.md
-docs/traceability/sprint1/wang_jingbo_sprint1.md
-docs/reviews/2026-08-25-wang-jingbo-sprint1-review.md
+```powershell
+python -m pytest
 ```
+
+再进入 `frontend`，运行前端测试、静态检查和生产构建：
+
+```powershell
+Set-Location frontend
+npm test
+npm run lint
+npm run build
+```
+
+这些命令对应当前仓库的 `pyproject.toml` 与 `frontend/package.json`；测试结果应以最近一次本地验证输出或对应提交记录为准，不在首页硬编码易过时的通过数量。
+
+## 路线图
+
+勾选项表示已在稳定提交状态中验证；未完成项保持未勾选。
+
+### Sprint 1：单人单日核心闭环
+
+- [x] 自然语言需求与关怀画像确认
+- [x] 高德地点/路线事实接入
+- [x] 服务端确定性 Plan V1 校验、签发与确认
+- [x] 执行事件与实际消费记录
+- [x] 单候选 Plan V2、V1/V2 Diff、接受与拒绝
+- [x] 计划费用、实际费用和版本历史基础总结
+- [ ] 自然语言具体起终点提取
+- [ ] 真实地图 Polyline 可视化
+- [ ] 自主多候选生成（T017）
+- [ ] 公网 HTTPS 演示地址
+
+### Sprint 2：多人和辅助体验
+
+- [ ] 2—3 人公平推荐模式
+- [ ] 一次性 GPS 到达辅助
+- [ ] 任务照片
+- [ ] 迟到与疲劳事件
+- [ ] 旅行回忆页
+
+### Sprint 3：质量与交付
+
+- [ ] 故障降级与三城完整链、两城烟测
+- [ ] 多日 Schema
+- [ ] 自动化质量门禁
+- [ ] 部署与答辩证据补齐
+
+## 团队成员与 Sprint 1 主责
+
+四名成员均参与开发、联调、测试和代码管理；模块主责只表示 Sprint 1 的首要推进责任，不构成固定技术岗位壁垒。PO、SM、QA 均为兼任职责。
+
+| 成员 | Gitee 账号 | Sprint 1 主责模块 | Scrum 兼任职责 |
+| --- | --- | --- | --- |
+| 陈梓元 | `c_z_yy` | Agent 后端与主链编排 | PO |
+| 林粲涵 | `rasz12345` | 规划、约束与路线风险 | QA |
+| 张琪 | `fangfangxiao` | 高德 Provider、数据与 API | QA |
+| 王敬博 | `wangjingbo` | 响应式 Web 与工作台 | SM |
+
+## 项目文档
+
+- [V2.3 项目规划书](doc/行知旅伴_旅行规划Agent_Scrum项目规划_V2.3.docx)
+- [V2.3 产品待办列表](doc/行知旅伴_V2.3_产品待办列表_含负责人.xlsx)
+- [V2.3 Sprint 1 待办列表](doc/行知旅伴_V2.3_Sprint1待办列表_含负责人.xlsx)
+- [API 合同与当前接口](doc/frontend_api_contract.md)
+- [部署说明](deploy/README.md)
+- [Sprint 1 验收记录](docs/testing/2026-08-25-wang-jingbo-sprint1-acceptance.md)
+- [Sprint 1 评审记录](docs/reviews/2026-08-25-wang-jingbo-sprint1-review.md)
+- [Sprint 1 追溯入口](docs/traceability/sprint1/wang_jingbo_sprint1.md)
+- [AI 使用说明](doc/ai_usage.md)
+
+## 已知限制、安全说明与明确不做事项
+
+当前版本明确保留以下边界：
+
+- 高德负责地点与路线事实，行知旅伴服务端负责确定性约束校验；不把高德描述成整套旅行计划生成器。
+- 自然语言具体起终点提取、真实地图 Polyline、自主多候选 T017 和公网地址仍未完成。
+- 2—3 人模式属于 Sprint 2，不把当前单人模式描述为多人公平推荐。
+- 当前没有公网在线体验地址，因此不提供在线体验按钮或远端 CI 徽章。
+
+明确不做：持续 GPS、视频剪辑、全国无障碍保证、优惠券/跑腿，以及第三方批量抓取。
+
+提交问题或复现本地行为时，请同时说明 Python/Node 版本、启动配置和是否使用模拟 Provider；不要上传 `.env`、真实 Key 或含敏感信息的截图。
