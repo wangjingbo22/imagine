@@ -271,9 +271,14 @@ def test_t016_budget_recalculation_evidence() -> None:
 
 def test_execution_page_calls_real_expense_api_and_restores_server_budget() -> None:
     page = Path("frontend/src/pages/WorkspacePage.tsx").read_text(encoding="utf-8")
+    orchestration = Path(
+        "frontend/src/services/executionReplan.ts"
+    ).read_text(encoding="utf-8")
     api = Path("frontend/src/api/tripApi.ts").read_text(encoding="utf-8")
 
-    assert "'EXPENSE',\n        actualExpenseCents" in page
+    assert "submitTaskCompletionEvents(" in page
+    assert "await recordEvent('EXPENSE', amountCents)" in orchestration
+    assert "await recordEvent('COMPLETE', null)" in orchestration
     assert "state.actualBudget?.actualSpentCents" in page
     assert "request<ExecutionEvent>" in api
     create_event_block = api.split("createExecutionEvent", maxsplit=1)[1].split(

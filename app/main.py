@@ -199,6 +199,7 @@ def create_app(
         allow_headers=["Content-Type"],
     )
     app.state.location_service = service
+    app.state.settings = resolved_settings
     app.state.trip_draft_service = TripDraftParserService(service)
     app.state.plan_version_service = plan_service
     app.state.workflow_service = workflow_service
@@ -211,7 +212,10 @@ def create_app(
 
     @app.get("/health", tags=["系统"], summary="健康检查")
     async def health() -> dict[str, str]:
-        return {"status": "ok"}
+        return {
+            "status": "ok",
+            "buildSha": resolved_settings.build_sha or "unavailable",
+        }
 
     @app.get("/docs", include_in_schema=False)
     async def chinese_api_docs() -> HTMLResponse:

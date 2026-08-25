@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     amap_place_cache_ttl_seconds: int = Field(default=86_400, ge=60)
     amap_route_cache_ttl_seconds: int = Field(default=1_800, ge=60)
     plan_version_db_path: Path = Path("data/plan_versions.sqlite3")
+    build_sha: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("BUILD_SHA", "RENDER_GIT_COMMIT"),
+    )
     cors_allowed_origins: str = (
         "http://localhost:5173,http://127.0.0.1:5173"
     )
