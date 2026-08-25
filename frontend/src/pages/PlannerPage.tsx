@@ -14,11 +14,16 @@ import {
   Wallet,
   X,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { tripApi } from '../api/tripApi'
+import { buildAssistanceProfile } from '../api/tripContract'
 import { AppShell } from '../components/AppShell'
-import type { AssistanceMode } from '../domain/trip'
+import type {
+  AssistanceMode,
+  ConstraintProfileStatus,
+  TripDraftInput,
+} from '../domain/trip'
 
 const assistanceOptions: Array<{
   value: AssistanceMode
@@ -36,8 +41,13 @@ const interestOptions = ['历史文化', '特色餐饮', '城市漫步', '摄影
 
 export function PlannerPage() {
   const navigate = useNavigate()
+  const [tripId] = useState(() => crypto.randomUUID())
   const [assistanceMode, setAssistanceMode] = useState<AssistanceMode>('low-mobility')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isConfirmingConstraints, setIsConfirmingConstraints] = useState(false)
+  const [constraintStatus, setConstraintStatus] =
+    useState<ConstraintProfileStatus>('DRAFT')
+  const confirmedProfileJson = useRef<string | null>(null)
   const [submitError, setSubmitError] = useState('')
   const [cityName, setCityName] = useState('北京')
   const [travelDate, setTravelDate] = useState('2026-08-26')
@@ -59,6 +69,53 @@ export function PlannerPage() {
     () => assistanceOptions.find((item) => item.value === assistanceMode),
     [assistanceMode],
   )
+  const draft = useMemo<TripDraftInput>(() => ({
+    cityName: cityName.trim(),
+    travelDate,
+    startTime,
+    endTime,
+    budgetCents: Math.round(Number(budget) * 100),
+    interests,
+    mustVisit: mustVisitInput.trim() ? [mustVisitInput.trim()] : [],
+    avoidPlaces: avoidInput.trim() ? [avoidInput.trim()] : [],
+    assistanceMode,
+    assistanceProfile: {
+      maxSegmentWalkMeters: Number(maxSegmentWalkMeters),
+      maxTransfers: Number(maxTransfers),
+      restIntervalMinutes: Number(restIntervalMinutes),
+    },
+    naturalLanguageRequest: request,
+  }), [
+    assistanceMode,
+    avoidInput,
+    budget,
+    cityName,
+    endTime,
+    interests,
+    maxSegmentWalkMeters,
+    maxTransfers,
+    mustVisitInput,
+    request,
+    restIntervalMinutes,
+    startTime,
+    travelDate,
+  ])
+  const assistanceProfile = useMemo(
+    () => buildAssistanceProfile(draft),
+    [draft],
+  )
+
+  useEffect(() => {
+    const confirmed = confirmedProfileJson.current
+    const current = JSON.stringify(assistanceProfile)
+    if (!confirmed || confirmed === current) {
+      return
+    }
+    setConstraintStatus('DRAFT')
+    void tripApi.saveConstraintDraft(tripId, assistanceProfile).catch((error: unknown) => {
+      setSubmitError(error instanceof Error ? error.message : '关怀约束回退 DRAFT 失败')
+    })
+  }, [assistanceProfile, tripId])
 
   const isFormValid =
     cityName.trim().length > 0 &&
@@ -82,31 +139,34 @@ export function PlannerPage() {
       return
     }
 
+    if (constraintStatus !== 'CONSTRAINT_CONFIRMED') {
+      setSubmitError('请先确认关怀约束，DRAFT 状态不能进入规划。')
+      return
+    }
     setSubmitError('')
     setIsSubmitting(true)
     try {
-      const draft = {
-        cityName: cityName.trim(),
-        travelDate,
-        startTime,
-        endTime,
-        budgetCents: Math.round(Number(budget) * 100),
-        interests,
-        mustVisit: mustVisitInput.trim() ? [mustVisitInput.trim()] : [],
-        avoidPlaces: avoidInput.trim() ? [avoidInput.trim()] : [],
-        assistanceMode,
-        assistanceProfile: {
-          maxSegmentWalkMeters: Number(maxSegmentWalkMeters),
-          maxTransfers: Number(maxTransfers),
-          restIntervalMinutes: Number(restIntervalMinutes),
-        },
-        naturalLanguageRequest: request,
-      }
-      const response = await tripApi.createDraft(draft)
+      const response = await tripApi.createDraft(draft, tripId)
       navigate('/generating', { state: { tripId: response.data.tripId, draft } })
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : '创建行程失败，请稍后重试。')
       setIsSubmitting(false)
+    }
+  }
+
+  async function handleConfirmConstraints() {
+    setIsConfirmingConstraints(true)
+    setSubmitError('')
+    try {
+      await tripApi.saveConstraintDraft(tripId, assistanceProfile)
+      const confirmed = await tripApi.confirmConstraints(tripId)
+      confirmedProfileJson.current = JSON.stringify(confirmed.data.assistanceProfile)
+      setConstraintStatus(confirmed.data.status)
+    } catch (error) {
+      setConstraintStatus('DRAFT')
+      setSubmitError(error instanceof Error ? error.message : '确认关怀约束失败')
+    } finally {
+      setIsConfirmingConstraints(false)
     }
   }
 
@@ -213,7 +273,10 @@ export function PlannerPage() {
           <div className="form-section">
             <div className="field-heading">
               <div><label className="field-label">关怀出行模式</label><small>会转换为可验证约束</small></div>
-              <span className="verified-chip"><Check size={13} /> 可随时修改</span>
+              <span className={`verified-chip constraint-status constraint-status--${constraintStatus.toLowerCase()}`}>
+                {constraintStatus === 'CONSTRAINT_CONFIRMED' ? <Check size={13} /> : <Clock3 size={13} />}
+                {constraintStatus === 'CONSTRAINT_CONFIRMED' ? '已确认' : 'DRAFT 待确认'}
+              </span>
             </div>
             <div className="assistance-grid">
               {assistanceOptions.map(({ value, label, description, icon: Icon }) => (
@@ -262,13 +325,41 @@ export function PlannerPage() {
             </div>
           )}
 
+          <div className="constraint-confirmation-bar">
+            <div>
+              <strong>
+                {constraintStatus === 'CONSTRAINT_CONFIRMED'
+                  ? '关怀约束已锁定，可进入规划'
+                  : '修改任意关怀字段后必须重新确认'}
+              </strong>
+              <small>确认操作幂等；重复点击不会重复迁移状态。</small>
+            </div>
+            <button
+              className="button button--soft"
+              disabled={isConfirmingConstraints}
+              onClick={handleConfirmConstraints}
+              type="button"
+            >
+              {isConfirmingConstraints ? '正在确认…' : '确认关怀约束'}
+            </button>
+          </div>
+
           <div className="planner-actions">
             <button className="button button--ghost" onClick={() => navigate('/')} type="button">
               <ChevronLeft size={18} /> 返回首页
             </button>
             <div className="planner-actions__submit">
               {submitError && <span className="form-error">{submitError}</span>}
-              <button className="button button--primary" disabled={isSubmitting || !isFormValid} onClick={handleSubmit} type="button">
+              <button
+                className="button button--primary"
+                disabled={
+                  isSubmitting ||
+                  !isFormValid ||
+                  constraintStatus !== 'CONSTRAINT_CONFIRMED'
+                }
+                onClick={handleSubmit}
+                type="button"
+              >
                 {isSubmitting ? '正在理解需求…' : '确认并生成方案'}
                 {!isSubmitting && <ArrowRight size={18} />}
               </button>

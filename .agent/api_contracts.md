@@ -228,3 +228,26 @@ Schema 校验失败沿用人工确认结构：
 - 相同决策可幂等重试；终态后执行相反决策返回 `PLAN_STATE_TRANSITION_INVALID`（HTTP 409）。
 - `PLAN_PARENT_NOT_FOUND` 返回 HTTP 404；父版本、路径 Trip 或不可变 Trip 快照不一致均被拒绝。
 - 页面只能调用决策接口，不得直接改写状态；候选 V2 在接受前不得覆盖当前方案。
+
+## 12. PBI-01-B / PBI-05-A / PBI-06-A 工作流接口
+
+### 12.1 约束状态
+
+- `PUT /api/v1/trips/{tripId}/constraints`：保存严格 `AssistanceProfile`，状态为 `DRAFT`；修改已确认内容后回退 DRAFT。
+- `POST /api/v1/trips/{tripId}/constraints/confirm`：幂等确认，状态为 `CONSTRAINT_CONFIRMED`。
+- `GET /api/v1/trips/{tripId}/constraints`：恢复约束状态。
+- 存在约束记录时，登记 Plan V1 必须使用完全相同且已确认的 Profile。
+
+### 12.2 执行事件
+
+- `POST /api/v1/trips/{tripId}/events`
+- `GET /api/v1/trips/{tripId}/events`
+
+请求字段：`taskId`、`planVersionId`、`eventType`、`amountCents`、`idempotencyKey`。
+事件类型固定为 `START | COMPLETE | SKIP | EXPENSE`。相同幂等键和相同请求返回原事件；相同键不同请求返回 `EVENT_IDEMPOTENCY_CONFLICT`。
+
+### 12.3 基础总结
+
+- `GET /api/v1/trips/{tripId}/summary`
+
+总结由服务端从 CURRENT PlanVersion 和 ExecutionEvent 复算，返回计划/实际金额、差额、完成/跳过任务、当前版本、版本历史和事件。

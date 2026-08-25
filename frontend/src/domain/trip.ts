@@ -344,7 +344,7 @@ export interface TripPlanState {
   tripStatus: TripStatus
   currentPlan: StoredPlanVersion | null
   proposedPlans: StoredPlanVersion[]
-  events: Array<Record<string, unknown>>
+  events: ExecutionEvent[]
 }
 
 export interface PlanDiffItem {
@@ -382,15 +382,52 @@ export interface PlanV2DecisionResult {
 
 export interface ExecutionEventInput {
   taskId: string
+  planVersionId: string
   eventType: 'START' | 'COMPLETE' | 'SKIP' | 'EXPENSE'
-  amountCents?: number
+  amountCents?: number | null
   idempotencyKey: string
 }
 
+export interface ExecutionEvent extends ExecutionEventInput {
+  eventId: string
+  tripId: string
+  occurredAt: string
+}
+
+export type ConstraintProfileStatus = 'DRAFT' | 'CONSTRAINT_CONFIRMED'
+
+export interface ConstraintProfileState {
+  tripId: string
+  status: ConstraintProfileStatus
+  assistanceProfile: AssistanceProfile
+  updatedAt: string
+  confirmedAt: string | null
+}
+
+export interface ConstraintConfirmationResult {
+  tripId: string
+  status: 'CONSTRAINT_CONFIRMED'
+  assistanceProfile: AssistanceProfile
+  confirmedAt: string
+}
+
+export interface PlanHistoryItem {
+  planId: string
+  version: number
+  status: PlanVersionStatus
+  reason: PlanVersionReason
+}
+
 export interface TripSummary {
+  tripId: string
+  tripStatus: TripStatus
   plannedCostCents: number
   actualCostCents: number
-  completedTasks: number
+  differenceCents: number
+  completedTaskIds: string[]
+  skippedTaskIds: string[]
   totalTasks: number
-  planAdjustmentCount: number
+  currentPlanVersion: number
+  planHistory: PlanHistoryItem[]
+  events: ExecutionEvent[]
 }

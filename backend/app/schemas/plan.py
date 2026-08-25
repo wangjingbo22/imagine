@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from pydantic import Field, StringConstraints, UUID4, model_validator
 
 from .trip import ContractModel, PlanReviewTripSnapshot, TripStatus
+from .execution import ExecutionEvent
 
 
 NonBlankText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -234,7 +235,7 @@ class TripPlanState(ContractModel):
     trip_status: TripStatus
     current_plan: PlanVersion | None = None
     proposed_plans: list[PlanVersion] = Field(default_factory=list)
-    events: list[dict[str, object]] = Field(default_factory=list)
+    events: list[ExecutionEvent] = Field(default_factory=list)
 
 
 __all__ = [

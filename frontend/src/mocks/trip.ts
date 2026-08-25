@@ -70,9 +70,15 @@ export const mockPlanV1: PlanSnapshot = {
 }
 
 export const mockSummary: TripSummary = {
+  tripId: '00000000-0000-4000-8000-000000000001',
+  tripStatus: 'COMPLETED',
   plannedCostCents: 29800,
   actualCostCents: 34300,
-  completedTasks: 3,
+  differenceCents: 4500,
+  completedTaskIds: ['task-1', 'task-2', 'task-4'],
+  skippedTaskIds: ['task-3'],
   totalTasks: 4,
-  planAdjustmentCount: 2,
+  currentPlanVersion: 1,
+  planHistory: [],
+  events: [],
 }

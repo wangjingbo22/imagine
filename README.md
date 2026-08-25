@@ -72,3 +72,20 @@ VITE_USE_PLAN_VERSION_API=true
 - 拒绝：V2 变为 `REJECTED`，原 `CURRENT` 和执行状态保持不变。
 - 同一决策可安全重试；终态后反向决策返回 `409`。
 - LLM/前端不得直接写业务状态，V2 在接受前不得覆盖 V1。
+
+## 王敬博：Sprint 1 前端、约束状态与执行闭环
+
+- T004：AssistanceProfile 使用真实 `DRAFT / CONSTRAINT_CONFIRMED` 状态，修改回退、重复确认幂等，未确认不能登记 Plan V1。
+- T015：`START / COMPLETE / SKIP / EXPENSE` 事件保存到 SQLite，绑定 task、CURRENT PlanVersion 和幂等键，刷新后可恢复。
+- T020：前端展示服务端 V1/V2 Diff，并通过原子接口接受或拒绝。
+- T021：基础总结由服务端事件流复算实际金额、完成/跳过任务和版本历史。
+- T023：仓库提供 Docker、Nginx SPA 回退、Render HTTPS Blueprint 和 CI；公网 URL 需平台账号创建服务后补录。
+
+详细文档：
+
+```text
+docs/superpowers/plans/2026-08-25-wang-jingbo-sprint1-completion.md
+docs/testing/2026-08-25-wang-jingbo-sprint1-acceptance.md
+docs/traceability/sprint1/wang_jingbo_sprint1.md
+docs/reviews/2026-08-25-wang-jingbo-sprint1-review.md
+```

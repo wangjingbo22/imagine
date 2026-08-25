@@ -1,9 +1,13 @@
 import type {
   ApiResponse,
   AddressResolution,
+  AssistanceProfile,
   CityResolution,
   CityContext,
+  ConstraintConfirmationResult,
+  ConstraintProfileState,
   CreateSingleDayTrip,
+  ExecutionEvent,
   ExecutionEventInput,
   PlanSnapshot,
   PlanV2DecisionResult,
@@ -26,6 +30,8 @@ import { request } from './client'
 const USE_MOCK_API = (import.meta.env.VITE_USE_MOCK_API ?? 'true') === 'true'
 export const USE_PLAN_VERSION_API =
   (import.meta.env.VITE_USE_PLAN_VERSION_API ?? 'true') === 'true'
+export const USE_WORKFLOW_API =
+  (import.meta.env.VITE_USE_WORKFLOW_API ?? 'true') === 'true'
 
 async function mockResponse<T>(data: T): Promise<ApiResponse<T>> {
   await new Promise((resolve) => window.setTimeout(resolve, 480))
@@ -33,9 +39,9 @@ async function mockResponse<T>(data: T): Promise<ApiResponse<T>> {
 }
 
 export const tripApi = {
-  createDraft(input: TripDraftInput) {
+  createDraft(input: TripDraftInput, tripId = crypto.randomUUID()) {
     if (USE_MOCK_API) {
-      return mockResponse({ tripId: crypto.randomUUID(), draft: input })
+      return mockResponse({ tripId, draft: input })
     }
     throw new ApiError(
       'TRIP_DRAFT_ENDPOINT_UNREGISTERED',
@@ -60,17 +66,47 @@ export const tripApi = {
     return request<PlanSnapshot>(`/api/v1/trips/${tripId}/plans`, { method: 'POST' })
   },
 
-  confirmConstraints<TConstraints>(tripId: string, constraints: TConstraints) {
-    if (USE_MOCK_API) {
-      return mockResponse({ tripId, status: 'CONSTRAINT_CONFIRMED', constraints })
+  saveConstraintDraft(tripId: string, profile: AssistanceProfile) {
+    if (!USE_WORKFLOW_API) {
+      return mockResponse<ConstraintProfileState>({
+        tripId,
+        status: 'DRAFT',
+        assistanceProfile: profile,
+        updatedAt: new Date().toISOString(),
+        confirmedAt: null,
+      })
     }
-    return request<{ tripId: string; status: string; constraints: TConstraints }>(
-      `/api/v1/trips/${tripId}/constraints`,
-      {
-        method: 'PUT',
-        body: JSON.stringify(constraints),
-      },
+    return request<ConstraintProfileState>(`/api/v1/trips/${tripId}/constraints`, {
+      method: 'PUT',
+      body: JSON.stringify(profile),
+    })
+  },
+
+  confirmConstraints(tripId: string) {
+    if (!USE_WORKFLOW_API) {
+      return mockResponse<ConstraintConfirmationResult>({
+        tripId,
+        status: 'CONSTRAINT_CONFIRMED',
+        assistanceProfile: {
+          type: 'ORDINARY',
+          childAge: null,
+          walkLimits: { maxContinuousMeters: null, maxDailyMeters: null },
+          maxTransfers: null,
+          restInterval: null,
+          napWindow: null,
+          avoidStairs: false,
+        },
+        confirmedAt: new Date().toISOString(),
+      })
+    }
+    return request<ConstraintConfirmationResult>(
+      `/api/v1/trips/${tripId}/constraints/confirm`,
+      { method: 'POST' },
     )
+  },
+
+  getConstraints(tripId: string) {
+    return request<ConstraintProfileState>(`/api/v1/trips/${tripId}/constraints`)
   },
 
   confirmPlan(tripId: string, planId: string) {
@@ -238,10 +274,15 @@ export const tripApi = {
   },
 
   createExecutionEvent(tripId: string, input: ExecutionEventInput) {
-    if (USE_MOCK_API) {
-      return mockResponse({ eventId: crypto.randomUUID(), ...input })
+    if (!USE_WORKFLOW_API) {
+      return mockResponse<ExecutionEvent>({
+        eventId: crypto.randomUUID(),
+        tripId,
+        occurredAt: new Date().toISOString(),
+        ...input,
+      })
     }
-    return request<{ eventId: string }>(`/api/v1/trips/${tripId}/events`, {
+    return request<ExecutionEvent>(`/api/v1/trips/${tripId}/events`, {
       method: 'POST',
       body: JSON.stringify(input),
     })
@@ -266,7 +307,7 @@ export const tripApi = {
   },
 
   getSummary(tripId: string) {
-    if (USE_MOCK_API) {
+    if (!USE_WORKFLOW_API) {
       return mockResponse(mockSummary)
     }
     return request<TripSummary>(`/api/v1/trips/${tripId}/summary`)

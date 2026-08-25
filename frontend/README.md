@@ -608,6 +608,26 @@ src/api/tripApi.ts
 | `updatePlan()` | Mock 可用，真实 URL 待确认 |
 | `getSummary()` | Mock 可用，真实 URL 待确认 |
 
+当前 Sprint 1 已新增真实工作流接口：
+
+```text
+PUT  /api/v1/trips/{tripId}/constraints
+POST /api/v1/trips/{tripId}/constraints/confirm
+GET  /api/v1/trips/{tripId}/constraints
+POST /api/v1/trips/{tripId}/events
+GET  /api/v1/trips/{tripId}/events
+GET  /api/v1/trips/{tripId}/summary
+```
+
+启用：
+
+```env
+VITE_USE_PLAN_VERSION_API=true
+VITE_USE_WORKFLOW_API=true
+```
+
+执行页面的完成、跳过和消费操作会写入真实事件；刷新后从事件流恢复。
+
 接口详细说明见：
 
 ```text

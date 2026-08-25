@@ -409,6 +409,81 @@ body,
   color: var(--web-blue);
 }
 
+.constraint-status--draft {
+  color: var(--web-amber);
+  border-color: #f4d9ad;
+  background: var(--web-amber-soft);
+}
+
+.constraint-status--constraint_confirmed {
+  color: var(--web-green);
+  border-color: #d2eee2;
+  background: var(--web-green-soft);
+}
+
+.constraint-confirmation-bar {
+  margin-top: 12px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--web-line);
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.constraint-confirmation-bar > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.constraint-confirmation-bar strong {
+  font-size: 11px;
+}
+
+.constraint-confirmation-bar small {
+  margin-top: 4px;
+  color: var(--web-muted);
+  font-size: 8px;
+}
+
+.summary-history {
+  margin-top: 18px;
+  padding: 20px;
+  border: 1px solid var(--web-line);
+  border-radius: 17px;
+  background: #f8fafc;
+}
+
+.summary-history__row {
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--web-line);
+}
+
+.summary-history__row span {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.summary-history__row strong {
+  padding: 4px 7px;
+  color: var(--web-blue);
+  font-size: 8px;
+  border-radius: 6px;
+  background: var(--web-blue-soft);
+}
+
+.summary-history__row small {
+  color: var(--web-muted);
+  font-size: 8px;
+  text-align: right;
+}
+
 .time-input-row {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -2171,5 +2246,10 @@ body,
 
   .planner-actions .button {
     width: 100%;
+  }
+
+  .constraint-confirmation-bar {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

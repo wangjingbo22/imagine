@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from app.core.errors import AppError
@@ -14,12 +15,20 @@ from app.schemas.plan import (
     TripPlanState,
 )
 
+if TYPE_CHECKING:
+    from app.application.workflow_service import WorkflowService
+
 
 class PlanVersionService:
     """Application boundary for immutable PlanVersion and state decisions."""
 
-    def __init__(self, repository: SqlitePlanVersionRepository) -> None:
+    def __init__(
+        self,
+        repository: SqlitePlanVersionRepository,
+        workflow_service: WorkflowService | None = None,
+    ) -> None:
         self.repository = repository
+        self.workflow_service = workflow_service
 
     @staticmethod
     def _as_app_error(error: PlanStoreError) -> AppError:
@@ -39,6 +48,11 @@ class PlanVersionService:
         )
 
     def register_proposed(self, proposal: ProposedPlanVersion) -> PlanVersion:
+        if self.workflow_service is not None and proposal.version == 1:
+            self.workflow_service.require_constraint_confirmed(
+                proposal.trip_snapshot.trip_id,
+                proposal.trip_snapshot.participants[0].assistance_profile,
+            )
         try:
             return self.repository.register_proposed(proposal)
         except PlanStoreError as error:
@@ -76,6 +90,11 @@ class PlanVersionService:
 
     def get_trip_state(self, trip_id: UUID) -> TripPlanState:
         try:
-            return self.repository.get_trip_state(trip_id)
+            state = self.repository.get_trip_state(trip_id)
+            if self.workflow_service is None:
+                return state
+            return state.model_copy(
+                update={"events": self.workflow_service.list_events(trip_id)}
+            )
         except PlanStoreError as error:
             raise self._as_app_error(error) from error

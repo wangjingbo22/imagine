@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: xingzhi-travel-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: AMAP_WEB_SERVICE_KEY
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://xingzhi-travel-web.onrender.com
+      - key: PLAN_VERSION_DB_PATH
+        value: /app/data/plan_versions.sqlite3
+
+  - type: web
+    name: xingzhi-travel-web
+    runtime: docker
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    healthCheckPath: /
+    envVars:
+      - key: API_UPSTREAM
+        value: https://xingzhi-travel-api.onrender.com
