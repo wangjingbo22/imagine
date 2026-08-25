@@ -13,34 +13,29 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { tripApi } from '../api/tripApi'
 import { AppShell } from '../components/AppShell'
 import type { TripDraftInput } from '../domain/trip'
+import { loadAmapPlan, type AmapPlanResult } from '../services/amapPlan'
 
 const processSteps = [
   {
     title: '理解你的真实需求',
-    detail: '已识别北京、单日、预算 ¥350、历史文化、特色餐饮与低体力需求。',
     icon: BrainCircuit,
   },
   {
     title: '检索同城地点',
-    detail: '正在筛选历史文化、餐饮与轻松漫步类候选地点，并核对来源时间。',
     icon: MapPinned,
   },
   {
     title: '分析路线与关怀风险',
-    detail: '逐段检查步行距离、换乘次数、休息间隔和已知阶梯路线。',
     icon: Route,
   },
   {
     title: '计算预算和时间',
-    detail: '金额按整数分复算，并预留交通波动与临时消费缓冲。',
     icon: CircleDollarSign,
   },
   {
     title: '执行确定性校验',
-    detail: '预算、时间、路线连续性、步行、换乘、休息和返程规则全部检查。',
     icon: ShieldCheck,
   },
 ]
@@ -53,20 +48,40 @@ export function AgentProcessPage() {
   const draft = navigationState?.draft
   const [completedSteps, setCompletedSteps] = useState(0)
   const [isPlanReady, setIsPlanReady] = useState(false)
+  const [planningResult, setPlanningResult] = useState<AmapPlanResult | null>(null)
+  const [planningError, setPlanningError] = useState(
+    draft ? '' : '缺少行程草稿，请返回新建行程页面重新提交。',
+  )
+  const [providerDetail, setProviderDetail] = useState('等待连接高德 Web 服务')
+  const [retryToken, setRetryToken] = useState(0)
 
   useEffect(() => {
-    let currentStep = 0
-    const timer = window.setInterval(() => {
-      currentStep += 1
-      setCompletedSteps(currentStep)
-      if (currentStep === processSteps.length) {
-        window.clearInterval(timer)
-        void tripApi.generatePlan(tripId).then(() => setIsPlanReady(true))
-      }
-    }, 650)
-
-    return () => window.clearInterval(timer)
-  }, [tripId])
+    if (!draft) {
+      return
+    }
+    let cancelled = false
+    const phaseStep = { CITY: 0, PLACES: 1, ROUTES: 2, PLAN: 3 } as const
+    void loadAmapPlan(tripId, draft, (phase, detail) => {
+      if (cancelled) return
+      setCompletedSteps(phaseStep[phase])
+      setProviderDetail(detail)
+    }).then((result) => {
+      if (cancelled) return
+      setPlanningResult(result)
+      setCompletedSteps(processSteps.length)
+      setProviderDetail(
+        `高德返回 ${result.evidence.places.length} 个地点和 ${result.evidence.routes.length} 段路线`,
+      )
+      setIsPlanReady(true)
+    }).catch((error: unknown) => {
+      if (cancelled) return
+      setPlanningError(error instanceof Error ? error.message : '高德真实数据生成失败')
+      setProviderDetail('未使用固定数据回退')
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [draft, retryToken, tripId])
 
   useEffect(() => {
     if (!isPlanReady) {
@@ -74,11 +89,13 @@ export function AgentProcessPage() {
     }
 
     const redirectTimer = window.setTimeout(
-      () => navigate(`/workspace?tripId=${tripId}`, { state: { draft, tripId } }),
+      () => navigate(`/workspace?tripId=${tripId}`, {
+        state: { draft, tripId, amapPlanResult: planningResult },
+      }),
       1200,
     )
     return () => window.clearTimeout(redirectTimer)
-  }, [draft, isPlanReady, navigate, tripId])
+  }, [draft, isPlanReady, navigate, planningResult, tripId])
 
   const progress = useMemo(
     () => Math.round((completedSteps / processSteps.length) * 100),
@@ -94,10 +111,12 @@ export function AgentProcessPage() {
   ]
   const dynamicStepResults = [
     `${9 + (draft?.mustVisit.length ?? 0) + (draft?.avoidPlaces.length ?? 0)} 项结构化字段`,
-    '找到 8 个候选点',
-    '排除 2 条高负担路线',
-    `预估剩余 ¥${Math.max(0, Math.round(((draft?.budgetCents ?? 35000) - 29800) / 100))}`,
-    '8 项硬约束通过',
+    planningResult ? `${planningResult.evidence.places.length} 个高德 POI` : '正在读取 Provider',
+    planningResult ? `${planningResult.evidence.routes.length} 段真实路线` : '正在规划逐段路线',
+    planningResult
+      ? `已知费用 ¥${Math.round(planningResult.knownCostCents / 100)}，${planningResult.unknownPriceCount} 项待确认`
+      : '等待 Provider 价格事实',
+    planningResult?.plan.validationStatus === 'PASS' ? '确定性校验通过' : '等待校验',
   ]
 
   return (
@@ -120,9 +139,26 @@ export function AgentProcessPage() {
           </div>
           <div className="agent-session-meta">
             <span><Database size={15} /> 城市缓存已隔离</span>
-            <span><Clock3 size={15} /> 数据时间 15:58</span>
-            <span><BadgeCheck size={15} /> Mock 演示环境</span>
+            <span><Clock3 size={15} /> {providerDetail}</span>
+            <span><BadgeCheck size={15} /> 高德真实数据</span>
           </div>
+          {planningError && (
+            <div className="provider-retry">
+              <p className="media-error">{planningError}</p>
+              <button
+                className="button button--soft"
+                onClick={() => {
+                  setPlanningError('')
+                  setCompletedSteps(0)
+                  setProviderDetail('正在重新连接高德 Web 服务')
+                  setRetryToken((current) => current + 1)
+                }}
+                type="button"
+              >
+                重试高德真实数据
+              </button>
+            </div>
+          )}
         </section>
 
         <section className="agent-console" data-reveal="panel">
@@ -167,7 +203,9 @@ export function AgentProcessPage() {
             <button
               className="button button--primary"
               disabled={!isPlanReady}
-              onClick={() => navigate(`/workspace?tripId=${tripId}`, { state: { draft, tripId } })}
+              onClick={() => navigate(`/workspace?tripId=${tripId}`, {
+                state: { draft, tripId, amapPlanResult: planningResult },
+              })}
               type="button"
             >
               查看推荐方案 <ArrowRight size={18} />

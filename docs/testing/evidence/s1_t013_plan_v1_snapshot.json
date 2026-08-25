@@ -1,0 +1,15 @@
+{
+  "taskId": "S1-T013",
+  "schemaVersion": "1.0",
+  "databaseInvariants": {
+    "immutableSnapshot": true,
+    "uniqueCurrentPerTrip": true,
+    "duplicateVersionWrite": "REJECTED"
+  },
+  "refreshRecovery": {
+    "cityCode": "110000",
+    "dayIndex": 0,
+    "taskIds": ["task-1", "task-2", "task-3", "task-4"],
+    "totalCostCents": 29800
+  }
+}
