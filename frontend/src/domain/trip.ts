@@ -192,6 +192,17 @@ export interface RouteStep {
   transport: string | null
 }
 
+export type FacilityType = 'ELEVATOR' | 'RAMP' | 'NURSING_ROOM' | 'ACCESSIBLE_ENTRANCE'
+
+export interface FacilityEvidence {
+  facilityType: FacilityType
+  label: string
+  status: 'PASS' | 'FAIL' | 'NEEDS_CONFIRMATION'
+  message: string
+  referenceId: string
+  provenance: Provenance
+}
+
 export interface ProviderRoute {
   routeId: string
   mode: TravelMode
@@ -202,6 +213,7 @@ export interface ProviderRoute {
   walkingDistanceMeters: number | null
   transferCount: number | null
   steps: RouteStep[]
+  facilityEvidence: FacilityEvidence[]
   priceReference: PriceFact
   provenance: Provenance
 }
@@ -282,6 +294,7 @@ export interface PlanTask {
   durationMinutes: number
   transport: string
   costCents: number
+  priceKnown?: boolean
   walkMeters: number
   note: string
   status: PlanTaskStatus
@@ -384,6 +397,7 @@ export interface TripPlanState {
   currentPlan: StoredPlanVersion | null
   proposedPlans: StoredPlanVersion[]
   events: ExecutionEvent[]
+  actualBudget: ActualBudgetSummary | null
 }
 
 export interface PlanDiffItem {
@@ -420,17 +434,27 @@ export interface PlanV2DecisionResult {
 }
 
 export interface ExecutionEventInput {
+  schemaVersion: '1.0'
   taskId: string
   planVersionId: string
   eventType: 'START' | 'COMPLETE' | 'SKIP' | 'EXPENSE'
   amountCents?: number | null
   idempotencyKey: string
+  occurredAt: string
 }
 
 export interface ExecutionEvent extends ExecutionEventInput {
   eventId: string
   tripId: string
-  occurredAt: string
+}
+
+export interface ActualBudgetSummary {
+  tripId: string
+  planVersionId: string | null
+  plannedBudgetCents: number
+  actualSpentCents: number
+  remainingBudgetCents: number
+  expenseEventCount: number
 }
 
 export type ConstraintProfileStatus = 'DRAFT' | 'CONSTRAINT_CONFIRMED'

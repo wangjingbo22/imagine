@@ -9,7 +9,6 @@ import type {
   CreateSingleDayTrip,
   ExecutionEvent,
   ExecutionEventInput,
-  PlanSnapshot,
   PlanV2DecisionResult,
   PlanVersionProposal,
   PlanVersionDiff,
@@ -24,19 +23,12 @@ import type {
   TripSummary,
   TripPlanState,
 } from '../domain/trip'
-import { mockPlanV1, mockSummary } from '../mocks/trip'
 import { request } from './client'
 
-const USE_MOCK_API = (import.meta.env.VITE_USE_MOCK_API ?? 'true') === 'true'
 export const USE_PLAN_VERSION_API =
   (import.meta.env.VITE_USE_PLAN_VERSION_API ?? 'true') === 'true'
 export const USE_WORKFLOW_API =
   (import.meta.env.VITE_USE_WORKFLOW_API ?? 'true') === 'true'
-
-async function mockResponse<T>(data: T): Promise<ApiResponse<T>> {
-  await new Promise((resolve) => window.setTimeout(resolve, 480))
-  return { code: 200, message: 'success', data }
-}
 
 export const tripApi = {
   createDraft(input: TripDraftParseInput) {
@@ -53,33 +45,7 @@ export const tripApi = {
     })
   },
 
-  submitNormalizedTrip(path: string, input: CreateSingleDayTrip) {
-    if (USE_MOCK_API) {
-      return mockResponse(input)
-    }
-    return request<CreateSingleDayTrip>(path, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    })
-  },
-
-  generatePlan(tripId: string) {
-    if (USE_MOCK_API) {
-      return mockResponse(mockPlanV1)
-    }
-    return request<PlanSnapshot>(`/api/v1/trips/${tripId}/plans`, { method: 'POST' })
-  },
-
   saveConstraintDraft(tripId: string, profile: AssistanceProfile) {
-    if (!USE_WORKFLOW_API) {
-      return mockResponse<ConstraintProfileState>({
-        tripId,
-        status: 'DRAFT',
-        assistanceProfile: profile,
-        updatedAt: new Date().toISOString(),
-        confirmedAt: null,
-      })
-    }
     return request<ConstraintProfileState>(`/api/v1/trips/${tripId}/constraints`, {
       method: 'PUT',
       body: JSON.stringify(profile),
@@ -87,22 +53,6 @@ export const tripApi = {
   },
 
   confirmConstraints(tripId: string) {
-    if (!USE_WORKFLOW_API) {
-      return mockResponse<ConstraintConfirmationResult>({
-        tripId,
-        status: 'CONSTRAINT_CONFIRMED',
-        assistanceProfile: {
-          type: 'ORDINARY',
-          childAge: null,
-          walkLimits: { maxContinuousMeters: null, maxDailyMeters: null },
-          maxTransfers: null,
-          restInterval: null,
-          napWindow: null,
-          avoidStairs: false,
-        },
-        confirmedAt: new Date().toISOString(),
-      })
-    }
     return request<ConstraintConfirmationResult>(
       `/api/v1/trips/${tripId}/constraints/confirm`,
       { method: 'POST' },
@@ -114,9 +64,6 @@ export const tripApi = {
   },
 
   confirmPlan(tripId: string, planId: string) {
-    if (!USE_PLAN_VERSION_API) {
-      return mockResponse({ tripId, planId, status: 'CURRENT' })
-    }
     return request<{
       tripId: string
       planId: string
@@ -265,55 +212,17 @@ export const tripApi = {
   },
 
   getTrip(tripId: string): Promise<ApiResponse<TripPlanState>> {
-    if (!USE_PLAN_VERSION_API) {
-      return mockResponse({
-        tripId,
-        tripStatus: 'EXECUTING',
-        currentPlan: null,
-        proposedPlans: [],
-        events: [],
-      })
-    }
     return request<TripPlanState>(`/api/v1/trips/${tripId}`)
   },
 
   createExecutionEvent(tripId: string, input: ExecutionEventInput) {
-    if (!USE_WORKFLOW_API) {
-      return mockResponse<ExecutionEvent>({
-        eventId: crypto.randomUUID(),
-        tripId,
-        occurredAt: new Date().toISOString(),
-        ...input,
-      })
-    }
     return request<ExecutionEvent>(`/api/v1/trips/${tripId}/events`, {
       method: 'POST',
       body: JSON.stringify(input),
     })
   },
 
-  updatePlan(tripId: string, feedback: string) {
-    if (USE_MOCK_API) {
-      return mockResponse({
-        tripId,
-        currentPlan: mockPlanV1,
-        feedback,
-        status: 'UPDATED',
-      })
-    }
-    return request<{ tripId: string; currentPlan: PlanSnapshot; status: string }>(
-      `/api/v1/trips/${tripId}/plan-feedback`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ feedback }),
-      },
-    )
-  },
-
   getSummary(tripId: string) {
-    if (!USE_WORKFLOW_API) {
-      return mockResponse(mockSummary)
-    }
     return request<TripSummary>(`/api/v1/trips/${tripId}/summary`)
   },
 }

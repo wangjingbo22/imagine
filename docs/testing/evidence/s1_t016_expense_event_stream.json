@@ -1,0 +1,30 @@
+{
+  "taskId": "S1-T016",
+  "schemaVersion": "1.0",
+  "amountUnit": "integer_cents",
+  "planVersionId": "20000000-0000-4000-8000-000000000001",
+  "expenseEvents": [
+    {
+      "taskId": "task-2",
+      "amountCents": 13800,
+      "idempotencyKey": "expense-task-2-v1"
+    },
+    {
+      "taskId": "task-3",
+      "amountCents": 5000,
+      "idempotencyKey": "expense-task-3-v1"
+    }
+  ],
+  "budget": {
+    "plannedBudgetCents": 35000,
+    "actualSpentCents": 18800,
+    "remainingBudgetCents": 16200,
+    "expenseEventCount": 2
+  },
+  "idempotency": {
+    "replayedKey": "expense-task-2-v1",
+    "storedExpenseEventCount": 2,
+    "duplicateDebitCount": 0
+  },
+  "refreshRecovery": "PASS"
+}

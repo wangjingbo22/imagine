@@ -94,7 +94,14 @@ class PlanVersionService:
             if self.workflow_service is None:
                 return state
             return state.model_copy(
-                update={"events": self.workflow_service.list_events(trip_id)}
+                update={
+                    "events": self.workflow_service.list_events(trip_id),
+                    "actual_budget": (
+                        self.workflow_service.get_budget_summary(trip_id)
+                        if state.current_plan is not None
+                        else None
+                    ),
+                }
             )
         except PlanStoreError as error:
             raise self._as_app_error(error) from error

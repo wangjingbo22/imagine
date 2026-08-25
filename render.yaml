@@ -11,6 +11,8 @@ services:
         value: https://xingzhi-travel-web.onrender.com
       - key: PLAN_VERSION_DB_PATH
         value: /app/data/plan_versions.sqlite3
+      - key: AMAP_CACHE_DB_PATH
+        value: /app/data/amap_cache.sqlite3
 
   - type: web
     name: xingzhi-travel-web
@@ -20,4 +22,4 @@ services:
     healthCheckPath: /
     envVars:
       - key: API_UPSTREAM
-        value: https://xingzhi-travel-api.onrender.com
+        value: https://imagine-mp7v.onrender.com
