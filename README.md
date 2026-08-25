@@ -58,11 +58,12 @@ PLAN_VERSION_DB_PATH=data/plan_versions.sqlite3
 
 ```env
 VITE_API_BASE_URL=http://localhost:8000
-VITE_USE_MOCK_API=true
+VITE_USE_MOCK_API=false
 VITE_USE_PLAN_VERSION_API=true
+VITE_USE_WORKFLOW_API=true
 ```
 
-其中 Trip 草稿和方案生成仍可使用 Mock，Plan V1 保存、确认、执行守卫与刷新恢复使用真实本地接口。
+前端通过后端调用高德 Web 服务：城市解析、同城 POI 检索和逐段路线规划均使用真实接口；Plan V1 保存、确认、执行守卫与刷新恢复也使用真实本地接口。高德 Key 只配置在后端根目录 `.env`，不能写入 `frontend/.env` 或提交到 Git。
 
 ## 张琪：PBI-05-C V1/V2 Diff 与接受拒绝
 

@@ -294,6 +294,7 @@ export interface PlanTask {
   durationMinutes: number
   transport: string
   costCents: number
+  priceKnown?: boolean
   walkMeters: number
   note: string
   status: PlanTaskStatus

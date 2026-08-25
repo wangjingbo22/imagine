@@ -46,6 +46,7 @@ def test_dockerfiles_use_reproducible_install_and_production_servers() -> None:
     backend = read("Dockerfile")
     frontend = read("frontend/Dockerfile")
     assert "pip install --no-cache-dir ." in backend
-    assert 'CMD ["uvicorn"' in backend
+    assert "uvicorn app.main:app" in backend
+    assert "${PORT:-8000}" in backend
     assert "RUN npm ci" in frontend
     assert "FROM nginx:1.27-alpine" in frontend

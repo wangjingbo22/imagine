@@ -66,10 +66,21 @@ class SqliteWorkflowRepository:
                     amount_cents INTEGER,
                     idempotency_key TEXT NOT NULL,
                     occurred_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
                     UNIQUE (trip_id, idempotency_key)
                 )
                 """
             )
+            event_columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(execution_events)"
+                ).fetchall()
+            }
+            if "created_at" not in event_columns:
+                connection.execute(
+                    "ALTER TABLE execution_events ADD COLUMN created_at TEXT"
+                )
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_execution_events_trip_time
@@ -334,8 +345,8 @@ class SqliteWorkflowRepository:
                 """
                 INSERT INTO execution_events (
                     event_id, trip_id, task_id, plan_version_id, event_type,
-                    amount_cents, idempotency_key, occurred_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    amount_cents, idempotency_key, occurred_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(event_id),
@@ -346,6 +357,7 @@ class SqliteWorkflowRepository:
                     request.amount_cents,
                     request.idempotency_key,
                     occurred_at,
+                    updated_at,
                 ),
             )
 
