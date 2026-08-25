@@ -102,23 +102,11 @@
       ]
     }
   ],
-  "deferredByUser": [
-    {
-      "taskId": "S1-T011",
-      "day": "Day 2",
-      "status": "NOT_IMPLEMENTED"
-    },
-    {
-      "taskId": "S1-T018",
-      "day": "Day 2",
-      "status": "NOT_IMPLEMENTED"
-    },
-    {
-      "taskId": "S1-T022",
-      "day": "Day 2",
-      "status": "NOT_IMPLEMENTED"
-    }
-  ],
+  "day2Continuation": {
+    "status": "IMPLEMENTED_IN_SEPARATE_TRACE",
+    "trace": "docs/traceability/sprint1/lin_canhan_day2.json",
+    "tasks": ["S1-T011", "S1-T018", "S1-T022"]
+  },
   "localVerification": {
     "command": "python -m pytest -q; npm run build; npm run lint",
     "result": "78 passed; frontend build passed; frontend lint passed"

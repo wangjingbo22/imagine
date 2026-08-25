@@ -1,0 +1,235 @@
+{
+  "schemaVersion": "1.0",
+  "owner": "林粲涵",
+  "sprint": "Sprint 1",
+  "scope": "DAY_2",
+  "compatibilityBaseline": {
+    "teamMainCommit": "b5b6d9fc0f19c01ef56f5b6db2aa8f13bf82cbdf",
+    "verifiedRemoteBranch": "origin/main",
+    "verifiedAt": "2026-08-25"
+  },
+  "implementationCommit": "1837e288686aa30c215eb01ea97e21682fba0360",
+  "tasks": [
+    {
+      "taskId": "S1-T011",
+      "pbiId": "PBI-04-A",
+      "acId": "AC-04-A",
+      "status": "IMPLEMENTED",
+      "dependsOn": ["S1-T006", "S1-T007", "S1-T009"],
+      "consumedBy": ["S1-T012", "S1-T018", "S1-T024"],
+      "codeFiles": [
+        "backend/app/services/planning/__init__.py",
+        "backend/app/services/planning/models.py",
+        "backend/app/services/planning/planner.py",
+        "backend/app/services/planning/replanning_adapter.py"
+      ],
+      "integrationFiles": [
+        "app/domain/models.py",
+        "app/domain/budget.py",
+        "app/application/route_risk_adapter.py",
+        "backend/app/services/assistance_constraints/compiler.py",
+        "backend/app/services/route_risk/models.py",
+        "backend/app/services/route_risk/evaluator.py",
+        "backend/app/schemas/plan.py",
+        "app/application/plan_service.py",
+        "app/infrastructure/plan_store.py"
+      ],
+      "testFiles": [
+        "backend/tests/test_candidate_planner.py",
+        "backend/tests/test_planning_replanning_integration.py"
+      ],
+      "fixtures": [
+        "backend/tests/fixtures/planning/golden_candidate_plan.json"
+      ],
+      "proves": [
+        "deterministic-single-candidate-with-three-or-four-tasks",
+        "confirmed-t007-constraints-are-recompiled-and-compared",
+        "t006-routes-are-continuous-fit-the-timeline-and-feed-t009",
+        "trusted-start-and-return-coordinates-bind-route-endpoints",
+        "all-hard-route-time-care-and-budget-results-must-pass",
+        "integer-cent-budget-is-recomputed-from-place-and-route-facts",
+        "unknown-price-or-source-remains-needs-confirmation-not-zero-or-pass",
+        "complete-pass-candidate-bridges-to-existing-v1-and-v2-plan-contracts",
+        "mutated-candidate-request-or-pass-snapshot-fails-closed"
+      ]
+    },
+    {
+      "taskId": "S1-T018",
+      "pbiId": "PBI-05-B",
+      "acId": "AC-05-B",
+      "status": "IMPLEMENTED_WITH_T017_INPUT_PORT",
+      "dependsOn": ["S1-T011", "S1-T017"],
+      "consumedBy": ["S1-T019", "S1-T024"],
+      "codeFiles": [
+        "backend/app/services/replanning/__init__.py",
+        "backend/app/services/replanning/models.py",
+        "backend/app/services/replanning/selector.py"
+      ],
+      "integrationFiles": [
+        "backend/app/services/planning/replanning_adapter.py",
+        "backend/app/schemas/execution.py",
+        "backend/app/schemas/plan.py",
+        "app/application/plan_service.py",
+        "app/infrastructure/plan_store.py"
+      ],
+      "testFiles": [
+        "backend/tests/test_minimum_disruption_replanning.py",
+        "backend/tests/test_planning_replanning_integration.py"
+      ],
+      "fixtures": [
+        "backend/tests/snapshots/t018_no_feasible.json"
+      ],
+      "proves": [
+        "completed-skipped-and-locked-tasks-freeze-the-current-prefix",
+        "candidate-id-version-parent-trip-and-frozen-prefix-are-validated",
+        "budget-time-route-and-care-hard-domains-must-all-pass",
+        "actual-expense-plus-known-remaining-cost-is-revalidated-without-double-counting",
+        "ranking-prefers-minimum-modified-task-count-then-satisfaction-loss",
+        "equal-score-ties-are-deterministic",
+        "selected-v2-registers-in-real-sqlite-as-proposed-and-enters-replan-review",
+        "no-feasible-result-reports-rule-ids-and-actionable-relaxations",
+        "missing-trusted-facts-tampering-and-forged-pass-snapshots-fail-closed"
+      ]
+    },
+    {
+      "taskId": "S1-T022",
+      "pbiId": "PBI-06-A",
+      "acId": "AC-06-A",
+      "status": "IMPLEMENTED",
+      "dependsOn": ["S1-T021"],
+      "consumedBy": ["S1-T024"],
+      "codeFiles": [
+        "backend/app/services/summary_trace/__init__.py",
+        "backend/app/services/summary_trace/adapter.py"
+      ],
+      "integrationFiles": [
+        "backend/app/schemas/workflow.py",
+        "backend/app/schemas/execution.py",
+        "backend/app/schemas/plan.py",
+        "app/application/workflow_service.py",
+        "app/infrastructure/workflow_store.py",
+        "app/api/workflow_routes.py",
+        "app/application/plan_service.py",
+        "app/infrastructure/plan_store.py",
+        "app/api/plan_routes.py",
+        "app/main.py"
+      ],
+      "testFiles": [
+        "backend/tests/test_s1_t022_summary_paths.py"
+      ],
+      "testSupportFiles": [
+        "tests/test_plan_versions.py",
+        "tests/test_plan_v2_diff.py"
+      ],
+      "fixtures": [
+        "backend/tests/fixtures/summary_paths/no_v2.json",
+        "backend/tests/fixtures/summary_paths/accepted_v2.json",
+        "backend/tests/fixtures/summary_paths/rejected_v2.json"
+      ],
+      "proves": [
+        "no-v2-accepted-v2-and-rejected-v2-real-http-sqlite-paths",
+        "every-public-summary-integer-has-plan-lineage-and-applicable-task-event-lineage",
+        "event-task-id-must-belong-to-its-referenced-plan-version",
+        "accepted-v2-expenses-retain-cross-version-lineage",
+        "tampered-summary-or-event-lineage-fails-closed",
+        "all-three-acceptance-paths-contain-no-photo-field"
+      ]
+    }
+  ],
+  "linkages": [
+    {
+      "pbiId": "PBI-04-A",
+      "acId": "AC-04-A",
+      "taskId": "S1-T011",
+      "moduleFiles": [
+        "backend/app/services/planning/__init__.py",
+        "backend/app/services/planning/models.py",
+        "backend/app/services/planning/planner.py",
+        "backend/app/services/planning/replanning_adapter.py"
+      ],
+      "testFiles": [
+        "backend/tests/test_candidate_planner.py",
+        "backend/tests/test_planning_replanning_integration.py"
+      ],
+      "fixtureFiles": [
+        "backend/tests/fixtures/planning/golden_candidate_plan.json"
+      ],
+      "upstreamTasks": ["S1-T006", "S1-T007", "S1-T009"],
+      "downstreamTasks": ["S1-T012", "S1-T018", "S1-T024"]
+    },
+    {
+      "pbiId": "PBI-05-B",
+      "acId": "AC-05-B",
+      "taskId": "S1-T018",
+      "moduleFiles": [
+        "backend/app/services/replanning/__init__.py",
+        "backend/app/services/replanning/models.py",
+        "backend/app/services/replanning/selector.py"
+      ],
+      "testFiles": [
+        "backend/tests/test_minimum_disruption_replanning.py",
+        "backend/tests/test_planning_replanning_integration.py"
+      ],
+      "fixtureFiles": [
+        "backend/tests/snapshots/t018_no_feasible.json"
+      ],
+      "upstreamTasks": ["S1-T011", "S1-T017"],
+      "downstreamTasks": ["S1-T019", "S1-T024"]
+    },
+    {
+      "pbiId": "PBI-06-A",
+      "acId": "AC-06-A",
+      "taskId": "S1-T022",
+      "moduleFiles": [
+        "backend/app/services/summary_trace/__init__.py",
+        "backend/app/services/summary_trace/adapter.py"
+      ],
+      "testFiles": [
+        "backend/tests/test_s1_t022_summary_paths.py"
+      ],
+      "fixtureFiles": [
+        "backend/tests/fixtures/summary_paths/no_v2.json",
+        "backend/tests/fixtures/summary_paths/accepted_v2.json",
+        "backend/tests/fixtures/summary_paths/rejected_v2.json"
+      ],
+      "upstreamTasks": ["S1-T021"],
+      "downstreamTasks": ["S1-T024"]
+    }
+  ],
+  "integrationBoundaries": {
+    "S1-T017": {
+      "status": "UPSTREAM_IMPLEMENTATION_ABSENT_PORT_ONLY",
+      "implementedByThisDelivery": false,
+      "port": "ReplanCandidateSource",
+      "definedIn": "backend/app/services/replanning/selector.py",
+      "evidence": "backend/tests/test_minimum_disruption_replanning.py"
+    },
+    "S1-T019": {
+      "status": "EXISTING_MAIN_CONSUMER_VERIFIED",
+      "input": "SelectedReplan.selectedPlan",
+      "service": "app/application/plan_service.py",
+      "evidence": "backend/tests/test_planning_replanning_integration.py"
+    },
+    "S1-T021": {
+      "status": "EXISTING_MAIN_UPSTREAM_VERIFIED",
+      "schema": "backend/app/schemas/workflow.py",
+      "service": "app/application/workflow_service.py",
+      "evidence": "backend/tests/test_s1_t022_summary_paths.py"
+    }
+  },
+  "traceabilityTest": "backend/tests/test_day2_traceability.py",
+  "localVerification": {
+    "backendCommand": "python -B -m pytest -p no:cacheprovider -q",
+    "backendResult": "215 passed in 3.80s",
+    "focusedCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_candidate_planner.py backend/tests/test_minimum_disruption_replanning.py backend/tests/test_planning_replanning_integration.py backend/tests/test_s1_t022_summary_paths.py",
+    "focusedResult": "33 passed in 1.10s",
+    "frontendBuild": "npm run build passed",
+    "frontendLint": "npm run lint passed"
+  },
+  "externalEvidence": {
+    "pullRequest": null,
+    "ciBuild": null,
+    "qaSignOff": null,
+    "poAcceptance": null
+  }
+}

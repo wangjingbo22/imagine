@@ -39,23 +39,13 @@ def test_day1_traceability_is_complete_and_points_to_real_files():
             assert (REPO_ROOT / relative_path).is_file(), relative_path
 
 
-def test_day2_tasks_are_explicitly_deferred_not_claimed_done():
+def test_day2_continuation_points_to_separate_trace():
     trace = json.loads(TRACE_PATH.read_text(encoding="utf-8"))
 
-    assert trace["deferredByUser"] == [
-        {
-            "taskId": "S1-T011",
-            "day": "Day 2",
-            "status": "NOT_IMPLEMENTED",
-        },
-        {
-            "taskId": "S1-T018",
-            "day": "Day 2",
-            "status": "NOT_IMPLEMENTED",
-        },
-        {
-            "taskId": "S1-T022",
-            "day": "Day 2",
-            "status": "NOT_IMPLEMENTED",
-        },
-    ]
+    assert "deferredByUser" not in trace
+    assert trace["day2Continuation"] == {
+        "status": "IMPLEMENTED_IN_SEPARATE_TRACE",
+        "trace": "docs/traceability/sprint1/lin_canhan_day2.json",
+        "tasks": ["S1-T011", "S1-T018", "S1-T022"],
+    }
+    assert (REPO_ROOT / trace["day2Continuation"]["trace"]).is_file()
