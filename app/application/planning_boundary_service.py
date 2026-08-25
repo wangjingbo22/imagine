@@ -19,7 +19,7 @@ from app.infrastructure.trusted_planning_store import (
     proposal_digest,
 )
 from app.schemas.execution import ExecutionEvent, ExecutionEventType
-from app.schemas.plan import PlanVersion, ProposedPlanVersion
+from app.schemas.plan import PlanVersion, PlanVersionStatus, ProposedPlanVersion
 from app.schemas.planning import (
     EventDrivenReplanRequest,
     RegisteredReplan,
@@ -173,6 +173,15 @@ class PlanningBoundaryService:
                 raise AppError(
                     code="PLANNING_PROPOSAL_DIGEST_MISMATCH",
                     message="已存在的 PlanVersion 与本次服务端生成提案摘要不一致",
+                    http_status=409,
+                ) from error
+            if (
+                proposal.version == 2
+                and stored.status is not PlanVersionStatus.PROPOSED
+            ):
+                raise AppError(
+                    code="REPLAN_S1_VERSION_LIMIT",
+                    message="Sprint 1 only supports one Plan V2 adjustment.",
                     http_status=409,
                 ) from error
             return stored

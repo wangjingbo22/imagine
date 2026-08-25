@@ -21,7 +21,7 @@ Command:
 python -m pytest backend/tests/test_s1_t017_event_replan.py -q
 ```
 
-Result: `8 passed`
+Result: `9 passed`
 
 Covered:
 
@@ -32,6 +32,7 @@ Covered:
 - No events returns `REPLAN_EVENTS_REQUIRED` with no V2 residual.
 - No unfinished suffix returns `REPLAN_SUFFIX_EMPTY` with no V2 residual.
 - Repeating the same event replan returns the same V2 and keeps only one version-2 row.
+- Replaying after V2 rejection returns `REPLAN_S1_VERSION_LIMIT` with no database changes.
 - `feedback` and `USER_FEEDBACK` are rejected by schema validation before any V2 side effect.
 
 Command:
@@ -86,7 +87,7 @@ git diff --check
 
 Results:
 
-- `272 passed`
+- `273 passed`
 - `compileall` exit `0`
 - `git diff --check` exit `0`; Git reports only LF-to-CRLF working-copy warnings.
 

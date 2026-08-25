@@ -420,6 +420,63 @@ async def test_same_event_replan_is_idempotent(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_rejected_v2_cannot_be_replayed_as_selected(
+    tmp_path: Path,
+) -> None:
+    app, database_path = _app_and_database(tmp_path)
+    request = _candidate_request()
+    trip_id = request["trip"]["tripId"]
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        current = await _generate_confirm_and_start(client, request)
+        first = current["days"][0]["tasks"][0]
+        await _record_completed_task(
+            client,
+            trip_id=trip_id,
+            plan_id=current["planId"],
+            task_id=first["taskId"],
+            actual_cents=first["costCents"] + 5_000,
+        )
+        generated = await _request_event_replan(client, trip_id)
+        assert generated.status_code == 200, generated.text
+        candidate_id = generated.json()["data"]["plan"]["planId"]
+        rejected = await client.post(
+            f"/api/v1/trips/{trip_id}/plan-versions/{candidate_id}/reject"
+        )
+        assert rejected.status_code == 200, rejected.text
+
+        tables = (
+            "trips",
+            "plan_versions",
+            "execution_events",
+            "trusted_plan_issuances",
+        )
+        with sqlite3.connect(database_path) as connection:
+            before = {
+                table: connection.execute(
+                    f"SELECT * FROM {table} ORDER BY rowid"
+                ).fetchall()
+                for table in tables
+            }
+
+        replay = await _request_event_replan(client, trip_id)
+
+    assert replay.status_code == 409, replay.text
+    assert replay.json()["code"] == "REPLAN_S1_VERSION_LIMIT"
+    with sqlite3.connect(database_path) as connection:
+        after = {
+            table: connection.execute(
+                f"SELECT * FROM {table} ORDER BY rowid"
+            ).fetchall()
+            for table in tables
+        }
+    assert after == before
+
+
+@pytest.mark.asyncio
 async def test_event_replan_rejects_free_text_feedback_contract_without_v2(
     tmp_path: Path,
 ) -> None:

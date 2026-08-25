@@ -14,8 +14,8 @@
 
 ## 本 T017 分支已验证
 
-- 后端 S1-T017 定向：`backend/tests/test_s1_t017_event_replan.py`，8 passed。
-- 后端全量回归：272 passed。
+- 后端 S1-T017 定向：`backend/tests/test_s1_t017_event_replan.py`，9 passed。
+- 后端全量回归：273 passed。
 - 前端契约与既有单测：21 passed。
 - 前端 lint/build：exit 0；Vite 仍打印既有 `/runtime-config.js` non-module warning，但构建完成。
 - `python -m compileall app backend/app`：exit 0。
@@ -25,7 +25,7 @@
 ## 张琪：服务端必须补充
 
 1. **V1 待确认恢复**：现在只有 `GET .../plan-reviews/{reviewId}`，但刷新后页面不知道 reviewId。请让 `getTrip` 返回 `pendingReviewId`，或新增“查询当前 pending review”接口。
-2. **一次 V2 的服务端事实**：Trip 状态应暴露 `v2Attempted`/V2 决策历史，避免拒绝 V2 后刷新页面又允许生成第二次。
+2. **一次 V2 的页面恢复提示**：服务端已拒绝终态 V2 的重复生成；Trip 状态仍可在 T024 暴露 `v2Attempted`/V2 决策历史，让刷新后的页面提前禁用入口并显示原因。
 3. **部署持久化**：Render 为 SQLite 的 `/app/data` 配 Persistent Disk；否则重部署会丢 V1、证据确认、执行事件、实际消费和 V2。
 4. **部署版本可见**：health/version 响应返回构建 SHA，发布后确认公网确实运行最新 main，而不是旧前端包。
 5. **错误详情稳定化**：保留 `code/field/message/affectedRuleIds/results/relaxations`，不要只返回“所有候选失败”。
