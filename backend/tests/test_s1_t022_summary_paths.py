@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import UTC, datetime
 import json
 from pathlib import Path
@@ -14,19 +15,39 @@ from app.application.workflow_service import WorkflowService
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.infrastructure.workflow_store import SqliteWorkflowRepository
 from app.main import create_app
-from app.schemas.plan import ProposedPlanVersion, TripPlanState
+from app.schemas.plan import PlanVersion, TripPlanState
+from app.schemas.trip import CreateSingleDayTrip
 from app.schemas.workflow import TripExecutionSummary
 from app.services.summary_trace import SummaryTraceError, trace_summary_numbers
-from tests.test_plan_v2_diff import v2_payload
-from tests.test_plan_versions import UnusedLocationService, proposal_payload
+from tests.test_plan_versions import UnusedLocationService
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "summary_paths"
+PLANNING_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "planning" / "golden_candidate_plan.json"
+)
 PATH_FIXTURES = ("no_v2", "accepted_v2", "rejected_v2")
 
 
 def _load_path_fixture(name: str) -> dict[str, Any]:
     return json.loads((FIXTURE_DIR / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def _planning_request(
+    task_ids: tuple[str, str, str, str],
+    task_costs: tuple[int, int, int, int],
+) -> dict[str, Any]:
+    request = json.loads(PLANNING_FIXTURE.read_text(encoding="utf-8"))["request"]
+    for task, task_id, cost_cents in zip(
+        request["taskFacts"],
+        task_ids,
+        task_costs,
+        strict=True,
+    ):
+        task["taskId"] = task_id
+        task["place"]["priceReference"]["amountCents"] = cost_cents
+        task["route"]["priceReference"]["amountCents"] = 0
+    return request
 
 
 def _contains_photo_key(value: object) -> bool:
@@ -104,11 +125,26 @@ async def test_s1_t022_real_summary_path_is_complete_and_traceable(
     """No-V2, accepted-V2 and rejected-V2 must all retain numeric lineage."""
 
     scenario = _load_path_fixture(fixture_name)
-    v1 = proposal_payload()
-    v2 = v2_payload()
-    trip_id = str(v1["tripSnapshot"]["tripId"])
-    plan_ids = {"V1": str(v1["planId"]), "V2": str(v2["planId"])}
+    v1_request = _planning_request(
+        ("task-1", "task-2", "task-3", "task-4"),
+        (600, 13_800, 400, 15_000),
+    )
+    v2_request = _planning_request(
+        ("task-1", "task-2", "task-4", "task-5"),
+        (600, 11_800, 14_000, 1_000),
+    )
+    trip_id = str(v1_request["trip"]["tripId"])
+    plan_ids: dict[str, str] = {}
+    plan_payloads: dict[str, dict[str, Any]] = {}
     plan_service, workflow_service = _services(tmp_path)
+    confirmed_payload = deepcopy(v1_request["trip"])
+    confirmed_payload["status"] = "DRAFT"
+    workflow_service.confirm_trip(
+        CreateSingleDayTrip.model_validate_json(
+            json.dumps(confirmed_payload, ensure_ascii=False),
+            strict=True,
+        )
+    )
     app = create_app(
         service=UnusedLocationService(),  # type: ignore[arg-type]
         plan_service=plan_service,
@@ -117,15 +153,27 @@ async def test_s1_t022_real_summary_path_is_complete_and_traceable(
     transport = httpx.ASGITransport(app=app)
 
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        registered_v1 = await client.post(
-            f"/api/v1/trips/{trip_id}/plan-versions",
-            json=v1,
+        saved_constraints = await client.put(
+            f"/api/v1/trips/{trip_id}/constraints",
+            json=v1_request["trip"]["participants"][0]["assistanceProfile"],
         )
+        confirmed_constraints = await client.post(
+            f"/api/v1/trips/{trip_id}/constraints/confirm"
+        )
+        assert saved_constraints.status_code == 200, saved_constraints.text
+        assert confirmed_constraints.status_code == 200, confirmed_constraints.text
+        generated_v1 = await client.post(
+            f"/api/v1/trips/{trip_id}/plan-versions/generate",
+            json=v1_request,
+        )
+        assert generated_v1.status_code == 200, generated_v1.text
+        plan_payloads["V1"] = generated_v1.json()["data"]
+        plan_ids["V1"] = plan_payloads["V1"]["planId"]
         confirmed_v1 = await client.post(
             f"/api/v1/trips/{trip_id}/plan-versions/{plan_ids['V1']}/confirm"
         )
         started = await client.post(f"/api/v1/trips/{trip_id}/execution/start")
-        assert registered_v1.status_code == confirmed_v1.status_code == 200
+        assert confirmed_v1.status_code == 200, confirmed_v1.text
         assert started.status_code == 200
 
         await _post_events(
@@ -136,11 +184,20 @@ async def test_s1_t022_real_summary_path_is_complete_and_traceable(
         )
 
         if scenario["decision"] != "NONE":
-            registered_v2 = await client.post(
-                f"/api/v1/trips/{trip_id}/plan-versions",
-                json=v2,
+            generated_v2 = await client.post(
+                f"/api/v1/trips/{trip_id}/replans",
+                json={
+                    "schemaVersion": "1.0",
+                    "reason": "USER_FEEDBACK",
+                    "lockedTaskIds": [],
+                    "candidates": [
+                        {"request": v2_request, "satisfactionLoss": 0},
+                    ],
+                },
             )
-            assert registered_v2.status_code == 200, registered_v2.text
+            assert generated_v2.status_code == 200, generated_v2.text
+            plan_payloads["V2"] = generated_v2.json()["data"]["plan"]
+            plan_ids["V2"] = plan_payloads["V2"]["planId"]
             action = "accept" if scenario["decision"] == "ACCEPT" else "reject"
             decision = await client.post(
                 f"/api/v1/trips/{trip_id}/plan-versions/{plan_ids['V2']}/{action}"
@@ -203,9 +260,8 @@ async def test_s1_t022_real_summary_path_is_complete_and_traceable(
     }
     assert actual_statuses == expected["planStatuses"]
 
-    plan_payloads = {"V1": v1, "V2": v2}
     plan_versions = tuple(
-        ProposedPlanVersion.model_validate_json(
+        PlanVersion.model_validate_json(
             json.dumps(plan_payloads[label], ensure_ascii=False),
             strict=True,
         )

@@ -251,42 +251,34 @@ def test_rejected_plan_cannot_transition_to_current(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_plan_http_flow_and_unconfirmed_guard(tmp_path: Path) -> None:
+async def test_raw_plan_http_registration_is_forbidden_without_state_change(
+    tmp_path: Path,
+) -> None:
+    plan_service = build_plan_service(tmp_path)
     app = create_app(
         service=UnusedLocationService(),  # type: ignore[arg-type]
-        plan_service=build_plan_service(tmp_path),
+        plan_service=plan_service,
     )
     transport = httpx.ASGITransport(app=app)
     payload = proposal_payload()
     trip_id = payload["tripSnapshot"]["tripId"]  # type: ignore[index]
-    plan_id = payload["planId"]
 
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         registered = await client.post(
             f"/api/v1/trips/{trip_id}/plan-versions",
             json=payload,
         )
-        blocked = await client.post(f"/api/v1/trips/{trip_id}/execution/start")
-        confirmed = await client.post(
-            f"/api/v1/trips/{trip_id}/plan-versions/{plan_id}/confirm"
-        )
-        started = await client.post(f"/api/v1/trips/{trip_id}/execution/start")
         restored = await client.get(f"/api/v1/trips/{trip_id}")
 
-    assert registered.status_code == 200
-    assert registered.json()["data"]["status"] == "PROPOSED"
-    assert blocked.status_code == 409
-    assert blocked.json()["code"] == "PLAN_NOT_CONFIRMED"
-    assert confirmed.json()["data"] == {
-        "tripId": trip_id,
-        "planId": plan_id,
-        "tripStatus": "CONFIRMED",
-        "planStatus": "CURRENT",
-    }
-    assert started.json()["data"]["tripStatus"] == "EXECUTING"
-    state = restored.json()["data"]
-    assert state["currentPlan"]["days"][0]["tasks"][1]["costCents"] == 13_800
-    assert state["currentPlan"]["tripSnapshot"]["cityContext"]["cityCode"] == "110000"
+    assert registered.status_code == 403
+    assert registered.json()["code"] == "PLAN_VERSION_DIRECT_REGISTRATION_FORBIDDEN"
+    assert restored.status_code == 404
+    assert restored.json()["code"] == "TRIP_NOT_FOUND"
+    with sqlite3.connect(plan_service.repository.database_path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM plan_versions"
+        ).fetchone() == (0,)
+        assert connection.execute("SELECT COUNT(*) FROM trips").fetchone() == (0,)
 
 
 @pytest.mark.asyncio
@@ -302,51 +294,29 @@ async def test_plan_http_rejects_path_payload_trip_mismatch(tmp_path: Path) -> N
             json=proposal_payload(),
         )
 
-    assert response.status_code == 422
-    assert response.json()["errors"][0]["path"] == "tripSnapshot.tripId"
+    assert response.status_code == 403
+    assert response.json()["code"] == "PLAN_VERSION_DIRECT_REGISTRATION_FORBIDDEN"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("invalid_case", "expected_path", "expected_code"),
+    "invalid_case",
     [
-        ("multiple_participants", "tripSnapshot.participants", "too_long"),
-        ("multiple_trip_days", "tripSnapshot.days", "too_long"),
-        ("end_date_mismatch", "tripSnapshot.endDate", "date_mismatch"),
-        ("trip_day_date_mismatch", "tripSnapshot.days[0].date", "date_mismatch"),
-        ("nonzero_day_index", "tripSnapshot.days[0].dayIndex", "invalid_day_index"),
-        (
-            "equal_time_window",
-            "tripSnapshot.days[0].timeWindow.end",
-            "invalid_time_window",
-        ),
-        (
-            "reversed_time_window",
-            "tripSnapshot.days[0].timeWindow.end",
-            "invalid_time_window",
-        ),
-        (
-            "daily_budget_exceeds_total",
-            "tripSnapshot.days[0].dailyBudgetCents",
-            "budget_exceeded",
-        ),
-        (
-            "invalid_preference_hardness",
-            "tripSnapshot.participants[0].preferences[0].isHard",
-            "invalid_preference_hardness",
-        ),
-        (
-            "normalized_preference_conflict",
-            "tripSnapshot.participants[0].preferences[1].value",
-            "preference_conflict",
-        ),
+        "multiple_participants",
+        "multiple_trip_days",
+        "end_date_mismatch",
+        "trip_day_date_mismatch",
+        "nonzero_day_index",
+        "equal_time_window",
+        "reversed_time_window",
+        "daily_budget_exceeds_total",
+        "invalid_preference_hardness",
+        "normalized_preference_conflict",
     ],
 )
-async def test_single_day_snapshot_rejects_invalid_v1_without_persistence(
+async def test_direct_registration_rejects_invalid_v1_without_persistence(
     tmp_path: Path,
     invalid_case: str,
-    expected_path: str,
-    expected_code: str,
 ) -> None:
     app = create_app(
         service=UnusedLocationService(),  # type: ignore[arg-type]
@@ -399,36 +369,32 @@ async def test_single_day_snapshot_rejects_invalid_v1_without_persistence(
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         registered, restored = await post_proposal_and_restore_state(client, payload)
 
-    assert registered.status_code == 422
-    body = registered.json()
-    assert body["code"] == "TRIP_SCHEMA_INVALID"
-    assert body["errors"][0]["path"] == expected_path
-    assert body["errors"][0]["code"] == expected_code
+    assert registered.status_code == 403
+    assert registered.json()["code"] == "PLAN_VERSION_DIRECT_REGISTRATION_FORBIDDEN"
     assert restored.status_code == 404
     assert restored.json()["code"] == "TRIP_NOT_FOUND"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("invalid_case", "expected_path", "expected_code"),
+    "invalid_case",
     [
-        ("multiple_participants", "tripSnapshot.participants", "too_long"),
-        (
-            "invalid_preference_hardness",
-            "tripSnapshot.participants[0].preferences[0].isHard",
-            "invalid_preference_hardness",
-        ),
+        "multiple_participants",
+        "invalid_preference_hardness",
     ],
 )
-async def test_invalid_v2_snapshot_preserves_current_v1_execution_state(
+async def test_forbidden_direct_v2_preserves_current_v1_execution_state(
     tmp_path: Path,
     invalid_case: str,
-    expected_path: str,
-    expected_code: str,
 ) -> None:
+    plan_service = build_plan_service(tmp_path)
+    current = parse_proposal()
+    plan_service.register_proposed(current)
+    plan_service.confirm(current.trip_snapshot.trip_id, current.plan_id)
+    plan_service.start_execution(current.trip_snapshot.trip_id)
     app = create_app(
         service=UnusedLocationService(),  # type: ignore[arg-type]
-        plan_service=build_plan_service(tmp_path),
+        plan_service=plan_service,
     )
     v1 = proposal_payload()
     trip_id = v1["tripSnapshot"]["tripId"]  # type: ignore[index]
@@ -450,28 +416,18 @@ async def test_invalid_v2_snapshot_preserves_current_v1_execution_state(
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        registered_v1 = await client.post(
-            f"/api/v1/trips/{trip_id}/plan-versions",
-            json=v1,
-        )
-        confirmed_v1 = await client.post(
-            f"/api/v1/trips/{trip_id}/plan-versions/{v1['planId']}/confirm"
-        )
-        started_v1 = await client.post(f"/api/v1/trips/{trip_id}/execution/start")
         state_before = await client.get(f"/api/v1/trips/{trip_id}")
         rejected_v2, state_after = await post_proposal_and_restore_state(client, v2)
 
-    assert registered_v1.status_code == confirmed_v1.status_code == started_v1.status_code == 200
     assert state_before.status_code == 200
     before = state_before.json()["data"]
     assert before["tripStatus"] == "EXECUTING"
     assert before["currentPlan"]["planId"] == v1["planId"]
     assert before["proposedPlans"] == []
-    assert rejected_v2.status_code == 422
-    body = rejected_v2.json()
-    assert body["code"] == "TRIP_SCHEMA_INVALID"
-    assert body["errors"][0]["path"] == expected_path
-    assert body["errors"][0]["code"] == expected_code
+    assert rejected_v2.status_code == 403
+    assert rejected_v2.json()["code"] == (
+        "PLAN_VERSION_DIRECT_REGISTRATION_FORBIDDEN"
+    )
     assert state_after.status_code == 200
     after = state_after.json()["data"]
     assert after["tripStatus"] == "EXECUTING"

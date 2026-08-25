@@ -36,13 +36,14 @@ import { type ChangeEvent, useCallback, useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { tripApi, USE_PLAN_VERSION_API } from '../api/tripApi'
-import { buildCreateSingleDayTrip } from '../api/tripContract'
 import { AppShell } from '../components/AppShell'
 import type {
+  CandidatePlanRequest,
+  CreateSingleDayTrip,
   ExecutionEvent,
   PlanSnapshot,
+  PlanningConstraint,
   PlanVersionDiff,
-  PlanVersionProposal,
   PlanVersionReason,
   Provenance,
   SourceStatus,
@@ -52,10 +53,18 @@ import type {
   TripSummary,
 } from '../domain/trip'
 import {
+  buildAmapReplanCandidate,
   loadAmapPlan,
   type AmapPlanResult,
   type LocationEvidence,
 } from '../services/amapPlan'
+import { compileAssistanceConstraints } from '../services/assistanceConstraints'
+import { facilityEvidenceNeedsConfirmation } from '../services/routeRiskFacts'
+import { restoreDraftFromPlanningFacts } from '../services/planningFacts'
+import {
+  canRequestS1PlanV2,
+  S1_REPLAN_LIMIT_MESSAGE,
+} from '../services/replanPolicy'
 
 type WorkspaceView = 'plan' | 'execute' | 'diff' | 'summary'
 
@@ -151,6 +160,29 @@ function formatDiffValue(value: string | number | null, category: keyof typeof d
   return String(value)
 }
 
+function describePlanningConstraint(constraint: PlanningConstraint) {
+  switch (constraint.field) {
+    case 'walkLimits.maxContinuousMeters':
+      return `单段步行 ≤ ${constraint.value}m`
+    case 'walkLimits.maxDailyMeters':
+      return `全天步行 ≤ ${constraint.value}m`
+    case 'maxTransfers':
+      return `每段路线换乘次数 ≤ ${constraint.value}`
+    case 'restInterval':
+      return `连续活动不超过 ${constraint.value} 分钟`
+    case 'napWindow': {
+      const window = constraint.value as { start: string; end: string }
+      return `${window.start.slice(0, 5)}—${window.end.slice(0, 5)} 午休时段不安排活动`
+    }
+    case 'return':
+      return '亲子行程返程地点与截止时间已锁定'
+    case 'avoidStairs':
+      return '路线避免楼梯'
+    default:
+      return `${constraint.field} ${constraint.operator} ${String(constraint.value)}`
+  }
+}
+
 function escapeHtml(value: string) {
   return value
     .replaceAll('&', '&amp;')
@@ -194,14 +226,34 @@ function toDisplayPlan(plan: StoredPlanVersion): PlanSnapshot {
   }
 }
 
+function planningFactsRecoveryMessage(error: unknown) {
+  if (!(error instanceof ApiError)) {
+    return '服务端规划事实恢复失败；请返回“新建行程”重新生成可信计划。'
+  }
+  switch (error.code) {
+    case 'TRIP_NOT_FOUND':
+      return '服务端未找到该行程；请返回“新建行程”重新创建。'
+    case 'PLANNING_PLAN_NOT_ISSUED':
+      return '当前计划没有服务端签发记录，已禁止重规划；请返回“新建行程”重新生成。'
+    case 'PLANNING_FACTS_NOT_FOUND':
+      return '当前计划缺少可恢复的 Provider 事实，已禁止重规划；请返回“新建行程”重新生成。'
+    case 'PLANNING_PROPOSAL_DIGEST_MISMATCH':
+      return '服务端规划事实摘要校验不一致，已禁止重规划；请重新生成计划或联系维护人员。'
+    default:
+      return `服务端规划事实恢复失败（${String(error.code)}）：${error.message}`
+  }
+}
+
 export function WorkspacePage() {
   const location = useLocation()
   const navigationState = location.state as {
     draft?: TripDraftInput
     tripId?: string
+    trip?: CreateSingleDayTrip
     amapPlanResult?: AmapPlanResult | null
   } | null
   const draft = navigationState?.draft
+  const confirmedTrip = navigationState?.trip
   const tripId =
     new URLSearchParams(location.search).get('tripId') ?? navigationState?.tripId ?? null
   const [view, setView] = useState<WorkspaceView>('plan')
@@ -210,7 +262,9 @@ export function WorkspacePage() {
   const [storedCurrentPlan, setStoredCurrentPlan] = useState<StoredPlanVersion | null>(null)
   const [candidatePlanV2, setCandidatePlanV2] = useState<StoredPlanVersion | null>(null)
   const [planDiff, setPlanDiff] = useState<PlanVersionDiff | null>(null)
-  const [persistedPlanId, setPersistedPlanId] = useState<string | null>(null)
+  const [persistedPlanId, setPersistedPlanId] = useState<string | null>(
+    navigationState?.amapPlanResult?.registeredPlan?.planId ?? null,
+  )
   const [isConfirmingPlan, setIsConfirmingPlan] = useState(false)
   const [isPreparingV2, setIsPreparingV2] = useState(false)
   const [isDecidingV2, setIsDecidingV2] = useState(false)
@@ -237,21 +291,45 @@ export function WorkspacePage() {
   const [providerPlan, setProviderPlan] = useState<PlanSnapshot | null>(
     navigationState?.amapPlanResult?.plan ?? null,
   )
+  const [candidateRequest, setCandidateRequest] = useState<CandidatePlanRequest | null>(
+    navigationState?.amapPlanResult?.candidateRequest ?? null,
+  )
+  const planningDraft = draft ?? (
+    candidateRequest ? restoreDraftFromPlanningFacts(candidateRequest) : null
+  )
+  const [planningIssue, setPlanningIssue] = useState(
+    navigationState?.amapPlanResult?.planningIssue ?? null,
+  )
+  const [planningTripSnapshot, setPlanningTripSnapshot] = useState<
+    CandidatePlanRequest['trip'] | StoredPlanVersion['tripSnapshot'] | null
+  >(
+    navigationState?.amapPlanResult?.candidateRequest.trip ??
+    navigationState?.amapPlanResult?.registeredPlan?.tripSnapshot ??
+    null,
+  )
   const [locationEvidence, setLocationEvidence] = useState<LocationEvidence | null>(
     navigationState?.amapPlanResult?.evidence ?? null,
   )
   const [isLoadingLocationEvidence, setIsLoadingLocationEvidence] = useState(
-    Boolean(tripId && draft && !navigationState?.amapPlanResult),
+    Boolean(tripId && draft && confirmedTrip && !navigationState?.amapPlanResult),
   )
-  const [locationEvidenceError, setLocationEvidenceError] = useState('')
+  const [locationEvidenceError, setLocationEvidenceError] = useState(
+    tripId && draft && !confirmedTrip && !navigationState?.amapPlanResult
+      ? '缺少 T004 已确认 Trip，不能猜测起点、终点或参与者；请返回新建行程重新确认。'
+      : '',
+  )
 
   const applyTripState = useCallback((state: TripPlanState) => {
     const current = state.currentPlan
     if (current) {
       const display = toDisplayPlan(current)
       setStoredCurrentPlan(current)
+      setPlanningTripSnapshot(current.tripSnapshot)
       setRestoredPlan(display)
       setPersistedPlanId(current.planId)
+      if (current.version === 2) {
+        setExecutionAdjustmentCount(1)
+      }
       const completed = state.events
         .filter((event) => event.eventType === 'COMPLETE')
         .map((event) => event.taskId)
@@ -295,6 +373,16 @@ export function WorkspacePage() {
       if (stored) {
         setRestoredPlan(toDisplayPlan(stored))
         setPersistedPlanId(stored.planId)
+        setPlanningTripSnapshot(stored.tripSnapshot)
+        void tripApi.getPlanningFacts(tripId).then((factsResponse) => {
+          if (cancelled) return
+          setCandidateRequest(factsResponse.data)
+          setPlanningTripSnapshot(factsResponse.data.trip)
+        }).catch((error: unknown) => {
+          if (cancelled) return
+          setCandidateRequest(null)
+          setPlanLifecycleError(planningFactsRecoveryMessage(error))
+        })
       }
       if (current) {
         applyTripState(response.data)
@@ -363,14 +451,18 @@ export function WorkspacePage() {
   }, [tripId, view])
 
   useEffect(() => {
-    if (!tripId || !draft || locationEvidence) {
+    if (!tripId || !draft || !confirmedTrip || locationEvidence) {
       return
     }
     let cancelled = false
-    void loadAmapPlan(tripId, draft).then((result) => {
+    void loadAmapPlan(tripId, draft, undefined, { confirmedTrip }).then((result) => {
       if (cancelled) return
       setProviderPlan(result.plan)
       setLocationEvidence(result.evidence)
+      setCandidateRequest(result.candidateRequest)
+      setPlanningTripSnapshot(result.candidateRequest.trip)
+      setPlanningIssue(result.planningIssue)
+      setPersistedPlanId(result.registeredPlan?.planId ?? null)
       setLocationEvidenceError('')
     }).catch((error: unknown) => {
       if (!cancelled) {
@@ -387,18 +479,19 @@ export function WorkspacePage() {
     return () => {
       cancelled = true
     }
-  }, [draft, locationEvidence, tripId])
+  }, [confirmedTrip, draft, locationEvidence, tripId])
 
-  const budgetCents = draft?.budgetCents ?? (
+  const budgetCents = planningDraft?.budgetCents ?? (
     restoredPlan
       ? restoredPlan.totalCostCents + restoredPlan.bufferCents
       : 35000
   )
+  const planningProfile = planningTripSnapshot?.participants[0].assistanceProfile ?? null
   const validationRules = [
-    `单段步行 ≤ ${draft?.assistanceProfile.maxSegmentWalkMeters ?? 500}m`,
-    `换乘次数 ≤ ${draft?.assistanceProfile.maxTransfers ?? 2}`,
-    `每 ${draft?.assistanceProfile.restIntervalMinutes ?? 90} 分钟休息`,
-    `${draft?.endTime ?? '20:00'} 前结束`,
+    ...(planningProfile
+      ? compileAssistanceConstraints(planningProfile).map(describePlanningConstraint)
+      : []),
+    `${planningTripSnapshot?.days[0].timeWindow.end.slice(0, 5) ?? planningDraft?.endTime ?? '20:00'} 前结束`,
   ]
   const availablePlan = restoredPlan ?? providerPlan
   if (!availablePlan) {
@@ -485,12 +578,18 @@ export function WorkspacePage() {
   const routeFacilityEvidence = locationEvidence?.routes.flatMap(
     (route) => route.facilityEvidence,
   ) ?? []
-  const facilityEvidence = [...new globalThis.Map(
-    routeFacilityEvidence.map((evidence) => [evidence.facilityType, evidence]),
-  ).values()]
-  const facilityNeedsConfirmation =
+  const facilityEvidence = routeFacilityEvidence
+  const facilityNeedsConfirmation = Boolean(locationEvidence) && (
     facilityEvidence.length === 0 ||
-    facilityEvidence.some((item) => item.status === 'NEEDS_CONFIRMATION')
+    facilityEvidence.some(facilityEvidenceNeedsConfirmation)
+  )
+  const serverPlanReady = Boolean(persistedPlanId) &&
+    activePlan.validationStatus === 'PASS' &&
+    !planningIssue
+  const canCreatePlanV2 = canRequestS1PlanV2(
+    storedCurrentPlan?.version ?? null,
+    executionAdjustmentCount,
+  )
 
   function toggleRecommendationFeedback(option: string) {
     setSelectedFeedbackOptions((current) =>
@@ -507,8 +606,18 @@ export function WorkspacePage() {
     ) {
       return
     }
-    if (!tripId || !draft) {
+    if (!tripId || !planningDraft) {
       setPlanLifecycleError('缺少原始行程草稿，无法重新请求高德真实数据。')
+      return
+    }
+    if (persistedPlanId) {
+      setPlanLifecycleError('当前 Plan V1 已由服务端签发；不可在客户端覆盖，请确认后通过 Plan V2 调整。')
+      setIsFeedbackOpen(false)
+      return
+    }
+    const planningTrip = candidateRequest?.trip ?? confirmedTrip
+    if (!planningTrip) {
+      setPlanLifecycleError('缺少 T004 已确认 Trip，不能猜测起终点；请返回新建行程重新确认。')
       return
     }
     setIsRegenerating(true)
@@ -517,31 +626,32 @@ export function WorkspacePage() {
       ...selectedFeedbackOptions,
       ...(recommendationFeedback.trim() ? [recommendationFeedback.trim()] : []),
     ]
-    const interests = [...draft.interests]
+    const interests = [...planningDraft.interests]
     if (selectedFeedbackOptions.includes('增加文化景点') && !interests.includes('博物馆')) {
       interests.unshift('博物馆')
     }
     if (selectedFeedbackOptions.includes('调整用餐安排') && !interests.includes('特色餐饮')) {
       interests.unshift('特色餐饮')
     }
-    const maxSegmentWalkMeters = selectedFeedbackOptions.includes('想少走路')
-      ? Math.max(100, Math.round(draft.assistanceProfile.maxSegmentWalkMeters * 0.7))
-      : draft.assistanceProfile.maxSegmentWalkMeters
     try {
+      const preferredMaxWalkMeters = selectedFeedbackOptions.includes('想少走路')
+        ? Math.max(100, Math.round(planningDraft.assistanceProfile.maxSegmentWalkMeters * 0.7))
+        : undefined
       const result = await loadAmapPlan(tripId, {
-        ...draft,
+        ...planningDraft,
         interests,
-        assistanceProfile: {
-          ...draft.assistanceProfile,
-          maxSegmentWalkMeters,
-        },
-        naturalLanguageRequest: `${draft.naturalLanguageRequest}；补充反馈：${feedback.join('、')}`,
-      })
+        naturalLanguageRequest: `${planningDraft.naturalLanguageRequest}；补充反馈：${feedback.join('、')}`,
+      }, undefined, { preferredMaxWalkMeters, confirmedTrip: planningTrip })
       setProviderPlan(result.plan)
       setLocationEvidence(result.evidence)
+      setCandidateRequest(result.candidateRequest)
+      setPlanningTripSnapshot(result.candidateRequest.trip)
+      setPlanningIssue(result.planningIssue)
+      setPersistedPlanId(result.registeredPlan?.planId ?? null)
       setRecommendationRound((current) => current + 1)
       setAppliedFeedback(feedback)
       setLocationEvidenceError('')
+      setPlanLifecycleError(result.planningIssue?.message ?? '')
       setIsFeedbackOpen(false)
     } catch (error) {
       setPlanLifecycleError(
@@ -595,146 +705,19 @@ export function WorkspacePage() {
     setIsConfirmingPlan(true)
     setPlanLifecycleError('')
     try {
+      if (planningIssue) {
+        throw new Error(planningIssue.message)
+      }
       if (activePlan.validationStatus !== 'PASS') {
-        throw new Error('高德已知费用或确定性约束未通过，当前真实计划不能确认。')
+        throw new Error('候选事实尚未获得服务端 T011 的完整 PASS，当前计划不能确认。')
       }
       if (activePlan.tasks.length < 3) {
         throw new Error('真实 Provider 地点不足 3 个，当前计划不能确认。')
       }
-      let planId = persistedPlanId
-      if (!planId) {
-        if (!draft) {
-          throw new Error('刷新后未找到可恢复的方案，请从“新建行程”重新生成。')
-        }
-        const city = locationEvidence?.city ?? (await tripApi.resolveCity(draft.cityName)).data
-        const tasks = activePlan.tasks.map((task) => ({
-          taskId: task.id,
-          order: task.order,
-          title: task.title,
-          category: task.category,
-          timeRange: task.timeRange,
-          durationMinutes: task.durationMinutes,
-          transport: task.transport,
-          costCents: task.costCents,
-          walkMeters: task.walkMeters,
-          note: task.note,
-        }))
-        const totalCostCents = tasks.reduce((sum, task) => sum + task.costCents, 0)
-        const totalWalkMeters = tasks.reduce((sum, task) => sum + task.walkMeters, 0)
-        const normalizedTrip = buildCreateSingleDayTrip(draft, {
-          tripId,
-          participantId: crypto.randomUUID(),
-          cityContext: city.cityContext,
-          nickname: '单人旅客',
-          startLocationText: `${city.cityContext.cityName}市内`,
-          endLocationText: `${city.cityContext.cityName}市内`,
-        })
-        const proposal: PlanVersionProposal = {
-          schemaVersion: '1.0',
-          planId: crypto.randomUUID(),
-          tripSnapshot: {
-            ...normalizedTrip,
-            status: 'PLAN_REVIEW',
-          },
-          version: 1,
-          parentId: null,
-          reason: 'INITIAL_PLAN',
-          metrics: {
-            totalCostCents,
-            bufferCents: draft.budgetCents - totalCostCents,
-            totalWalkMeters,
-            transferCount: activePlan.transferCount,
-            validationStatus: 'PASS',
-          },
-          days: [{ dayIndex: 0, date: draft.travelDate, tasks }],
-          constraintsSnapshot: [
-            ...validationRules.map((description, index) => ({
-              ruleId: `hard-rule-${index + 1}`,
-              scope: 'trip.days[0]',
-              hardness: 'HARD' as const,
-              status: 'PASS' as const,
-              description,
-              details: {},
-            })),
-            ...(locationEvidence?.routes.flatMap((route) => route.facilityEvidence).map((evidence) => ({
-              ruleId: `facility-${evidence.referenceId}-${evidence.facilityType.toLowerCase().replaceAll('_', '-')}`,
-              scope: 'days[0].routes',
-              hardness: 'SOFT' as const,
-              status: evidence.status,
-              description: evidence.message,
-              details: {
-                sourceStatus: evidence.provenance.sourceStatus,
-                fetchedAt: evidence.provenance.fetchedAt,
-                referenceId: evidence.referenceId,
-              },
-            })) ?? [{
-              ruleId: 'facility-route-evidence-unavailable',
-              scope: 'days[0].routes',
-              hardness: 'SOFT' as const,
-              status: 'NEEDS_CONFIRMATION' as const,
-              description: '路线设施证据尚未返回，需现场或人工来源确认',
-              details: { sourceStatus: 'UNKNOWN' },
-            }]),
-            ...(locationEvidence?.places
-              .filter((place) => place.priceReference.amountCents === null)
-              .map((place) => ({
-                ruleId: `price-${place.placeId}`,
-                scope: `days[0].tasks.${place.placeId}.costCents`,
-                hardness: 'SOFT' as const,
-                status: 'NEEDS_CONFIRMATION' as const,
-                description: `${place.name} 的 Provider 价格未知，确认计划时仅累计已知费用`,
-                details: {
-                  sourceStatus: place.priceReference.provenance.sourceStatus,
-                  fetchedAt: place.priceReference.provenance.fetchedAt,
-                },
-              })) ?? []),
-          ],
-          sourcesSnapshot: [
-            {
-              provider: 'AMAP',
-              sourceStatus: city.provenance.sourceStatus,
-              fetchedAt: city.provenance.fetchedAt,
-              isStale: city.provenance.isStale,
-              referenceId: city.cityContext.cityCode,
-            },
-            ...(locationEvidence?.places ?? []).flatMap((place) => [
-              {
-                provider: place.provenance.provider,
-                sourceStatus: place.provenance.sourceStatus,
-                fetchedAt: place.provenance.fetchedAt,
-                isStale: place.provenance.isStale,
-                referenceId: place.placeId,
-              },
-              {
-                provider: place.priceReference.provenance.provider,
-                sourceStatus: place.priceReference.provenance.sourceStatus,
-                fetchedAt: place.priceReference.provenance.fetchedAt,
-                isStale: place.priceReference.provenance.isStale,
-                referenceId: `${place.placeId}:price`,
-              },
-            ]),
-            ...(locationEvidence?.routes.map((route) => ({
-              provider: route.provenance.provider,
-              sourceStatus: route.provenance.sourceStatus,
-              fetchedAt: route.provenance.fetchedAt,
-              isStale: route.provenance.isStale,
-              referenceId: route.routeId,
-            })) ?? []),
-            {
-              provider: 'LOCAL_RULE_ENGINE',
-              sourceStatus: 'ESTIMATED',
-              fetchedAt: new Date().toISOString(),
-              isStale: false,
-              referenceId: 'amap-evidence-scheduler-v1',
-            },
-          ],
-        }
-        const registered = await tripApi.registerPlanVersion(tripId, proposal)
-        planId = registered.data.planId
-        setPersistedPlanId(planId)
-        setRestoredPlan(toDisplayPlan(registered.data))
+      if (!persistedPlanId) {
+        throw new Error('服务端尚未签发可信 Plan V1；请先补齐未知价格、设施或来源证据。')
       }
-      await tripApi.confirmPlan(tripId, planId)
+      await tripApi.confirmPlan(tripId, persistedPlanId)
       await tripApi.startExecution(tripId)
       const restored = await tripApi.getTrip(tripId)
       if (restored.data.currentPlan) {
@@ -757,6 +740,9 @@ export function WorkspacePage() {
     if (!tripId || !storedCurrentPlan) {
       throw new Error('未恢复当前 Plan V1，暂时不能生成 Plan V2。')
     }
+    if (!canCreatePlanV2) {
+      throw new Error(S1_REPLAN_LIMIT_MESSAGE)
+    }
     if (candidatePlanV2) {
       setView('diff')
       return
@@ -767,8 +753,11 @@ export function WorkspacePage() {
     if (replaceIndex < 0) {
       throw new Error('当前没有可调整的未完成任务。')
     }
-    if (!draft) {
-      throw new Error('缺少原始行程草稿，不能重新请求高德地点与路线。')
+    if (!planningDraft) {
+      throw new Error('缺少服务端签发规划事实，不能重新请求高德地点与路线。')
+    }
+    if (!candidateRequest) {
+      throw new Error('缺少服务端签发 Plan V1 时使用的原始事实，刷新后请重新从新建行程进入。')
     }
     const extraQuery = reason === 'EXPENSE_CHANGE'
       ? '免费景点'
@@ -777,116 +766,35 @@ export function WorkspacePage() {
         : reason === 'DELAY'
           ? '附近景点'
           : feedback.slice(0, 30)
-    const providerResult = await loadAmapPlan(
+    const providerResult = await buildAmapReplanCandidate(
       tripId,
-      {
-        ...draft,
-        assistanceProfile: {
-          ...draft.assistanceProfile,
-          maxSegmentWalkMeters: reason === 'FATIGUE'
-            ? Math.max(100, Math.round(draft.assistanceProfile.maxSegmentWalkMeters * 0.7))
-            : draft.assistanceProfile.maxSegmentWalkMeters,
-        },
-      },
+      planningDraft,
+      candidateRequest,
       undefined,
       {
+        feedback,
+        lockedThroughIndex,
         extraQueries: [extraQuery],
         excludePlaceIds: originalTasks.map((task) => task.taskId),
+        preferredMaxWalkMeters: reason === 'FATIGUE'
+          ? Math.max(100, Math.round(planningDraft.assistanceProfile.maxSegmentWalkMeters * 0.7))
+          : undefined,
       },
     )
-    const replacementCount = originalTasks.length - replaceIndex
-    const replacements = providerResult.plan.tasks.slice(0, replacementCount)
-    if (replacements.length < replacementCount) {
-      throw new Error('高德没有返回足够的新地点，未生成包含固定数据的 Plan V2。')
-    }
-    const tasks = originalTasks.map((task, index) => {
-      if (index < replaceIndex) return task
-      const replacement = replacements[index - replaceIndex]
-      return {
-        ...task,
-        taskId: replacement.id,
-        title: replacement.title,
-        category: replacement.category,
-        durationMinutes: replacement.durationMinutes,
-        transport: replacement.transport,
-        costCents: replacement.costCents,
-        walkMeters: replacement.walkMeters,
-        note: `${replacement.note}；调整依据：${feedback}`.slice(0, 500),
-      }
-    })
-    const totalCostCents = tasks.reduce((sum, task) => sum + task.costCents, 0)
-    const totalWalkMeters = tasks.reduce((sum, task) => sum + task.walkMeters, 0)
-    if (totalCostCents > storedCurrentPlan.tripSnapshot.totalBudgetCents) {
-      throw new Error('高德已知费用已超过总预算，Plan V2 未登记，请调整预算或反馈。')
-    }
-    const proposal: PlanVersionProposal = {
+    const lockedTaskIds = originalTasks
+      .slice(0, Math.max(0, lockedThroughIndex + 1))
+      .map((task) => task.taskId)
+    const selected = await tripApi.selectReplan(tripId, {
       schemaVersion: '1.0',
-      planId: crypto.randomUUID(),
-      tripSnapshot: storedCurrentPlan.tripSnapshot,
-      version: 2,
-      parentId: storedCurrentPlan.planId,
       reason,
-      metrics: {
-        totalCostCents,
-        bufferCents: storedCurrentPlan.tripSnapshot.totalBudgetCents - totalCostCents,
-        totalWalkMeters,
-        transferCount: providerResult.plan.transferCount,
-        validationStatus: 'PASS',
-      },
-      days: [{
-        dayIndex: 0,
-        date: storedCurrentPlan.days[0].date,
-        tasks,
+      lockedTaskIds,
+      candidates: [{
+        request: providerResult.candidateRequest,
+        satisfactionLoss: 0,
       }],
-      constraintsSnapshot: [
-        ...storedCurrentPlan.constraintsSnapshot,
-        {
-          ruleId: `v2-${reason.toLowerCase().replaceAll('_', '-')}`,
-          scope: 'trip.days[0].remainingTasks',
-          hardness: 'SOFT',
-          status: 'WARNING',
-          description: 'Plan V2 已根据执行变化降低后续负担',
-          details: { feedback },
-        },
-      ],
-      sourcesSnapshot: [
-        ...storedCurrentPlan.sourcesSnapshot,
-        ...providerResult.evidence.places.flatMap((place) => [
-          {
-            provider: place.provenance.provider,
-            sourceStatus: place.provenance.sourceStatus,
-            fetchedAt: place.provenance.fetchedAt,
-            isStale: place.provenance.isStale,
-            referenceId: place.placeId,
-          },
-          {
-            provider: place.priceReference.provenance.provider,
-            sourceStatus: place.priceReference.provenance.sourceStatus,
-            fetchedAt: place.priceReference.provenance.fetchedAt,
-            isStale: place.priceReference.provenance.isStale,
-            referenceId: `${place.placeId}:price`,
-          },
-        ]),
-        ...providerResult.evidence.routes.map((route) => ({
-          provider: route.provenance.provider,
-          sourceStatus: route.provenance.sourceStatus,
-          fetchedAt: route.provenance.fetchedAt,
-          isStale: route.provenance.isStale,
-          referenceId: route.routeId,
-        })),
-        {
-          provider: 'LOCAL_RULE_ENGINE',
-          sourceStatus: 'ESTIMATED',
-          fetchedAt: new Date().toISOString(),
-          isStale: false,
-          referenceId: 'amap-evidence-scheduler-v2',
-        },
-      ],
-    }
-
-    const registered = await tripApi.registerPlanVersion(tripId, proposal)
-    const diff = await tripApi.getPlanDiff(tripId, registered.data.planId)
-    setCandidatePlanV2(registered.data)
+    })
+    const diff = await tripApi.getPlanDiff(tripId, selected.data.plan.planId)
+    setCandidatePlanV2(selected.data.plan)
     setPlanDiff(diff.data)
     setView('diff')
   }
@@ -916,9 +824,7 @@ export function WorkspacePage() {
           ? '已接受 Plan V2；Plan V1 已转为历史版本。'
           : '已拒绝 Plan V2；继续执行原 Plan V1。',
       )
-      if (decision === 'accept') {
-        setExecutionAdjustmentCount((current) => current + 1)
-      }
+      setExecutionAdjustmentCount((current) => current + 1)
       if (advanceAfterDecision) {
         const nextIndex = currentTaskIndex + 1
         const next = nextDisplayPlan.tasks[nextIndex]
@@ -984,13 +890,17 @@ export function WorkspacePage() {
       if (
         expenseDeltaCents !== 0 &&
         currentTaskIndex < activePlan.tasks.length - 1 &&
-        USE_PLAN_VERSION_API
+        USE_PLAN_VERSION_API &&
+        canCreatePlanV2
       ) {
         setIsPreparingV2(true)
         setAdvanceAfterDecision(true)
         await preparePlanV2('EXPENSE_CHANGE', expenseDifferenceLabel, currentTaskIndex)
         setIsPreparingV2(false)
         return
+      }
+      if (expenseDeltaCents !== 0 && !canCreatePlanV2) {
+        setExecutionNotice(`费用变化已记录；${S1_REPLAN_LIMIT_MESSAGE} 将继续执行当前计划。`)
       }
       const nextIndex = currentTaskIndex + 1
       if (storedCurrentPlan.days[0].tasks[nextIndex]) {
@@ -1009,6 +919,10 @@ export function WorkspacePage() {
   async function handleExecutionFeedback() {
     const feedback = executionFeedback.trim()
     if (!feedback) {
+      return
+    }
+    if (!canCreatePlanV2) {
+      setPlanLifecycleError(S1_REPLAN_LIMIT_MESSAGE)
       return
     }
     setIsPreparingV2(true)
@@ -1086,11 +1000,11 @@ export function WorkspacePage() {
           : `<figure><video controls src="${asset.dataUrl}"></video><figcaption>${escapeHtml(asset.name)}</figcaption></figure>`,
         ).join('')
       : '<p>本次旅行没有保存照片或视频。</p>'
-    const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>行知旅伴旅行总结</title><style>body{font-family:system-ui,sans-serif;max-width:960px;margin:40px auto;padding:0 24px;color:#172033}h1{font-size:36px}section{margin-top:32px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border-bottom:1px solid #e5eaf1;text-align:left}.media{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.media img,.media video{width:100%;max-height:360px;object-fit:cover;border-radius:12px}figcaption{margin-top:6px;color:#667085;font-size:12px}</style></head><body><h1>${escapeHtml(draft?.cityName ?? '北京')}旅行总结</h1><p>完成 ${summary?.completedTaskIds.length ?? completedTaskIds.length}/${summary?.totalTasks ?? activePlan.tasks.length} 个任务，跳过 ${summary?.skippedTaskIds.length ?? skippedTaskIds.length} 个任务，实际花费 ${formatMoney(summary?.actualCostCents ?? actualSpentCents)}。</p><section><h2>实际行程</h2><table><thead><tr><th>#</th><th>地点</th><th>时间</th><th>状态</th></tr></thead><tbody>${taskRows}</tbody></table></section><section><h2>旅行影像</h2><div class="media">${mediaHtml}</div></section></body></html>`
+    const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>行知旅伴旅行总结</title><style>body{font-family:system-ui,sans-serif;max-width:960px;margin:40px auto;padding:0 24px;color:#172033}h1{font-size:36px}section{margin-top:32px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border-bottom:1px solid #e5eaf1;text-align:left}.media{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.media img,.media video{width:100%;max-height:360px;object-fit:cover;border-radius:12px}figcaption{margin-top:6px;color:#667085;font-size:12px}</style></head><body><h1>${escapeHtml(planningDraft?.cityName ?? activePlan.cityName)}旅行总结</h1><p>完成 ${summary?.completedTaskIds.length ?? completedTaskIds.length}/${summary?.totalTasks ?? activePlan.tasks.length} 个任务，跳过 ${summary?.skippedTaskIds.length ?? skippedTaskIds.length} 个任务，实际花费 ${formatMoney(summary?.actualCostCents ?? actualSpentCents)}。</p><section><h2>实际行程</h2><table><thead><tr><th>#</th><th>地点</th><th>时间</th><th>状态</th></tr></thead><tbody>${taskRows}</tbody></table></section><section><h2>旅行影像</h2><div class="media">${mediaHtml}</div></section></body></html>`
     const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }))
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = `${draft?.cityName ?? '北京'}旅行总结.html`
+    anchor.download = `${planningDraft?.cityName ?? activePlan.cityName}旅行总结.html`
     anchor.style.display = 'none'
     document.body.append(anchor)
     anchor.click()
@@ -1104,13 +1018,16 @@ export function WorkspacePage() {
         <header className="workspace-header" data-reveal="fade">
           <div>
             <span className="section-kicker">
-              {activePlan.cityName} · {draft?.travelDate ?? storedCurrentPlan?.days[0].date ?? '日期已保存'}
+              {activePlan.cityName} · {planningDraft?.travelDate ?? storedCurrentPlan?.days[0].date ?? '日期已保存'}
             </span>
             <h1>{activePlan.cityName}高德真实数据一日计划</h1>
           </div>
           <div className="workspace-header__meta">
             <span className="pass-chip pass-chip--large">
-              <ShieldCheck size={15} /> {validationRules.length} 项确定性约束通过
+              <ShieldCheck size={15} />
+              {serverPlanReady
+                ? `${validationRules.length} 项约束已由服务端复算`
+                : '候选事实等待服务端确认'}
             </span>
             <button className="button button--soft" type="button"><Sparkles size={17} /> 问问 Agent</button>
           </div>
@@ -1209,18 +1126,22 @@ export function WorkspacePage() {
               <section className="validation-card">
                 <div className="validation-card__head">
                   <span><ShieldCheck size={21} /> 关怀校验</span>
-                  <strong className={facilityNeedsConfirmation ? 'needs-confirmation' : ''}>
-                    {facilityNeedsConfirmation ? '待确认' : 'PASS'}
+                  <strong className={!serverPlanReady ? 'needs-confirmation' : ''}>
+                    {serverPlanReady ? '服务端 PASS' : '待确认'}
                   </strong>
                 </div>
                 {validationRules.map((rule) => (
-                  <div className="validation-row" key={rule}><CheckCircle2 size={16} /><span>{rule}</span><small>已满足</small></div>
+                  <div className="validation-row" key={rule}>
+                    <CheckCircle2 size={16} />
+                    <span>{rule}</span>
+                    <small>{serverPlanReady ? '服务端已复算' : '等待服务端确认'}</small>
+                  </div>
                 ))}
-                {facilityEvidence.length > 0 ? facilityEvidence.map((evidence) => (
-                  <div className="warning-row" key={`${evidence.referenceId}-${evidence.facilityType}`}>
+                {facilityEvidence.length > 0 ? facilityEvidence.map((evidence, index) => (
+                  <div className="warning-row" key={`${evidence.referenceId}-${evidence.facilityType}-${index}`}>
                     <MapPin size={16} />
                     <span>{evidence.label}<small>{evidence.message}</small></span>
-                    <small>{evidence.status === 'NEEDS_CONFIRMATION' ? '待确认' : evidence.status}</small>
+                    <small>{facilityEvidenceNeedsConfirmation(evidence) ? '待确认' : evidence.status}</small>
                   </div>
                 )) : (
                   <div className="warning-row">
@@ -1229,13 +1150,18 @@ export function WorkspacePage() {
                     <small>待确认</small>
                   </div>
                 )}
+                {planningIssue && (
+                  <p className="media-error">
+                    {planningIssue.message}（{planningIssue.code}）
+                  </p>
+                )}
               </section>
               <section className="explanation-card">
                 <div className="explanation-card__head">
                   <span><Sparkles size={18} /> Agent 推荐理由</span>
                   <small>可解释</small>
                 </div>
-                <p>优先满足{draft?.interests.slice(0, 2).join('和') || '历史文化和特色餐饮'}偏好，在满足{draft?.assistanceMode === 'standard' ? '时间与预算' : '关怀'}约束的前提下，减少无效折返并保留返程缓冲。</p>
+                <p>优先满足{planningDraft?.interests.slice(0, 2).join('和') || '历史文化和特色餐饮'}偏好，在满足{planningDraft?.assistanceMode === 'standard' ? '时间与预算' : '关怀'}约束的前提下，减少无效折返并保留返程缓冲。</p>
                 <div className="reason-tags">
                   <span>高德地点 {locationEvidence?.places.length ?? activePlan.tasks.length} 个</span>
                   <span>真实路线 {locationEvidence?.routes.length ?? activePlan.tasks.length} 段</span>
@@ -1277,7 +1203,7 @@ export function WorkspacePage() {
                   <span>路线设施证据</span>
                   <strong className={facilityNeedsConfirmation ? 'needs-confirmation' : ''}>
                     {facilityNeedsConfirmation
-                      ? `${Math.max(1, facilityEvidence.filter((item) => item.status === 'NEEDS_CONFIRMATION').length)} 项待确认`
+                      ? `${Math.max(1, facilityEvidence.filter(facilityEvidenceNeedsConfirmation).length)} 项待确认`
                       : '已核验'}
                   </strong>
                 </div>
@@ -1396,9 +1322,18 @@ export function WorkspacePage() {
                   <button className="button button--ghost" onClick={() => setIsFeedbackOpen(true)} type="button">
                     <MessageSquareText size={17} /> 不满意，重新推荐
                   </button>
-                  <button className="button button--primary" disabled={isConfirmingPlan} onClick={handleAcceptPlan} type="button">
+                  <button
+                    className="button button--primary"
+                    disabled={isConfirmingPlan || !serverPlanReady}
+                    onClick={handleAcceptPlan}
+                    type="button"
+                  >
                     {isConfirmingPlan ? <LoaderCircle className="spin-icon" size={17} /> : null}
-                    {isConfirmingPlan ? '正在保存并确认…' : '接受推荐并确认 Plan V1'}
+                    {isConfirmingPlan
+                      ? '正在确认…'
+                      : serverPlanReady
+                        ? '接受推荐并确认 Plan V1'
+                        : '证据待确认，暂不可接受'}
                     {!isConfirmingPlan && <ArrowRight size={18} />}
                   </button>
                   {planLifecycleError && <p className="media-error">{planLifecycleError}</p>}
@@ -1519,7 +1454,7 @@ export function WorkspacePage() {
                 <div className="current-task-card__content">
                   <span className="category-chip">任务 {currentTaskIndex + 1} / {activePlan.tasks.length} · {currentTask?.category}</span>
                   <h3>{currentTask?.title}</h3>
-                  <p><MapPin size={16} /> {draft?.cityName ?? '北京'} · 当前任务目的地</p>
+                  <p><MapPin size={16} /> {planningDraft?.cityName ?? activePlan.cityName} · 当前任务目的地</p>
                   <div className="current-task-metrics">
                     <div><Clock3 size={19} /><span>计划时间<strong>{currentTask?.timeRange}</strong></span></div>
                     <div><Navigation size={19} /><span>预计步行<strong>{currentTask?.walkMeters ?? 0} 米</strong></span></div>
@@ -1542,7 +1477,14 @@ export function WorkspacePage() {
                 </label>
                 <div className="budget-alert">
                   <CircleDollarSign size={19} />
-                  <div><strong>{expenseDifferenceLabel}</strong><small>提交后 Agent 将检查剩余路线是否仍满足预算和关怀约束。</small></div>
+                  <div>
+                    <strong>{expenseDifferenceLabel}</strong>
+                    <small>
+                      {canCreatePlanV2
+                        ? '提交后 Agent 将检查剩余路线是否仍满足预算和关怀约束。'
+                        : `提交后只记录实际费用；${S1_REPLAN_LIMIT_MESSAGE}`}
+                    </small>
+                  </div>
                 </div>
                 <div className="execution-form-actions">
                   <button
@@ -1565,7 +1507,7 @@ export function WorkspacePage() {
                       ? '正在生成 Plan V2…'
                       : currentTaskIndex === activePlan.tasks.length - 1
                       ? '完成行程并查看总结'
-                      : expenseDeltaCents !== 0
+                      : expenseDeltaCents !== 0 && canCreatePlanV2
                         ? '完成并更新后续安排'
                         : '完成当前任务'}
                     <RefreshCw size={17} />
@@ -1600,15 +1542,28 @@ export function WorkspacePage() {
                   <span><MessageSquareText size={18} /> 随时反馈给 Agent</span>
                 </div>
                 <textarea
+                  disabled={!canCreatePlanV2}
                   maxLength={160}
                   onChange={(event) => setExecutionFeedback(event.target.value)}
-                  placeholder="例如：有点累了、想提前吃饭、希望减少后面的步行……"
+                  placeholder={canCreatePlanV2
+                    ? '例如：有点累了、想提前吃饭、希望减少后面的步行……'
+                    : S1_REPLAN_LIMIT_MESSAGE}
                   value={executionFeedback}
                 />
-                <button className="button button--soft" disabled={isPreparingV2 || !executionFeedback.trim()} onClick={() => void handleExecutionFeedback()} type="button">
+                <button
+                  className="button button--soft"
+                  disabled={isPreparingV2 || !executionFeedback.trim() || !canCreatePlanV2}
+                  onClick={() => void handleExecutionFeedback()}
+                  type="button"
+                >
                   {isPreparingV2 ? <LoaderCircle className="spin-icon" size={15} /> : <Send size={15} />}
-                  {isPreparingV2 ? '正在生成候选方案…' : '生成 Plan V2 候选方案'}
+                  {isPreparingV2
+                    ? '正在生成候选方案…'
+                    : canCreatePlanV2
+                      ? '生成 Plan V2 候选方案'
+                      : '本迭代已完成 V2 调整'}
                 </button>
+                {!canCreatePlanV2 && <p>{S1_REPLAN_LIMIT_MESSAGE}</p>}
                 {executionNotice && <p><CheckCircle2 size={14} /> {executionNotice}</p>}
                 {planLifecycleError && <p className="media-error">{planLifecycleError}</p>}
               </section>
@@ -1628,7 +1583,7 @@ export function WorkspacePage() {
             <div className="summary-hero">
               <span className="summary-icon"><BadgeCheck size={34} /></span>
               <span className="section-kicker">JOURNEY COMPLETE</span>
-              <h2>今天，你和{draft?.cityName ?? '北京'}认真地见了一面。</h2>
+              <h2>今天，你和{planningDraft?.cityName ?? activePlan.cityName}认真地见了一面。</h2>
               <p>行程已经结束。每一次完成、跳过、反馈和拍摄记录都已保存在这份总结中。</p>
             </div>
             <div className="summary-metrics">

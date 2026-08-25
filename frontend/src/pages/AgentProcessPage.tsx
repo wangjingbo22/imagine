@@ -11,10 +11,10 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
-import type { TripDraftInput } from '../domain/trip'
+import type { CreateSingleDayTrip, TripDraftInput } from '../domain/trip'
 import { loadAmapPlan, type AmapPlanResult } from '../services/amapPlan'
 
 const processSteps = [
@@ -43,71 +43,98 @@ const processSteps = [
 export function AgentProcessPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const navigationState = location.state as { tripId?: string; draft?: TripDraftInput } | null
-  const tripId = navigationState?.tripId ?? crypto.randomUUID()
+  const navigationState = location.state as {
+    tripId?: string
+    draft?: TripDraftInput
+    trip?: CreateSingleDayTrip
+  } | null
+  const tripId = navigationState?.tripId ?? null
   const draft = navigationState?.draft
+  const confirmedTrip = navigationState?.trip
   const [completedSteps, setCompletedSteps] = useState(0)
   const [isPlanReady, setIsPlanReady] = useState(false)
   const [planningResult, setPlanningResult] = useState<AmapPlanResult | null>(null)
-  const [planningError, setPlanningError] = useState(
-    draft ? '' : '缺少行程草稿，请返回新建行程页面重新提交。',
-  )
+  const [planningError, setPlanningError] = useState(() => {
+    if (!draft) return '缺少行程草稿，请返回新建行程页面重新提交。'
+    if (!tripId || !confirmedTrip) return '缺少 T004 已确认 Trip，请返回新建行程页面重新确认。'
+    return ''
+  })
   const [providerDetail, setProviderDetail] = useState('等待连接高德 Web 服务')
   const [retryToken, setRetryToken] = useState(0)
+  const planningPromiseRef = useRef<Promise<AmapPlanResult> | null>(null)
 
   useEffect(() => {
-    if (!draft) {
+    if (!draft || !tripId || !confirmedTrip) {
       return
     }
     let cancelled = false
     const phaseStep = { CITY: 0, PLACES: 1, ROUTES: 2, PLAN: 3 } as const
-    void loadAmapPlan(tripId, draft, (phase, detail) => {
-      if (cancelled) return
-      setCompletedSteps(phaseStep[phase])
-      setProviderDetail(detail)
-    }).then((result) => {
+    const planningPromise = planningPromiseRef.current ?? loadAmapPlan(
+      tripId,
+      draft,
+      (phase, detail) => {
+        if (cancelled) return
+        setCompletedSteps(phaseStep[phase])
+        setProviderDetail(detail)
+      },
+      { confirmedTrip },
+    )
+    planningPromiseRef.current = planningPromise
+    void planningPromise.then((result) => {
       if (cancelled) return
       setPlanningResult(result)
       setCompletedSteps(processSteps.length)
       setProviderDetail(
-        `高德返回 ${result.evidence.places.length} 个地点和 ${result.evidence.routes.length} 段路线`,
+        result.planningIssue
+          ? `高德事实已返回；服务端标记 ${result.planningIssue.code}`
+          : `高德返回 ${result.evidence.places.length} 个地点和 ${result.evidence.routes.length} 段路线`,
       )
       setIsPlanReady(true)
     }).catch((error: unknown) => {
       if (cancelled) return
+      if (planningPromiseRef.current === planningPromise) {
+        planningPromiseRef.current = null
+      }
       setPlanningError(error instanceof Error ? error.message : '高德真实数据生成失败')
       setProviderDetail('未使用固定数据回退')
     })
     return () => {
       cancelled = true
     }
-  }, [draft, retryToken, tripId])
+  }, [confirmedTrip, draft, retryToken, tripId])
 
   useEffect(() => {
-    if (!isPlanReady) {
+    if (!isPlanReady || !tripId) {
       return
     }
 
     const redirectTimer = window.setTimeout(
       () => navigate(`/workspace?tripId=${tripId}`, {
-        state: { draft, tripId, amapPlanResult: planningResult },
+        state: { draft, tripId, trip: confirmedTrip, amapPlanResult: planningResult },
       }),
       1200,
     )
     return () => window.clearTimeout(redirectTimer)
-  }, [draft, isPlanReady, navigate, planningResult, tripId])
+  }, [confirmedTrip, draft, isPlanReady, navigate, planningResult, tripId])
 
   const progress = useMemo(
     () => Math.round((completedSteps / processSteps.length) * 100),
     [completedSteps],
   )
+  const routeConstraintDetail = draft?.assistanceMode === 'low-mobility'
+    ? `逐段检查步行距离、换乘次数与休息间隔。已确认单段步行上限 ${draft.assistanceProfile.maxSegmentWalkMeters} 米。`
+    : draft?.assistanceMode === 'family'
+      ? '逐段检查路线来源，并按已确认的午休时段和亲子返程规则排程。'
+      : draft?.assistanceMode === 'assisted'
+        ? '逐段检查路线与设施来源；楼梯规避证据未知时保持待确认。'
+        : '逐段检查路线距离、换乘与来源事实；普通模式没有额外冻结步行或休息阈值。'
 
   const dynamicStepDetails = [
     `已识别${draft?.cityName ?? '北京'}、单日、预算 ¥${Math.round((draft?.budgetCents ?? 35000) / 100)}、${draft?.interests.join('、') ?? '历史文化、特色餐饮'}与关怀需求。`,
     `正在筛选${draft?.cityName ?? '北京'}的兴趣候选地点，并核对来源时间与同城缓存。`,
-    `逐段检查步行距离、换乘次数、休息间隔和已知阶梯路线。当前单段步行上限 ${draft?.assistanceProfile.maxSegmentWalkMeters ?? 500} 米。`,
+    routeConstraintDetail,
     `金额按整数分复算，并在 ¥${Math.round((draft?.budgetCents ?? 35000) / 100)} 总预算内预留交通波动与临时消费缓冲。`,
-    `预算、${draft?.startTime ?? '09:00'}—${draft?.endTime ?? '20:00'} 时间窗、路线连续性、步行、换乘、休息和返程规则全部检查。`,
+    `预算、${draft?.startTime ?? '09:00'}—${draft?.endTime ?? '20:00'} 时间窗与路线连续性全部检查，并仅执行已确认关怀画像中实际冻结的规则。`,
   ]
   const dynamicStepResults = [
     `${9 + (draft?.mustVisit.length ?? 0) + (draft?.avoidPlaces.length ?? 0)} 项结构化字段`,
@@ -116,7 +143,11 @@ export function AgentProcessPage() {
     planningResult
       ? `已知费用 ¥${Math.round(planningResult.knownCostCents / 100)}，${planningResult.unknownPriceCount} 项待确认`
       : '等待 Provider 价格事实',
-    planningResult?.plan.validationStatus === 'PASS' ? '确定性校验通过' : '等待校验',
+    planningResult?.registeredPlan
+      ? '服务端确定性校验通过'
+      : planningResult?.planningIssue
+        ? '发现未知事实，等待确认'
+        : '等待服务端校验',
   ]
 
   return (
@@ -135,7 +166,7 @@ export function AgentProcessPage() {
               <strong>{progress}%</strong>
             </div>
             <div className="agent-progress-track"><i style={{ width: `${progress}%` }} /></div>
-            <small>{isPlanReady ? '方案已生成，即将自动进入工作台' : '预计还需数秒'}</small>
+            <small>{isPlanReady ? '候选事实已处理，即将自动进入工作台' : '预计还需数秒'}</small>
           </div>
           <div className="agent-session-meta">
             <span><Database size={15} /> 城市缓存已隔离</span>
@@ -151,6 +182,7 @@ export function AgentProcessPage() {
                   setPlanningError('')
                   setCompletedSteps(0)
                   setProviderDetail('正在重新连接高德 Web 服务')
+                  planningPromiseRef.current = null
                   setRetryToken((current) => current + 1)
                 }}
                 type="button"
@@ -167,7 +199,7 @@ export function AgentProcessPage() {
               <span className="agent-console__pulse" />
               <strong>Planning graph</strong>
             </div>
-            <span>{tripId}</span>
+              <span>{tripId ?? '缺少已确认 tripId'}</span>
           </div>
           <div className="agent-step-list">
             {processSteps.map(({ title, icon: Icon }, index) => {
@@ -196,16 +228,31 @@ export function AgentProcessPage() {
             <div>
               <ShieldCheck size={18} />
               <span>
-                <strong>{isPlanReady ? '计划校验通过，1 秒后自动跳转' : '不会跳过硬约束校验'}</strong>
-                <small>{isPlanReady ? '也可以立即点击右侧按钮查看' : '失败时将返回具体冲突，而不是生成看似合理的方案'}</small>
+                <strong>
+                  {isPlanReady
+                    ? planningResult?.registeredPlan
+                      ? '服务端校验通过，1 秒后自动跳转'
+                      : '发现待确认事实，1 秒后展示证据'
+                    : '不会跳过硬约束校验'}
+                </strong>
+                <small>
+                  {isPlanReady
+                    ? planningResult?.registeredPlan
+                      ? '也可以立即点击右侧按钮查看'
+                      : '未知价格或设施不会被当作 PASS，补齐前无法确认'
+                    : '失败时将返回具体冲突，而不是生成看似合理的方案'}
+                </small>
               </span>
             </div>
             <button
               className="button button--primary"
               disabled={!isPlanReady}
-              onClick={() => navigate(`/workspace?tripId=${tripId}`, {
-                state: { draft, tripId, amapPlanResult: planningResult },
-              })}
+              onClick={() => {
+                if (!tripId) return
+                navigate(`/workspace?tripId=${tripId}`, {
+                  state: { draft, tripId, trip: confirmedTrip, amapPlanResult: planningResult },
+                })
+              }}
               type="button"
             >
               查看推荐方案 <ArrowRight size={18} />

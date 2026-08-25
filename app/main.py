@@ -9,9 +9,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.api.routes import router
 from app.api.plan_routes import router as plan_router
+from app.api.planning_routes import router as planning_router
 from app.api.trip_draft_routes import router as trip_draft_router
 from app.api.workflow_routes import router as workflow_router
 from app.application.amap_service import AmapLocationService
+from app.application.planning_boundary_service import PlanningBoundaryService
 from app.application.plan_service import PlanVersionService
 from app.application.trip_draft_service import TripDraftParserService
 from app.application.workflow_service import WorkflowService
@@ -21,6 +23,7 @@ from app.domain.models import ErrorResponse
 from app.infrastructure.amap import AmapClient
 from app.infrastructure.cache import SqliteProviderCache
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
+from app.infrastructure.trusted_planning_store import SqliteTrustedPlanningRepository
 from app.infrastructure.workflow_store import SqliteWorkflowRepository
 from app.schemas.validation_error import TripSchemaError, issues_from_pydantic
 
@@ -112,6 +115,7 @@ def create_app(
     service: AmapLocationService | None = None,
     plan_service: PlanVersionService | None = None,
     workflow_service: WorkflowService | None = None,
+    planning_boundary_service: PlanningBoundaryService | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     managed_client: AmapClient | None = None
@@ -140,6 +144,23 @@ def create_app(
             workflow_service=workflow_service,
         )
 
+    if planning_boundary_service is None and isinstance(
+        plan_service,
+        PlanVersionService,
+    ):
+        planning_database_path = getattr(
+            plan_service.repository,
+            "database_path",
+            resolved_settings.plan_version_db_path,
+        )
+        planning_boundary_service = PlanningBoundaryService(
+            plan_service=plan_service,
+            workflow_service=workflow_service,
+            trust_repository=SqliteTrustedPlanningRepository(
+                planning_database_path
+            ),
+        )
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
@@ -159,7 +180,11 @@ def create_app(
             },
             {
                 "name": "PlanVersion 状态与 Diff",
-                "description": "登记不可变候选、确认唯一 CURRENT、查看 V1/V2 Diff、记录执行事件并复算实际预算。",
+                "description": "确认服务端签发候选、维护唯一 CURRENT、查看 V1/V2 Diff、记录执行事件并复算实际预算。",
+            },
+            {
+                "name": "服务端规划与重规划",
+                "description": "由 T011 生成可信 V1，并由 T011 + T018 校验和选择 V2。",
             },
         ],
     )
@@ -174,8 +199,10 @@ def create_app(
     app.state.trip_draft_service = TripDraftParserService(service)
     app.state.plan_version_service = plan_service
     app.state.workflow_service = workflow_service
+    app.state.planning_boundary_service = planning_boundary_service
     app.include_router(router)
     app.include_router(plan_router)
+    app.include_router(planning_router)
     app.include_router(trip_draft_router)
     app.include_router(workflow_router)
 

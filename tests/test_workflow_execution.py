@@ -60,10 +60,13 @@ def proposal_with_profile(profile: AssistanceProfile) -> ProposedPlanVersion:
 
 def setup_execution(tmp_path: Path):
     plan_service, workflow_service = build_services(tmp_path)
-    proposal = ProposedPlanVersion.model_validate_json(
-        json.dumps(proposal_payload(), ensure_ascii=False),
-        strict=True,
+    profile = low_stamina_profile()
+    proposal = proposal_with_profile(profile)
+    workflow_service.save_constraint_draft(
+        proposal.trip_snapshot.trip_id,
+        profile,
     )
+    workflow_service.confirm_constraints(proposal.trip_snapshot.trip_id)
     plan_service.register_proposed(proposal)
     plan_service.confirm(proposal.trip_snapshot.trip_id, proposal.plan_id)
     plan_service.start_execution(proposal.trip_snapshot.trip_id)
@@ -92,6 +95,10 @@ def test_constraint_confirmation_is_idempotent_and_edit_returns_draft(
     plan_service, workflow = build_services(tmp_path)
     profile = low_stamina_profile()
     trip_id = proposal_with_profile(profile).trip_snapshot.trip_id
+
+    with pytest.raises(PlanStoreError) as missing:
+        workflow.repository.require_constraint_confirmed(trip_id, profile)
+    assert missing.value.code == "CONSTRAINTS_NOT_CONFIRMED"
 
     draft = workflow.save_constraint_draft(trip_id, profile)
     assert draft.status is ConstraintProfileStatus.DRAFT
@@ -228,14 +235,12 @@ async def test_constraint_and_event_http_flow_refreshes_state(tmp_path: Path) ->
         confirmed = await client.post(
             f"/api/v1/trips/{trip_id}/constraints/confirm"
         )
-        registered = await client.post(
-            f"/api/v1/trips/{trip_id}/plan-versions",
-            json=proposal.model_dump(mode="json", by_alias=True),
-        )
-        await client.post(
-            f"/api/v1/trips/{trip_id}/plan-versions/{proposal.plan_id}/confirm"
-        )
-        await client.post(f"/api/v1/trips/{trip_id}/execution/start")
+        # This test targets the workflow/event boundary. Plan setup deliberately
+        # stays at the application-service layer; HTTP Plan confirmation is
+        # covered by the trusted planning-boundary regression suite.
+        registered = plan_service.register_proposed(proposal)
+        plan_service.confirm(proposal.trip_snapshot.trip_id, proposal.plan_id)
+        plan_service.start_execution(proposal.trip_snapshot.trip_id)
         event_payload = {
             "taskId": "task-1",
             "planVersionId": str(proposal.plan_id),
@@ -249,6 +254,6 @@ async def test_constraint_and_event_http_flow_refreshes_state(tmp_path: Path) ->
 
     assert saved.json()["data"]["status"] == "DRAFT"
     assert confirmed.json()["data"]["status"] == "CONSTRAINT_CONFIRMED"
-    assert registered.status_code == 200
+    assert registered.status.value == "PROPOSED"
     assert first.json()["data"]["eventId"] == second.json()["data"]["eventId"]
     assert restored.json()["data"]["events"][0]["eventType"] == "START"

@@ -1,16 +1,11 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import ValidationError
 
+from app.application.planning_boundary_service import PlanningBoundaryService
 from app.application.plan_service import PlanVersionService
+from app.core.errors import AppError
 from app.domain.models import ApiResponse
-from app.schemas.plan import ProposedPlanVersion
-from app.schemas.validation_error import (
-    TripSchemaError,
-    ValidationIssue,
-    issues_from_pydantic,
-)
 
 
 router = APIRouter(prefix="/api/v1", tags=["PlanVersion 状态与 Diff"])
@@ -20,35 +15,35 @@ def get_plan_service(request: Request) -> PlanVersionService:
     return request.app.state.plan_version_service
 
 
+def get_planning_boundary(request: Request) -> PlanningBoundaryService:
+    service = request.app.state.planning_boundary_service
+    if not isinstance(service, PlanningBoundaryService):
+        raise AppError(
+            code="PLANNING_BOUNDARY_UNAVAILABLE",
+            message="服务端规划边界未配置",
+            http_status=503,
+            retryable=True,
+        )
+    return service
+
+
 @router.post(
     "/trips/{trip_id}/plan-versions",
-    summary="登记待确认的 PlanVersion",
-    description="校验并持久化不可变的 V1/V2 方案、约束快照和可信来源快照。",
+    summary="拒绝客户端直接登记 PlanVersion",
+    description="PlanVersion 只能由服务端 T011/T018 可信规划边界生成并登记。",
 )
 async def register_plan_version(
     trip_id: UUID,
-    request: Request,
-    service: PlanVersionService = Depends(get_plan_service),
 ) -> ApiResponse:
-    try:
-        proposal = ProposedPlanVersion.model_validate_json(
-            await request.body(),
-            strict=True,
-        )
-    except ValidationError as error:
-        raise TripSchemaError(issues_from_pydantic(error.errors())) from error
-
-    if proposal.trip_snapshot.trip_id != trip_id:
-        raise TripSchemaError(
-            [
-                ValidationIssue(
-                    path="tripSnapshot.tripId",
-                    code="trip_id_mismatch",
-                    message="tripSnapshot.tripId 必须与请求路径中的 tripId 一致",
-                )
-            ]
-        )
-    return ApiResponse(data=service.register_proposed(proposal))
+    raise AppError(
+        code="PLAN_VERSION_DIRECT_REGISTRATION_FORBIDDEN",
+        message=(
+            "禁止客户端直接登记 PlanVersion；请使用服务端 V1 生成或 V2 重规划接口"
+        ),
+        http_status=403,
+        retryable=False,
+        errors=[{"tripId": str(trip_id)}],
+    )
 
 
 @router.post(
@@ -60,7 +55,9 @@ async def confirm_plan_version(
     trip_id: UUID,
     plan_id: UUID,
     service: PlanVersionService = Depends(get_plan_service),
+    planning: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
+    planning.require_v1_confirmation(trip_id, plan_id)
     return ApiResponse(data=service.confirm(trip_id, plan_id))
 
 
@@ -110,7 +107,9 @@ async def accept_plan_v2(
     trip_id: UUID,
     plan_id: UUID,
     service: PlanVersionService = Depends(get_plan_service),
+    planning: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
+    planning.require_v2_acceptance(trip_id, plan_id)
     return ApiResponse(data=service.accept_v2(trip_id, plan_id))
 
 

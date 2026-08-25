@@ -62,10 +62,24 @@ async def test_real_route_snapshot_exposes_each_missing_facility_fact(
 
 def test_workspace_copy_never_marks_missing_facility_evidence_as_pass() -> None:
     source = Path("frontend/src/pages/WorkspacePage.tsx").read_text(encoding="utf-8")
+    risk_helper = Path("frontend/src/services/routeRiskFacts.ts").read_text(
+        encoding="utf-8"
+    )
 
-    assert "facilityNeedsConfirmation ? '待确认' : 'PASS'" in source
-    assert "电梯、坡道、母婴室、无障碍入口" in source
-    assert "路线设施来源尚未返回" in source
+    assert "facilityEvidence.length === 0 ||" in source
+    assert (
+        "import { facilityEvidenceNeedsConfirmation } from "
+        "'../services/routeRiskFacts'"
+    ) in source
+    assert "facilityEvidence.some(facilityEvidenceNeedsConfirmation)" in source
+    assert "facilityEvidenceNeedsConfirmation(evidence) ? '待确认'" in source
+    assert "evidence.status === 'NEEDS_CONFIRMATION'" in risk_helper
+    assert "evidence.provenance.sourceStatus === 'UNKNOWN'" in risk_helper
+    assert "const serverPlanReady = Boolean(persistedPlanId) &&" in source
+    assert "activePlan.validationStatus === 'PASS'" in source
+    assert "{serverPlanReady ? '服务端 PASS' : '待确认'}" in source
+    assert "disabled={isConfirmingPlan || !serverPlanReady}" in source
+    assert "证据待确认，暂不可接受" in source
     assert "全国无障碍" not in source
 
 

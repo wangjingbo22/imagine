@@ -1,6 +1,8 @@
 import json
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import UUID
 
 import httpx
 import pytest
@@ -43,6 +45,69 @@ def setup_services(tmp_path: Path):
     workflow_service = WorkflowService(workflow)
     plan_service = PlanVersionService(plans, workflow_service=workflow_service)
     return database_path, plans, workflow, workflow_service, plan_service, current
+
+
+def test_legacy_execution_events_schema_adds_created_at_without_data_loss(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "legacy_events.sqlite3"
+    event_id = "10000000-0000-4000-8000-000000000001"
+    trip_id = "10000000-0000-4000-8000-000000000002"
+    plan_id = "10000000-0000-4000-8000-000000000003"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE execution_events (
+                event_id TEXT PRIMARY KEY,
+                trip_id TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                plan_version_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                amount_cents INTEGER,
+                idempotency_key TEXT NOT NULL,
+                occurred_at TEXT NOT NULL,
+                UNIQUE (trip_id, idempotency_key)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO execution_events (
+                event_id, trip_id, task_id, plan_version_id, event_type,
+                amount_cents, idempotency_key, occurred_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                trip_id,
+                "legacy-task",
+                plan_id,
+                "EXPENSE",
+                1_234,
+                "legacy-expense",
+                "2026-08-24T02:00:00+00:00",
+            ),
+        )
+
+    repository = SqliteWorkflowRepository(database_path)
+    reopened = SqliteWorkflowRepository(database_path)
+
+    with sqlite3.connect(database_path) as connection:
+        columns = connection.execute(
+            "PRAGMA table_info(execution_events)"
+        ).fetchall()
+        stored = connection.execute(
+            "SELECT event_id, created_at FROM execution_events"
+        ).fetchone()
+    assert [column[1] for column in columns].count("created_at") == 1
+    assert stored == (event_id, None)
+
+    restored = reopened.list_events(UUID(trip_id))
+    assert len(restored) == 1
+    assert restored[0].event_id == UUID(event_id)
+    assert restored[0].plan_version_id == UUID(plan_id)
+    assert restored[0].amount_cents == 1_234
+    assert repository.list_events(UUID(trip_id)) == restored
 
 
 def test_expenses_use_integer_cents_and_refresh_recomputes_from_event_stream(

@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test": "node --test --experimental-strip-types tests/restClock.test.ts tests/assistanceConstraints.test.ts tests/routeRiskFacts.test.ts tests/replanPolicy.test.ts tests/planningFacts.test.ts tests/candidateRequestBuilder.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

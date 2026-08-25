@@ -267,6 +267,57 @@ export interface CreateSingleDayTrip {
   days: [TripDayInput]
 }
 
+export interface CandidatePlanningTrip extends Omit<CreateSingleDayTrip, 'status'> {
+  status: 'CONSTRAINT_CONFIRMED' | 'PLANNING' | 'PLAN_REVIEW'
+}
+
+export type ConstraintValue =
+  | null
+  | boolean
+  | number
+  | string
+  | ConstraintValue[]
+  | { [key: string]: ConstraintValue }
+
+export interface PlanningConstraint {
+  field: string
+  operator: string
+  value: ConstraintValue
+  scope: string
+  hardness: 'HARD' | 'SOFT'
+}
+
+export interface CandidateEndpointFact {
+  locationText: string
+  cityCode: string
+  location: GeoPoint
+  provenance: Provenance
+}
+
+export interface CandidateTaskFact {
+  taskId: string
+  order: number
+  title: string
+  category: string
+  startAt: string
+  endAt: string
+  endLocationText: string
+  cityCode: string
+  place: Place
+  route: ProviderRoute
+  elapsedSinceRestMinutes: number
+  note: string
+}
+
+export interface CandidatePlanRequest {
+  schemaVersion: '1.0'
+  trip: CandidatePlanningTrip
+  startLocation: CandidateEndpointFact
+  endLocation: CandidateEndpointFact
+  taskFacts: CandidateTaskFact[]
+  confirmedConstraints: PlanningConstraint[]
+}
+
 export interface PlanTripSnapshot extends Omit<CreateSingleDayTrip, 'status'> {
   status: 'PLAN_REVIEW'
 }
@@ -389,6 +440,54 @@ export interface StoredPlanVersion extends PlanVersionProposal {
   status: PlanVersionStatus
   createdAt: string
   confirmedAt: string | null
+}
+
+export interface ReplanRequestCandidate {
+  request: CandidatePlanRequest
+  satisfactionLoss: number
+}
+
+export interface ReplanGenerationRequest {
+  schemaVersion: '1.0'
+  reason: Exclude<PlanVersionReason, 'INITIAL_PLAN'>
+  lockedTaskIds: string[]
+  candidates: ReplanRequestCandidate[]
+}
+
+export type ReplanRuleDomain = 'BUDGET' | 'TIME' | 'ROUTE' | 'CARE'
+
+export interface ReplanRuleCheck {
+  ruleId: string
+  domain: ReplanRuleDomain
+  hardness: 'HARD' | 'SOFT'
+  status: 'PASS' | 'WARNING' | 'FAIL' | 'NEEDS_CONFIRMATION'
+  relaxable: boolean
+  relaxationHint: string | null
+}
+
+export interface ReplanValidationReport {
+  candidatePlanId: string
+  checks: ReplanRuleCheck[]
+}
+
+export interface CandidateAssessment {
+  candidatePlanId: string
+  feasible: boolean
+  rank: number | null
+  modifiedTaskCount: number | null
+  satisfactionLoss: number
+  tieBreakKey: string
+  affectedRuleIds: string[]
+}
+
+export interface RegisteredReplan {
+  outcome: 'SELECTED'
+  plan: StoredPlanVersion
+  disruptionScore: number
+  satisfactionLoss: number
+  frozenTaskIds: string[]
+  assessments: CandidateAssessment[]
+  validationReport: ReplanValidationReport
 }
 
 export interface TripPlanState {

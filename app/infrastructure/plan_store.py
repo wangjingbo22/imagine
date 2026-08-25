@@ -666,6 +666,24 @@ class SqlitePlanVersionRepository:
                 self._rollback(connection)
                 raise
 
+    def get_plan_version(self, trip_id: UUID, plan_id: UUID) -> PlanVersion:
+        """Load one stored immutable snapshot, including terminal plan states."""
+
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM plan_versions
+                WHERE trip_id = ? AND plan_id = ?
+                """,
+                (str(trip_id), str(plan_id)),
+            ).fetchone()
+        if row is None:
+            raise PlanStoreError(
+                "PLAN_VERSION_NOT_FOUND",
+                "未找到该 Trip 的 PlanVersion",
+            )
+        return self._plan_from_row(row)
+
     def get_trip_state(self, trip_id: UUID) -> TripPlanState:
         trip_text = str(trip_id)
         with closing(self._connect()) as connection:

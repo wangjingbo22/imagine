@@ -171,8 +171,10 @@ Schema 校验失败沿用人工确认结构：
 
 ### 10.1 路由
 
-- `POST /api/v1/trips/{tripId}/plan-versions`：登记通过确定性校验的 `PROPOSED` Plan V1。请求体必须包含不可变的 `tripSnapshot`、`days`、`metrics`、`constraintsSnapshot` 和 `sourcesSnapshot`。
-- `POST /api/v1/trips/{tripId}/plan-versions/{planId}/confirm`：原子地将该版本从 `PROPOSED` 改为唯一 `CURRENT`，同时将 Trip 从 `PLAN_REVIEW` 改为 `CONFIRMED`。
+- `POST /api/v1/trips/{tripId}/plan-versions/generate`：接收严格的 `CandidatePlanRequest`。服务端先核对 T004 已确认画像和 `/trips/drafts/confirm` 保存的完整 Trip 快照，再由 T011 重新编译 T007 约束、核验 T006/T009 路线事实并重算时间与整数分预算；只有完整 `PASS` 的结果才会登记为 `PROPOSED` Plan V1，并留下候选事实、校验结果和提案摘要的 `ISSUED` 记录。
+- `GET /api/v1/trips/{tripId}/planning-facts`：仅返回当前服务端已签发且摘要匹配的 `CandidatePlanRequest`，供页面刷新后恢复 V2 所需的可信原始事实。
+- `POST /api/v1/trips/{tripId}/plan-versions`：禁止客户端直接登记，统一返回 HTTP 403 `PLAN_VERSION_DIRECT_REGISTRATION_FORBIDDEN`；V1/V2 只能由服务端可信规划边界在内部登记，避免客户端抢占 `(tripId, version)` 或伪造 Trip 状态。
+- `POST /api/v1/trips/{tripId}/plan-versions/{planId}/confirm`：先校验该 V1 的服务端签发记录与当前不可变快照摘要一致，再原子地将其从 `PROPOSED` 改为唯一 `CURRENT`，同时将 Trip 从 `PLAN_REVIEW` 改为 `CONFIRMED`。
 - `POST /api/v1/trips/{tripId}/execution/start`：仅在存在 `CURRENT` 版本且 Trip 为 `CONFIRMED` 时迁移到 `EXECUTING`。
 - `GET /api/v1/trips/{tripId}`：恢复 Trip 状态、当前/候选 PlanVersion 和原始快照。
 
@@ -187,6 +189,7 @@ Schema 校验失败沿用人工确认结构：
 - `days` 当前固定单日；每天 3—4 个任务，`order` 必须从 1 连续递增。
 - 任务金额、步行距离、预算缓冲必须与 `metrics` 精确相等；所有硬约束必须为 `PASS`。
 - 未确认的 `PROPOSED` 绝不能进入执行状态，大模型也不得直接写状态。
+- 客户端提交的 `validationStatus`、约束 `PASS` 或随机 `planId` 均不是可信验证证据；确认边界只认可服务端 T011 签发的 canonical SHA-256 摘要。
 
 ### 10.3 错误码
 
@@ -196,14 +199,18 @@ Schema 校验失败沿用人工确认结构：
 - `PLAN_VERSION_IMMUTABLE`、`TRIP_SNAPSHOT_IMMUTABLE`：尝试原地更换已保存快照（HTTP 409）。
 - `PLAN_CURRENT_CONFLICT`、`PLAN_VERSION_CONFLICT`：唯一 CURRENT 或版本号冲突（HTTP 409）。
 - `PLAN_TRIP_MISMATCH`：路径 Trip 与 Plan 不匹配（HTTP 409）。
+- `PLANNING_PLAN_NOT_ISSUED`：版本没有服务端规划签发记录，不能确认或接受（HTTP 409）。
+- `PLANNING_PROPOSAL_DIGEST_MISMATCH`：已存快照与签发摘要不一致（HTTP 409）。
+- `PLAN_VERSION_DIRECT_REGISTRATION_FORBIDDEN`：客户端尝试绕过 T011/T018 直接登记版本（HTTP 403）。
+- `CONSTRAINTS_NOT_CONFIRMED`、`CONSTRAINT_PROFILE_MISMATCH`：T004 画像未确认或与规划请求不一致（HTTP 409）。
+- `TRIP_NOT_CONFIRMED`、`CONFIRMED_TRIP_MISMATCH`：没有权威 Trip 快照，或规划请求改变了已确认的参与者、预算、时间窗或起终点（HTTP 409）。
+- `CONFIRMED_TRIP_CONFLICT`：同一 `tripId` 再次确认了不同的 Trip 内容；权威快照保持不可变（HTTP 409）。
 - `TRIP_NOT_FOUND`、`PLAN_VERSION_NOT_FOUND`：资源不存在（HTTP 404）。
 
 ### 10.4 T014 snapshot boundary
 
-- `tripSnapshot` MUST be a single-person, single-day `PLAN_REVIEW` snapshot.
-- Invalid V1/V2 snapshots return HTTP 422 `TRIP_SCHEMA_INVALID` with stable
-  field path/code; rejected V1 writes no Trip state, while rejected V2 preserves
-  the full CURRENT V1 and `EXECUTING` state.
+- 内部 `tripSnapshot` MUST be a single-person, single-day `PLAN_REVIEW` snapshot；`ProposedPlanVersion` 仍按 T014 Schema 严格校验。
+- 公开 raw PlanVersion 路由在读取快照前即返回 HTTP 403。V1/V2 的正式入口分别校验 `CandidatePlanRequest` 与 `ReplanGenerationRequest`；任何 422/409 拒绝都不得写入正式 PlanVersion，V2 拒绝还必须保留完整 CURRENT V1 与 `EXECUTING` 状态。
 
 ## 11. PBI-05-C V1/V2 Diff 与接受拒绝（Schema 1.0）
 
@@ -211,15 +218,16 @@ Schema 校验失败沿用人工确认结构：
 
 ### 11.1 候选 V2
 
-- `POST /api/v1/trips/{tripId}/plan-versions` 同时登记 V1 和 V2。
-- V2 必须使用 `version: 2`，`parentId` 必须指向该 Trip 唯一的 `CURRENT`，Trip 必须为 `EXECUTING`。
+- `POST /api/v1/trips/{tripId}/replans`：接收 `reason`、`lockedTaskIds` 和 1—20 个 `{ request: CandidatePlanRequest, satisfactionLoss }` 候选。服务端读取唯一 `CURRENT` 和真实 `ExecutionEvent`，逐个调用 T011 重算，再由 T018 按最小扰动规则选择；只有 `SELECTED` 候选会登记并签发为 V2 `PROPOSED`。
+- 公开 `POST /api/v1/trips/{tripId}/plan-versions` 不接受 V2；V2 只能由 `/replans` 经 T011 校验与 T018 选择后在服务端内部登记和签发。
+- V2 必须使用 `version: 2`，`parentId` 必须指向该 Trip 唯一且具有匹配 `ISSUED` 摘要的 `CURRENT` V1，Trip 必须为 `EXECUTING`；旧库中未签发的 CURRENT 不能作为可信父版本。
 - V2 原因固定为 `EXPENSE_CHANGE | DELAY | FATIGUE | USER_FEEDBACK | OTHER`；`INITIAL_PLAN` 只允许 V1。
 - 登记成功后 V2 为 `PROPOSED`，Trip 从 `EXECUTING` 进入 `REPLAN_REVIEW`；V1 和 Trip 快照保持不可变。
 
 ### 11.2 路由与返回
 
 - `GET /api/v1/trips/{tripId}/plan-versions/{planId}/diff`：服务端比较 V2 与其父版本。
-- `POST /api/v1/trips/{tripId}/plan-versions/{planId}/accept`：接受 V2。
+- `POST /api/v1/trips/{tripId}/plan-versions/{planId}/accept`：校验 T018 签发记录和快照摘要后接受 V2。
 - `POST /api/v1/trips/{tripId}/plan-versions/{planId}/reject`：拒绝 V2。
 - Diff 分类固定为 `PLACE | TIME | ROUTE | COST | CARE`，变化类型固定为 `RETAINED | REMOVED | ADDED | CHANGED`。
 - Diff 同时返回 `totalCostCents`、`totalWalkMeters`、`transferCount` 的差值；正数代表 V2 增加，负数代表 V2 减少。
@@ -230,6 +238,7 @@ Schema 校验失败沿用人工确认结构：
 - 拒绝：V2 `PROPOSED -> REJECTED`，父版本继续为唯一 `CURRENT`，Trip `REPLAN_REVIEW -> EXECUTING`。
 - 相同决策可幂等重试；终态后执行相反决策返回 `PLAN_STATE_TRANSITION_INVALID`（HTTP 409）。
 - `PLAN_PARENT_NOT_FOUND` 返回 HTTP 404；父版本、路径 Trip 或不可变 Trip 快照不一致均被拒绝。
+- 当前 Sprint 1 只允许从 V1 生成一次 V2；CURRENT 已为 V2 时返回 `REPLAN_S1_VERSION_LIMIT`，V2 已拒绝后的再次生成也因版本唯一性 fail-closed。
 - 页面只能调用决策接口，不得直接改写状态；候选 V2 在接受前不得覆盖当前方案。
 
 ## 12. PBI-01-B / PBI-05-A / PBI-06-A 工作流接口
@@ -239,7 +248,7 @@ Schema 校验失败沿用人工确认结构：
 - `PUT /api/v1/trips/{tripId}/constraints`：保存严格 `AssistanceProfile`，状态为 `DRAFT`；修改已确认内容后回退 DRAFT。
 - `POST /api/v1/trips/{tripId}/constraints/confirm`：幂等确认，状态为 `CONSTRAINT_CONFIRMED`。
 - `GET /api/v1/trips/{tripId}/constraints`：恢复约束状态。
-- 存在约束记录时，登记 Plan V1 必须使用完全相同且已确认的 Profile。
+- 生成 Plan V1 前必须存在已确认的约束记录，并使用完全相同的 Profile；同时必须匹配 `/trips/drafts/confirm` 保存的完整 Trip。
 
 ### 12.2 执行事件
 

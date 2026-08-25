@@ -2,6 +2,7 @@ import type {
   ApiResponse,
   AddressResolution,
   AssistanceProfile,
+  CandidatePlanRequest,
   CityResolution,
   CityContext,
   ConstraintConfirmationResult,
@@ -10,12 +11,13 @@ import type {
   ExecutionEvent,
   ExecutionEventInput,
   PlanV2DecisionResult,
-  PlanVersionProposal,
   PlanVersionDiff,
   Place,
   PlaceCollection,
   GeoPoint,
   RouteCollection,
+  ReplanGenerationRequest,
+  RegisteredReplan,
   TravelMode,
   StoredPlanVersion,
   TripDraftParseInput,
@@ -82,10 +84,26 @@ export const tripApi = {
     })
   },
 
-  registerPlanVersion(tripId: string, proposal: PlanVersionProposal) {
-    return request<StoredPlanVersion>(`/api/v1/trips/${tripId}/plan-versions`, {
+  generatePlanVersion(tripId: string, candidate: CandidatePlanRequest) {
+    return request<StoredPlanVersion>(
+      `/api/v1/trips/${tripId}/plan-versions/generate`,
+      {
+        method: 'POST',
+        body: JSON.stringify(candidate),
+      },
+    )
+  },
+
+  getPlanningFacts(tripId: string) {
+    return request<CandidatePlanRequest>(
+      `/api/v1/trips/${tripId}/planning-facts`,
+    )
+  },
+
+  selectReplan(tripId: string, input: ReplanGenerationRequest) {
+    return request<RegisteredReplan>(`/api/v1/trips/${tripId}/replans`, {
       method: 'POST',
-      body: JSON.stringify(proposal),
+      body: JSON.stringify(input),
     })
   },
 

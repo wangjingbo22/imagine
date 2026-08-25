@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Request
 
 from app.application.trip_draft_service import TripDraftParserService
+from app.application.workflow_service import WorkflowService
 from app.domain.models import ApiResponse
 from app.domain.trip_draft import TripDraftParseRequest
 
@@ -10,6 +11,10 @@ router = APIRouter(prefix="/api/v1", tags=["自然语言行程解析与歧义确
 
 def get_trip_draft_service(request: Request) -> TripDraftParserService:
     return request.app.state.trip_draft_service
+
+
+def get_workflow_service(request: Request) -> WorkflowService:
+    return request.app.state.workflow_service
 
 
 @router.post(
@@ -32,6 +37,8 @@ async def parse_trip_draft(
 async def confirm_trip_draft(
     payload: TripDraftParseRequest,
     service: TripDraftParserService = Depends(get_trip_draft_service),
+    workflow: WorkflowService = Depends(get_workflow_service),
 ) -> ApiResponse:
     parsed = await service.parse(payload)
-    return ApiResponse(data=service.require_planning_ready(parsed))
+    confirmed = service.require_planning_ready(parsed)
+    return ApiResponse(data=workflow.confirm_trip(confirmed))

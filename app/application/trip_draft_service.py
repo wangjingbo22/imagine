@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 import re
 from typing import Protocol
 from unicodedata import normalize
@@ -16,6 +16,7 @@ from app.schemas.trip import (
     AssistanceProfile,
     AssistanceType,
     CreateSingleDayTrip,
+    NapWindow,
     Participant,
     Preference,
     PreferenceType,
@@ -149,13 +150,41 @@ class TripDraftParserService:
             Preference(type=PreferenceType.AVOID_PLACE, value=value, weight=5, is_hard=True)
             for value in avoid_places
         )
-        assistance = request.assistance_profile
         assistance_type = {
             "standard": AssistanceType.ORDINARY,
             "family": AssistanceType.PARENT_CHILD,
             "low-mobility": AssistanceType.LOW_STAMINA,
             "assisted": AssistanceType.MOBILITY_ASSISTANCE_BETA,
         }[request.assistance_mode]
+        constrained = request.assistance_mode == "low-mobility"
+        assistance_profile = AssistanceProfile(
+            type=assistance_type,
+            child_age=None,
+            walk_limits=WalkLimits(
+                max_continuous_meters=(
+                    request.assistance_profile.max_segment_walk_meters
+                    if constrained
+                    else None
+                ),
+                max_daily_meters=None,
+            ),
+            max_transfers=(
+                request.assistance_profile.max_transfers
+                if constrained
+                else None
+            ),
+            rest_interval=(
+                request.assistance_profile.rest_interval_minutes
+                if constrained
+                else None
+            ),
+            nap_window=(
+                NapWindow(start=time(13), end=time(14))
+                if request.assistance_mode == "family"
+                else None
+            ),
+            avoid_stairs=request.assistance_mode == "assisted",
+        )
         trip = CreateSingleDayTrip(
             schema_version="1.0",
             trip_id=trip_uuid,
@@ -172,18 +201,7 @@ class TripDraftParserService:
                     nickname="单人旅客",
                     budget_cap_cents=budget_cents,
                     preferences=preferences,
-                    assistance_profile=AssistanceProfile(
-                        type=assistance_type,
-                        child_age=None,
-                        walk_limits=WalkLimits(
-                            max_continuous_meters=assistance.max_segment_walk_meters,
-                            max_daily_meters=None,
-                        ),
-                        max_transfers=assistance.max_transfers,
-                        rest_interval=assistance.rest_interval_minutes,
-                        nap_window=None,
-                        avoid_stairs=request.assistance_mode == "assisted",
-                    ),
+                    assistance_profile=assistance_profile,
                 )
             ],
             days=[

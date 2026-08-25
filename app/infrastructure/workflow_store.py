@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime
@@ -14,7 +15,12 @@ from app.schemas.execution import (
     ExecutionEventType,
 )
 from app.schemas.plan import PlanVersion, PlanVersionStatus, ProposedPlanVersion
-from app.schemas.trip import AssistanceProfile, TripStatus
+from app.schemas.trip import (
+    AssistanceProfile,
+    CreateSingleDayTrip,
+    Trip,
+    TripStatus,
+)
 from app.schemas.workflow import (
     ConstraintConfirmationResult,
     ConstraintProfileState,
@@ -52,6 +58,16 @@ class SqliteWorkflowRepository:
                     profile_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     confirmed_at TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS confirmed_trip_inputs (
+                    trip_id TEXT PRIMARY KEY,
+                    trip_json TEXT NOT NULL,
+                    semantic_json TEXT NOT NULL,
+                    confirmed_at TEXT NOT NULL
                 )
                 """
             )
@@ -123,6 +139,110 @@ class SqliteWorkflowRepository:
             idempotency_key=row["idempotency_key"],
             occurred_at=datetime.fromisoformat(row["occurred_at"]),
         )
+
+    @staticmethod
+    def _confirmed_trip_semantic_json(trip: CreateSingleDayTrip) -> str:
+        """Canonical comparison that ignores only the parser-owned participant UUID."""
+
+        payload = trip.model_dump(mode="json", by_alias=True)
+        payload["participants"][0].pop("participantId")
+        return json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+    @staticmethod
+    def _planning_trip_json(trip: Trip) -> str:
+        """Normalize only the DRAFT -> PLANNING hand-off between T002 and T011."""
+
+        payload = trip.model_dump(mode="json", by_alias=True)
+        if payload["status"] == TripStatus.DRAFT.value:
+            payload["status"] = TripStatus.PLANNING.value
+        return json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+    def confirm_trip(self, trip: CreateSingleDayTrip) -> CreateSingleDayTrip:
+        """Persist one authoritative Trip, with semantic retry idempotency."""
+
+        trip_text = str(trip.trip_id)
+        trip_json = trip.model_dump_json(by_alias=True)
+        semantic_json = self._confirmed_trip_semantic_json(trip)
+        confirmed_at = datetime.now(UTC).isoformat()
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT * FROM confirmed_trip_inputs WHERE trip_id = ?",
+                    (trip_text,),
+                ).fetchone()
+                if row is None:
+                    connection.execute(
+                        """
+                        INSERT INTO confirmed_trip_inputs (
+                            trip_id, trip_json, semantic_json, confirmed_at
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                        (trip_text, trip_json, semantic_json, confirmed_at),
+                    )
+                    row = connection.execute(
+                        "SELECT * FROM confirmed_trip_inputs WHERE trip_id = ?",
+                        (trip_text,),
+                    ).fetchone()
+                elif row["semantic_json"] != semantic_json:
+                    raise PlanStoreError(
+                        "CONFIRMED_TRIP_CONFLICT",
+                        "同一 tripId 已确认过不同的 Trip 内容，不允许覆盖",
+                    )
+                connection.execute("COMMIT")
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+
+        assert row is not None
+        return CreateSingleDayTrip.model_validate_json(
+            row["trip_json"],
+            strict=True,
+        )
+
+    def require_confirmed_trip(
+        self,
+        trip_id: UUID,
+        planning_trip: Trip,
+    ) -> None:
+        """Require T011 input to match the exact Trip confirmed by T002."""
+
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT trip_json FROM confirmed_trip_inputs WHERE trip_id = ?",
+                (str(trip_id),),
+            ).fetchone()
+        if row is None:
+            raise PlanStoreError(
+                "TRIP_NOT_CONFIRMED",
+                "Trip 尚未通过行程草稿确认，不允许进入规划",
+            )
+
+        confirmed = CreateSingleDayTrip.model_validate_json(
+            row["trip_json"],
+            strict=True,
+        )
+        if (
+            confirmed.trip_id != trip_id
+            or planning_trip.trip_id != trip_id
+            or self._planning_trip_json(confirmed)
+            != self._planning_trip_json(planning_trip)
+        ):
+            raise PlanStoreError(
+                "CONFIRMED_TRIP_MISMATCH",
+                "CandidatePlanRequest.trip 与已确认 Trip 不一致",
+            )
 
     def save_constraint_draft(
         self,
@@ -231,7 +351,10 @@ class SqliteWorkflowRepository:
                 (str(trip_id),),
             ).fetchone()
         if row is None:
-            return
+            raise PlanStoreError(
+                "CONSTRAINTS_NOT_CONFIRMED",
+                "AssistanceProfile 尚未保存并确认，不允许进入规划",
+            )
         if row["status"] != ConstraintProfileStatus.CONSTRAINT_CONFIRMED.value:
             raise PlanStoreError(
                 "CONSTRAINTS_NOT_CONFIRMED",

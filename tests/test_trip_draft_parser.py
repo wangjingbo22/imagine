@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import UTC, datetime
 import json
 from pathlib import Path
+import sqlite3
 
 import httpx
 import pytest
 
 from app.application.trip_draft_service import TripDraftParserService
+from app.application.workflow_service import WorkflowService
 from app.domain.models import CityResolution, Provenance, SourceStatus
 from app.domain.trip_draft import TripDraftParseRequest
 from app.main import create_app
+from app.infrastructure.workflow_store import SqliteWorkflowRepository
 from app.schemas.trip import CityContext, GeoPoint, ProviderConfig
 from app.schemas.validation_error import TripSchemaError
 
@@ -89,19 +93,29 @@ async def test_unconfirmed_draft_is_rejected_before_planning() -> None:
 
 
 @pytest.mark.asyncio
-async def test_parse_and_confirm_http_endpoints_enforce_confirmation_gate() -> None:
+async def test_parse_and_confirm_http_endpoints_enforce_confirmation_gate(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "trip-confirmation.sqlite3"
+    workflow = WorkflowService(SqliteWorkflowRepository(database_path))
     app = create_app(
         service=FixtureCityResolver(),  # type: ignore[arg-type]
         plan_service=object(),  # type: ignore[arg-type]
+        workflow_service=workflow,
     )
     transport = httpx.ASGITransport(app=app)
     missing = json.loads((FIXTURE_DIR / "missing_budget.json").read_text(encoding="utf-8"))["request"]
     complete = json.loads((FIXTURE_DIR / "complete.json").read_text(encoding="utf-8"))["request"]
+    complete["tripId"] = "11111111-1111-4111-8111-111111111111"
+    changed = deepcopy(complete)
+    changed["budgetCents"] = 40_000
 
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         parsed = await client.post("/api/v1/trips/drafts/parse", json=missing)
         blocked = await client.post("/api/v1/trips/drafts/confirm", json=missing)
         confirmed = await client.post("/api/v1/trips/drafts/confirm", json=complete)
+        retried = await client.post("/api/v1/trips/drafts/confirm", json=complete)
+        conflict = await client.post("/api/v1/trips/drafts/confirm", json=changed)
 
     assert parsed.status_code == 200
     assert parsed.json()["data"]["canPlan"] is False
@@ -111,6 +125,109 @@ async def test_parse_and_confirm_http_endpoints_enforce_confirmation_gate() -> N
     assert blocked.json()["errors"][0]["path"] == "budgetCents"
     assert confirmed.status_code == 200
     assert confirmed.json()["data"]["cityContext"]["cityCode"] == "110000"
+    assert retried.status_code == 200
+    assert retried.json()["data"] == confirmed.json()["data"]
+    assert conflict.status_code == 409
+    assert conflict.json()["code"] == "CONFIRMED_TRIP_CONFLICT"
+    with sqlite3.connect(database_path) as connection:
+        row = connection.execute(
+            "SELECT trip_json FROM confirmed_trip_inputs"
+        ).fetchone()
+    assert row is not None
+    assert json.loads(row[0]) == confirmed.json()["data"]
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        (
+            "standard",
+            {
+                "type": "ORDINARY",
+                "childAge": None,
+                "walkLimits": {
+                    "maxContinuousMeters": None,
+                    "maxDailyMeters": None,
+                },
+                "maxTransfers": None,
+                "restInterval": None,
+                "napWindow": None,
+                "avoidStairs": False,
+            },
+        ),
+        (
+            "family",
+            {
+                "type": "PARENT_CHILD",
+                "childAge": None,
+                "walkLimits": {
+                    "maxContinuousMeters": None,
+                    "maxDailyMeters": None,
+                },
+                "maxTransfers": None,
+                "restInterval": None,
+                "napWindow": {"start": "13:00:00", "end": "14:00:00"},
+                "avoidStairs": False,
+            },
+        ),
+        (
+            "low-mobility",
+            {
+                "type": "LOW_STAMINA",
+                "childAge": None,
+                "walkLimits": {
+                    "maxContinuousMeters": 777,
+                    "maxDailyMeters": None,
+                },
+                "maxTransfers": 1,
+                "restInterval": 45,
+                "napWindow": None,
+                "avoidStairs": False,
+            },
+        ),
+        (
+            "assisted",
+            {
+                "type": "MOBILITY_ASSISTANCE_BETA",
+                "childAge": None,
+                "walkLimits": {
+                    "maxContinuousMeters": None,
+                    "maxDailyMeters": None,
+                },
+                "maxTransfers": None,
+                "restInterval": None,
+                "napWindow": None,
+                "avoidStairs": True,
+            },
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_trip_parser_uses_the_frozen_t003_assistance_profiles(
+    mode: str,
+    expected: dict[str, object],
+) -> None:
+    payload = json.loads(
+        (FIXTURE_DIR / "complete.json").read_text(encoding="utf-8")
+    )["request"]
+    payload.update(
+        {
+            "assistanceMode": mode,
+            "assistanceProfile": {
+                "maxSegmentWalkMeters": 777,
+                "maxTransfers": 1,
+                "restIntervalMinutes": 45,
+            },
+        }
+    )
+    service = TripDraftParserService(FixtureCityResolver())
+
+    result = await service.parse(TripDraftParseRequest.model_validate(payload))
+
+    assert result.trip is not None
+    profile = result.trip.participants[0].assistance_profile
+    assert profile is not None
+    assert profile.model_dump(mode="json", by_alias=True) == expected
 
 
 def test_complete_parse_result_evidence_matches_unified_trip_contract() -> None:

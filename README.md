@@ -63,11 +63,11 @@ VITE_USE_PLAN_VERSION_API=true
 VITE_USE_WORKFLOW_API=true
 ```
 
-前端通过后端调用高德 Web 服务：城市解析、同城 POI 检索和逐段路线规划均使用真实接口；Plan V1 保存、确认、执行守卫与刷新恢复也使用真实本地接口。高德 Key 只配置在后端根目录 `.env`，不能写入 `frontend/.env` 或提交到 Git。
+前端通过后端调用高德 Web 服务：城市解析、同城 POI 检索和逐段路线规划均使用真实接口。`/trips/drafts/confirm` 保存完整权威 Trip，前端规划时原样复用参与者、预算、时间窗及起终点，并把返程建模为回到已确认终点的独立末项。前端只提交 `CandidatePlanRequest`；服务端先核对 T004 画像与权威 Trip，再由 T011 重编译关怀约束并重算路线、时间和预算，留下可信签发摘要后才允许确认 Plan V1。未知价格、设施或来源不会被当作 0 或 `PASS`。高德 Key 只配置在后端根目录 `.env`，不能写入 `frontend/.env` 或提交到 Git。
 
 ## 张琪：PBI-05-C V1/V2 Diff 与接受拒绝
 
-执行中的费用变化或用户反馈会登记不可变的候选 Plan V2。服务端确定性计算地点、时间、路线、费用和关怀指标的保留、删除、新增与变更，前端用中文 Diff 页面展示。
+执行中的费用变化或用户反馈会把候选事实提交到 `/replans`。服务端 T011 重新校验候选，T018 结合 `ExecutionEvent` 冻结已完成/跳过/锁定前缀并选择最小扰动方案；只有被选择并签发的 V2 才会登记。服务端随后确定性计算地点、时间、路线、费用和关怀指标的保留、删除、新增与变更，前端用中文 Diff 页面展示。
 
 - 接受：旧 `CURRENT` 变为 `SUPERSEDED`，V2 原子切换为唯一 `CURRENT`，Trip 回到 `EXECUTING`。
 - 拒绝：V2 变为 `REJECTED`，原 `CURRENT` 和执行状态保持不变。
@@ -76,7 +76,7 @@ VITE_USE_WORKFLOW_API=true
 
 ## 王敬博：Sprint 1 前端、约束状态与执行闭环
 
-- T004：AssistanceProfile 使用真实 `DRAFT / CONSTRAINT_CONFIRMED` 状态，修改回退、重复确认幂等，未确认不能登记 Plan V1。
+- T004：AssistanceProfile 使用真实 `DRAFT / CONSTRAINT_CONFIRMED` 状态，修改回退、重复确认幂等；未确认画像或未保存权威 Trip 时不能生成 Plan V1。
 - T015：`START / COMPLETE / SKIP / EXPENSE` 事件保存到 SQLite，绑定 task、CURRENT PlanVersion 和幂等键，刷新后可恢复。
 - T020：前端展示服务端 V1/V2 Diff，并通过原子接口接受或拒绝。
 - T021：基础总结由服务端事件流复算实际金额、完成/跳过任务和版本历史。

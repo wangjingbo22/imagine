@@ -1,4 +1,5 @@
 import copy
+import json
 import sqlite3
 from pathlib import Path
 
@@ -6,19 +7,86 @@ import httpx
 import pytest
 
 from app.application.plan_service import PlanVersionService
+from app.application.workflow_service import WorkflowService
 from app.infrastructure.plan_store import PlanStoreError, SqlitePlanVersionRepository
+from app.infrastructure.workflow_store import SqliteWorkflowRepository
 from app.main import create_app
 from app.schemas.plan import (
     PlanDiffChangeType,
     PlanV2Decision,
     PlanVersionStatus,
 )
-from app.schemas.trip import TripStatus
+from app.schemas.trip import CreateSingleDayTrip, TripStatus
 from tests.test_plan_versions import (
     UnusedLocationService,
     parse_proposal,
     proposal_payload,
 )
+
+
+PLANNING_FIXTURE = (
+    Path(__file__).parents[1]
+    / "backend"
+    / "tests"
+    / "fixtures"
+    / "planning"
+    / "golden_candidate_plan.json"
+)
+
+
+def planning_request() -> dict[str, object]:
+    return json.loads(PLANNING_FIXTURE.read_text(encoding="utf-8"))["request"]
+
+
+def trusted_http_app(tmp_path: Path):
+    database_path = tmp_path / "trusted_http.sqlite3"
+    workflow = WorkflowService(SqliteWorkflowRepository(database_path))
+    confirmed_payload = copy.deepcopy(planning_request()["trip"])
+    confirmed_payload["status"] = "DRAFT"  # type: ignore[index]
+    workflow.confirm_trip(
+        CreateSingleDayTrip.model_validate_json(
+            json.dumps(confirmed_payload, ensure_ascii=False),
+            strict=True,
+        )
+    )
+    plans = PlanVersionService(
+        SqlitePlanVersionRepository(database_path),
+        workflow_service=workflow,
+    )
+    return create_app(
+        service=UnusedLocationService(),  # type: ignore[arg-type]
+        plan_service=plans,
+        workflow_service=workflow,
+    )
+
+
+async def start_issued_v1(
+    client: httpx.AsyncClient,
+    request: dict[str, object],
+) -> dict[str, object]:
+    trip_id = request["trip"]["tripId"]  # type: ignore[index]
+    profile = request["trip"]["participants"][0]["assistanceProfile"]  # type: ignore[index]
+    saved = await client.put(
+        f"/api/v1/trips/{trip_id}/constraints",
+        json=profile,
+    )
+    confirmed_constraints = await client.post(
+        f"/api/v1/trips/{trip_id}/constraints/confirm"
+    )
+    assert saved.status_code == 200, saved.text
+    assert confirmed_constraints.status_code == 200, confirmed_constraints.text
+    generated = await client.post(
+        f"/api/v1/trips/{trip_id}/plan-versions/generate",
+        json=request,
+    )
+    assert generated.status_code == 200, generated.text
+    plan = generated.json()["data"]
+    confirmed = await client.post(
+        f"/api/v1/trips/{trip_id}/plan-versions/{plan['planId']}/confirm"
+    )
+    started = await client.post(f"/api/v1/trips/{trip_id}/execution/start")
+    assert confirmed.status_code == started.status_code == 200
+    return plan
 
 
 def v2_payload() -> dict[str, object]:
@@ -205,23 +273,30 @@ def test_v2_requires_current_parent_and_matching_snapshot(tmp_path: Path) -> Non
 
 @pytest.mark.asyncio
 async def test_v2_http_diff_accept_and_opposite_decision_guard(tmp_path: Path) -> None:
-    repository = SqlitePlanVersionRepository(tmp_path / "plan_versions.sqlite3")
-    v1 = setup_executing(repository)
-    service = PlanVersionService(repository)
-    app = create_app(
-        service=UnusedLocationService(),  # type: ignore[arg-type]
-        plan_service=service,
-    )
+    app = trusted_http_app(tmp_path)
     transport = httpx.ASGITransport(app=app)
-    payload = v2_payload()
-    trip_id = str(v1.trip_snapshot.trip_id)
-    plan_id = payload["planId"]
+    v1_request = planning_request()
+    v2_request = copy.deepcopy(v1_request)
+    v2_request["taskFacts"][1]["place"]["priceReference"][  # type: ignore[index]
+        "amountCents"
+    ] -= 2_400
+    trip_id = v1_request["trip"]["tripId"]  # type: ignore[index]
 
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        v1 = await start_issued_v1(client, v1_request)
         registered = await client.post(
-            f"/api/v1/trips/{trip_id}/plan-versions",
-            json=payload,
+            f"/api/v1/trips/{trip_id}/replans",
+            json={
+                "schemaVersion": "1.0",
+                "reason": "EXPENSE_CHANGE",
+                "lockedTaskIds": [],
+                "candidates": [
+                    {"request": v2_request, "satisfactionLoss": 0},
+                ],
+            },
         )
+        assert registered.status_code == 200, registered.text
+        plan_id = registered.json()["data"]["plan"]["planId"]
         diff = await client.get(
             f"/api/v1/trips/{trip_id}/plan-versions/{plan_id}/diff"
         )
@@ -233,7 +308,8 @@ async def test_v2_http_diff_accept_and_opposite_decision_guard(tmp_path: Path) -
         )
 
     assert registered.status_code == 200
-    assert registered.json()["data"]["version"] == 2
+    assert registered.json()["data"]["plan"]["version"] == 2
+    assert registered.json()["data"]["plan"]["parentId"] == v1["planId"]
     assert diff.status_code == 200
     assert diff.json()["data"]["metricsDelta"]["totalCostCents"] == -2_400
     assert accepted.status_code == 200
@@ -244,20 +320,28 @@ async def test_v2_http_diff_accept_and_opposite_decision_guard(tmp_path: Path) -
 
 @pytest.mark.asyncio
 async def test_v2_http_reject_is_idempotent_and_preserves_v1(tmp_path: Path) -> None:
-    repository = SqlitePlanVersionRepository(tmp_path / "plan_versions.sqlite3")
-    v1 = setup_executing(repository)
-    service = PlanVersionService(repository)
-    app = create_app(
-        service=UnusedLocationService(),  # type: ignore[arg-type]
-        plan_service=service,
-    )
+    app = trusted_http_app(tmp_path)
     transport = httpx.ASGITransport(app=app)
-    payload = v2_payload()
-    trip_id = str(v1.trip_snapshot.trip_id)
-    plan_id = payload["planId"]
+    v1_request = planning_request()
+    v2_request = copy.deepcopy(v1_request)
+    v2_request["taskFacts"][3]["note"] = "服务端签发后测试拒绝幂等"  # type: ignore[index]
+    trip_id = v1_request["trip"]["tripId"]  # type: ignore[index]
 
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        await client.post(f"/api/v1/trips/{trip_id}/plan-versions", json=payload)
+        v1 = await start_issued_v1(client, v1_request)
+        generated = await client.post(
+            f"/api/v1/trips/{trip_id}/replans",
+            json={
+                "schemaVersion": "1.0",
+                "reason": "USER_FEEDBACK",
+                "lockedTaskIds": [],
+                "candidates": [
+                    {"request": v2_request, "satisfactionLoss": 0},
+                ],
+            },
+        )
+        assert generated.status_code == 200, generated.text
+        plan_id = generated.json()["data"]["plan"]["planId"]
         first = await client.post(
             f"/api/v1/trips/{trip_id}/plan-versions/{plan_id}/reject"
         )
@@ -271,8 +355,8 @@ async def test_v2_http_reject_is_idempotent_and_preserves_v1(tmp_path: Path) -> 
 
     assert first.status_code == second.status_code == 200
     assert first.json()["data"]["decision"] == "REJECTED"
-    assert second.json()["data"]["currentPlanId"] == str(v1.plan_id)
+    assert second.json()["data"]["currentPlanId"] == v1["planId"]
     assert restored.json()["data"]["tripStatus"] == "EXECUTING"
-    assert restored.json()["data"]["currentPlan"]["planId"] == str(v1.plan_id)
+    assert restored.json()["data"]["currentPlan"]["planId"] == v1["planId"]
     assert accepted_after_reject.status_code == 409
     assert accepted_after_reject.json()["code"] == "PLAN_STATE_TRANSITION_INVALID"

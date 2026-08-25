@@ -88,6 +88,12 @@ class PlanVersionService:
         except PlanStoreError as error:
             raise self._as_app_error(error) from error
 
+    def get_plan_version(self, trip_id: UUID, plan_id: UUID) -> PlanVersion:
+        try:
+            return self.repository.get_plan_version(trip_id, plan_id)
+        except PlanStoreError as error:
+            raise self._as_app_error(error) from error
+
     def get_trip_state(self, trip_id: UUID) -> TripPlanState:
         try:
             state = self.repository.get_trip_state(trip_id)

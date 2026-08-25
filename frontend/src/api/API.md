@@ -261,12 +261,13 @@ src/api/tripContract.ts
 - `tripApi.forwardGeocode()` → `POST /api/v1/geocoding/forward`
 - `tripApi.reverseGeocode()` → `POST /api/v1/geocoding/reverse`
 - `tripApi.planRoute()` → `POST /api/v1/routes/plan`
-- `tripApi.registerPlanVersion()` → `POST /api/v1/trips/{tripId}/plan-versions`
+- `tripApi.generatePlanVersion()` → `POST /api/v1/trips/{tripId}/plan-versions/generate`；提交 `CandidatePlanRequest`，由服务端 T011 重算并签发 V1
+- `tripApi.getPlanningFacts()` → `GET /api/v1/trips/{tripId}/planning-facts`；只恢复服务端已签发且摘要匹配的原始候选事实
 - `tripApi.confirmPlan()` → `POST /api/v1/trips/{tripId}/plan-versions/{planId}/confirm`
 - `tripApi.startExecution()` → `POST /api/v1/trips/{tripId}/execution/start`
 - `tripApi.getTrip()` → `GET /api/v1/trips/{tripId}`
 
-计划生成会实际调用城市解析、多个同城 POI 关键词检索和逐段路线规划，并展示 `cityCode`、来源状态、`fetchedAt` 和未知价格。页面使用高德返回的真实 POI 名称、地址、坐标、路线距离与时长；关怀约束不满足时改查另一种真实交通方式，不回退固定景点。Provider 返回 `amountCents: null + UNKNOWN` 时，页面显示“未知待确认”，计划总额只累计 Provider 已返回的金额。前端地址栏保留 `tripId`。刷新时恢复 `CURRENT` 或 `PROPOSED`；确认按钮严格按“登记候选 → 确认 CURRENT → 开始执行”的顺序调用。PlanVersion DTO 定义在 `src/domain/trip.ts`，字段名保持 camelCase，不翻译代码契约。
+计划生成会实际调用城市解析、已确认起终点解析、多个同城 POI 关键词检索和逐段路线规划，并展示 `cityCode`、来源状态、`fetchedAt` 和未知价格。页面原样复用 `/trips/drafts/confirm` 返回的权威 Trip，最后追加回到已确认终点的独立返程任务；不会在客户端重建参与者或把最后一个景点冒充终点。Provider 返回 `amountCents: null + UNKNOWN` 时，页面显示“未知待确认”，计划总额只累计 Provider 已返回的金额。前端地址栏保留 `tripId`。刷新时恢复 `CURRENT` 或 `PROPOSED` 及其服务端签发事实；确认按钮严格按“服务端 T011 生成并签发 → 确认 CURRENT → 开始执行”的顺序调用。公开 `POST /plan-versions` 直登接口会返回 403；前端不构造 PlanVersion、不填写约束 `PASS`、不生成 `planId`。DTO 定义在 `src/domain/trip.ts`，字段名保持 camelCase，不翻译代码契约。
 
 路线 DTO 的 `facilityEvidence[]` 逐项展示电梯、坡道、母婴室和无障碍入口。来源缺失时总状态显示“待确认”，不能显示 `PASS`。
 
@@ -274,12 +275,12 @@ src/api/tripContract.ts
 
 设置 `VITE_USE_PLAN_VERSION_API=true` 后：
 
-- `tripApi.registerPlanVersion()` 可登记 `version: 2` 的不可变候选，`parentId` 指向当前 V1，原因使用已确认枚举。
+- `tripApi.selectReplan()` → `POST /api/v1/trips/{tripId}/replans`；提交候选事实、原因、满意度损失与锁定任务，由服务端 T011 重算并交 T018 选择、签发 V2。
 - `tripApi.getPlanDiff()` → `GET /api/v1/trips/{tripId}/plan-versions/{planId}/diff`
 - `tripApi.acceptPlanV2()` → `POST /api/v1/trips/{tripId}/plan-versions/{planId}/accept`
 - `tripApi.rejectPlanV2()` → `POST /api/v1/trips/{tripId}/plan-versions/{planId}/reject`
 
-前端展示 `PLACE | TIME | ROUTE | COST | CARE` 五类及 `RETAINED | REMOVED | ADDED | CHANGED` 四种变化。接受前不得用候选数据替换当前计划；决策完成后重新调用 `getTrip()`，以服务端唯一 `CURRENT` 为准。
+前端展示 `PLACE | TIME | ROUTE | COST | CARE` 五类及 `RETAINED | REMOVED | ADDED | CHANGED` 四种变化。前端不直接登记 V2，也不自报 `validationStatus: PASS`；接受前不得用候选数据替换当前计划。决策完成后重新调用 `getTrip()`，以服务端唯一 `CURRENT` 为准。S1 仅支持一次 V2 调整：CURRENT 已为 V2 或已经完成一次 V2 决策时，前端不再调用重规划接口。
 
 ## 10. 执行消费事件正式接口
 

@@ -6,7 +6,7 @@ from app.core.errors import AppError
 from app.infrastructure.plan_store import PlanStoreError
 from app.infrastructure.workflow_store import SqliteWorkflowRepository
 from app.schemas.execution import ActualBudgetSummary, CreateExecutionEvent, ExecutionEvent
-from app.schemas.trip import AssistanceProfile
+from app.schemas.trip import AssistanceProfile, CreateSingleDayTrip, Trip
 from app.schemas.workflow import (
     ConstraintConfirmationResult,
     ConstraintProfileState,
@@ -42,6 +42,18 @@ class WorkflowService:
     ) -> ConstraintProfileState:
         try:
             return self.repository.save_constraint_draft(trip_id, profile)
+        except PlanStoreError as error:
+            raise self._as_app_error(error) from error
+
+    def confirm_trip(self, trip: CreateSingleDayTrip) -> CreateSingleDayTrip:
+        try:
+            return self.repository.confirm_trip(trip)
+        except PlanStoreError as error:
+            raise self._as_app_error(error) from error
+
+    def require_confirmed_trip(self, trip_id: UUID, trip: Trip) -> None:
+        try:
+            self.repository.require_confirmed_trip(trip_id, trip)
         except PlanStoreError as error:
             raise self._as_app_error(error) from error
 
