@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from app.application.recommendation_service import MemberPreference, TrustedRecommendationService
 from app.domain.models import Place, PriceFact, Provenance, SourceStatus
-from app.domain.recommendation import CandidateRecommendation, FactRef, LlmRanking
+from app.domain.recommendation import CandidatePlace, CandidateRecommendation, FactRef, LlmRanking, MemberScore
 from app.schemas.trip import GeoPoint
 
 
@@ -63,3 +63,11 @@ def test_single_plan_exposes_member_scores_and_unknown_provider_facts() -> None:
     assert result.trusted_plan.lowest_member_score == min(item.score for item in result.trusted_plan.member_scores)
     assert "价格尚未由高德提供" in result.trusted_plan.unknown_facts[0]
     assert result.trusted_plan.compromises
+
+
+def test_fairness_key_prefers_higher_lowest_member_score() -> None:
+    tasks = [CandidatePlace(factRefId="AMAP:a", placeId="a", name="A")]
+    facts = {"a": _fact("a", "A")}
+    balanced = [MemberScore(participantId=str(index), score=80) for index in range(3)]
+    unequal = [MemberScore(participantId=str(index), score=score) for index, score in enumerate((95, 95, 50))]
+    assert TrustedRecommendationService._fairness_sort_key(tasks, balanced, facts) < TrustedRecommendationService._fairness_sort_key(tasks, unequal, facts)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import combinations
 
 from pydantic import ValidationError
 
@@ -116,10 +117,50 @@ class TrustedRecommendationService:
         candidates_by_id = {item.place_id: item for item in bundle.candidates}
         facts_by_id = {item.place.placeId: item for item in facts}
         ordered = [candidates_by_id[item.place_id] for item in bundle.recommendations if item.place_id in candidates_by_id]
-        tasks = ordered[:4]
-        if not tasks:
+        if not ordered:
             return bundle
 
+        # Exhaustively evaluate at most 126 possible three/four-task selections.
+        # The comparison implements the published fairness key exactly:
+        # minimum member score desc, average score desc, known price asc, then
+        # a stable candidate-id tie break.
+        sizes = range(3, min(4, len(ordered)) + 1) if len(ordered) >= 3 else (len(ordered),)
+        possible_sets = (tasks for size in sizes for tasks in combinations(ordered, size))
+        scored_sets = [(list(tasks), TrustedRecommendationService._score_members(tasks, members), facts_by_id) for tasks in possible_sets]
+        tasks, scores, _ = min(
+            scored_sets,
+            key=lambda entry: TrustedRecommendationService._fairness_sort_key(entry[0], entry[1], facts_by_id),
+        )
+        # Restore the approved bounded ranking order as the task sequence.  The
+        # order is display-only; the task membership came from fairness ranking.
+        selected_ids = {task.place_id for task in tasks}
+        tasks = [task for task in ordered if task.place_id in selected_ids]
+
+        unknown_facts = [
+            f"{task.name} 的价格尚未由高德提供，需要在生成路线时核验"
+            for task in tasks
+            if (fact := facts_by_id.get(task.place_id)) is not None and fact.place.priceReference.amountCents is None
+        ]
+        interest_groups = sum(bool(member.interests) for member in members)
+        compromises = (["任务组合按最低成员分优先确定，优先避免只满足单一成员的安排"] if len(members) > 1 else [])
+        care_points = ["已在进入推荐前完成成员确认与硬冲突筛除"]
+        if interest_groups > 1:
+            care_points.append("已将不同成员的已确认兴趣共同纳入评分")
+        plan = TrustedPlan(
+            tasks=tasks,
+            member_scores=scores,
+            lowest_member_score=min(score.score for score in scores),
+            care_points=care_points,
+            compromises=compromises,
+            unknown_facts=unknown_facts,
+            confirmation_message="这是当前约束下唯一的稳定推荐。确认后再核验路线、费用和可达性。",
+        )
+        return bundle.model_copy(update={"trusted_plan": plan})
+
+    @staticmethod
+    def _score_members(
+        tasks: Sequence[CandidatePlace], members: Sequence[MemberPreference],
+    ) -> list[MemberScore]:
         selected_text = " ".join(
             f"{item.name} {item.category or ''}".casefold() for item in tasks
         )
@@ -146,27 +187,22 @@ class TrustedRecommendationService:
                 participant_id=member.participant_id, score=score,
                 penalty_rule_ids=penalties, reasons=reasons,
             ))
+        return scores
 
-        unknown_facts = [
-            f"{task.name} 的价格尚未由高德提供，需要在生成路线时核验"
-            for task in tasks
-            if (fact := facts_by_id.get(task.place_id)) is not None and fact.place.priceReference.amountCents is None
-        ]
-        interest_groups = sum(bool(member.interests) for member in members)
-        compromises = (["任务顺序按最低成员分优先确定，优先避免只满足单一成员的安排"] if len(members) > 1 else [])
-        care_points = ["已在进入推荐前完成成员确认与硬冲突筛除"]
-        if interest_groups > 1:
-            care_points.append("已将不同成员的已确认兴趣共同纳入评分")
-        plan = TrustedPlan(
-            tasks=tasks,
-            member_scores=scores,
-            lowest_member_score=min(score.score for score in scores),
-            care_points=care_points,
-            compromises=compromises,
-            unknown_facts=unknown_facts,
-            confirmation_message="这是当前约束下唯一的稳定推荐。确认后再核验路线、费用和可达性。",
+    @staticmethod
+    def _fairness_sort_key(
+        tasks: Sequence[CandidatePlace], scores: Sequence[MemberScore], facts_by_id: dict[str, FactRef],
+    ) -> tuple[float, float, int, str]:
+        known_cost = sum(
+            fact.place.priceReference.amountCents or 0
+            for task in tasks if (fact := facts_by_id.get(task.place_id)) is not None
         )
-        return bundle.model_copy(update={"trusted_plan": plan})
+        return (
+            -min(item.score for item in scores),
+            -(sum(item.score for item in scores) / len(scores)),
+            known_cost,
+            ",".join(sorted(item.place_id for item in tasks)),
+        )
 
 
 __all__ = ["MemberPreference", "TrustedRecommendationService"]
