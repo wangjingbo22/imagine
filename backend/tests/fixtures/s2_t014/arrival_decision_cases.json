@@ -1,0 +1,72 @@
+{
+  "tripId": "22222222-2222-4222-8222-222222222222",
+  "targetLocation": {
+    "longitude": 112.473588,
+    "latitude": 34.555782
+  },
+  "cases": [
+    {
+      "name": "arrived",
+      "evidence": {
+        "schemaVersion": "1.0",
+        "taskId": "task-longmen-grottoes",
+        "locationEvidence": {
+          "longitude": 112.473588,
+          "latitude": 34.555782,
+          "accuracy": 20.0,
+          "capturedAt": "2026-08-26T10:00:00+08:00",
+          "source": "WEB_GEOLOCATION"
+        },
+        "idempotencyKey": "arrival-decision:arrived"
+      },
+      "attemptOutcome": "EVIDENCE",
+      "expectedResult": "ARRIVED"
+    },
+    {
+      "name": "too_far",
+      "evidence": {
+        "schemaVersion": "1.0",
+        "taskId": "task-longmen-grottoes",
+        "locationEvidence": {
+          "longitude": 112.483588,
+          "latitude": 34.555782,
+          "accuracy": 20.0,
+          "capturedAt": "2026-08-26T10:01:00+08:00",
+          "source": "WEB_GEOLOCATION"
+        },
+        "idempotencyKey": "arrival-decision:too-far"
+      },
+      "attemptOutcome": "EVIDENCE",
+      "expectedResult": "TOO_FAR"
+    },
+    {
+      "name": "permission_denied",
+      "evidence": null,
+      "attemptOutcome": "PERMISSION_DENIED",
+      "expectedResult": "PERMISSION_DENIED"
+    },
+    {
+      "name": "timeout",
+      "evidence": null,
+      "attemptOutcome": "TIMEOUT",
+      "expectedResult": "TIMEOUT"
+    },
+    {
+      "name": "low_accuracy",
+      "evidence": {
+        "schemaVersion": "1.0",
+        "taskId": "task-longmen-grottoes",
+        "locationEvidence": {
+          "longitude": 112.473588,
+          "latitude": 34.555782,
+          "accuracy": 101.0,
+          "capturedAt": "2026-08-26T10:02:00+08:00",
+          "source": "WEB_GEOLOCATION"
+        },
+        "idempotencyKey": "arrival-decision:low-accuracy"
+      },
+      "attemptOutcome": "EVIDENCE",
+      "expectedResult": "LOW_ACCURACY"
+    }
+  ]
+}

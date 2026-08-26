@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from app.api.arrival_decision_routes import router as arrival_decision_router
 from app.api.arrival_evidence_routes import router as arrival_evidence_router
 from app.api.routes import router
 from app.api.execution_adjustment_routes import router as execution_adjustment_router
@@ -17,6 +18,7 @@ from app.api.workflow_routes import router as workflow_router
 from app.api.collaboration_routes import router as collaboration_router
 from app.api.recommendation_routes import router as recommendation_router
 from app.api.media_routes import router as media_router
+from app.application.arrival_decision_service import ArrivalDecisionService
 from app.application.arrival_evidence_service import ArrivalEvidenceService
 from app.application.collaboration_service import CollaborationService
 from app.application.amap_service import AmapLocationService
@@ -145,6 +147,7 @@ def create_app(
     candidate_selection_gateway: CandidateSelectionGateway | None = None,
     execution_event_draft_service: ExecutionEventDraftService | None = None,
     arrival_evidence_service: ArrivalEvidenceService | None = None,
+    arrival_decision_service: ArrivalDecisionService | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     managed_client: AmapClient | None = None
@@ -318,6 +321,10 @@ def create_app(
             )
         )
     )
+    app.state.arrival_decision_service = (
+        arrival_decision_service
+        or ArrivalDecisionService(app.state.arrival_evidence_service)
+    )
     app.state.collaboration_service = CollaborationService(
         SqliteCollaborationRepository(resolved_settings.plan_version_db_path),
         app.state.trip_draft_service,
@@ -327,6 +334,7 @@ def create_app(
     app.state.workflow_service = workflow_service
     app.state.planning_boundary_service = planning_boundary_service
     app.state.recommendation_service = recommendation_service
+    app.include_router(arrival_decision_router)
     app.include_router(arrival_evidence_router)
     app.include_router(router)
     app.include_router(execution_adjustment_router)
