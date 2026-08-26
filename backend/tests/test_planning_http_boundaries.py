@@ -18,7 +18,7 @@ from app.main import create_app
 from app.schemas.trip import CreateSingleDayTrip
 from app.services.planning.models import CandidatePlanRequest
 from app.services.planning.planner import generate_proposed_plan_version
-from tests.test_plan_versions import UnusedLocationService, proposal_payload
+from backend.tests.plan_support import UnusedLocationService, proposal_payload
 
 
 PLANNING_FIXTURE = (

@@ -19,7 +19,7 @@ from app.schemas.plan import PlanVersion, TripPlanState
 from app.schemas.trip import CreateSingleDayTrip
 from app.schemas.workflow import TripExecutionSummary
 from app.services.summary_trace import SummaryTraceError, trace_summary_numbers
-from tests.test_plan_versions import UnusedLocationService
+from backend.tests.plan_support import UnusedLocationService
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "summary_paths"
