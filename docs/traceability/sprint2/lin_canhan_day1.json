@@ -1,0 +1,172 @@
+{
+  "schemaVersion": "1.0",
+  "owner": "林粲涵",
+  "sprint": "Sprint 2",
+  "scope": "DAY_1",
+  "verifiedAgainst": {
+    "remoteBranch": "origin/main",
+    "remoteMainCommit": "3e60435fcfde0705149dbc5f340d60e1aa63103c",
+    "verifiedAt": "2026-08-26"
+  },
+  "task": {
+    "taskId": "S2-T008",
+    "pbiId": "PBI-08-A",
+    "acId": "AC-08-A",
+    "owner": "林粲涵",
+    "priority": "Must",
+    "plannedDay": "Day1",
+    "estimateHours": 3,
+    "status": "IMPLEMENTED_WITH_UPSTREAM_FIXTURE_PENDING",
+    "dependsOn": ["S2-T006"],
+    "consumedBy": ["S2-T009"],
+    "indirectlyVisibleIn": ["S2-T010"],
+    "codeFiles": [
+      "backend/app/schemas/llm.py",
+      "app/application/llm_gateway.py",
+      "app/infrastructure/openai_compatible_llm.py"
+    ],
+    "integrationFiles": [
+      "app/main.py",
+      "app/core/config.py",
+      ".env.example"
+    ],
+    "testFiles": [
+      "backend/tests/test_s2_t008_candidate_selection_gateway.py",
+      "backend/tests/test_s2_t008_traceability.py"
+    ],
+    "fixtures": [
+      "backend/tests/fixtures/s2_t008/candidate_selection_request.json",
+      "backend/tests/fixtures/s2_t008/candidate_selection_proposal.json",
+      "backend/tests/fixtures/s2_t008/redacted_model_request.json"
+    ],
+    "schemaSnapshots": [
+      "backend/tests/snapshots/s2_t008_provider_candidate_selection.schema.json"
+    ],
+    "proves": [
+      "request-admits-exactly-six-to-eight-unique-server-factrefs",
+      "fact-digest-is-a-lowercase-sha256-identity",
+      "allowed-task-count-is-fixed-to-three-or-four",
+      "proposal-selects-two-to-three-unique-allowlisted-place-fact-ids",
+      "strict-json-schema-rejects-every-extra-field",
+      "model-cannot-author-price-route-score-pass-plan-or-version-state",
+      "risk-notes-only-report-unknown-or-unconfirmed-facts-without-guarantees",
+      "each-selected-place-and-risk-note-is-grounded-in-the-request-safe-projection",
+      "prompt-injection-or-sensitive-text-in-the-safe-projection-is-rejected-before-model-call",
+      "model-payload-excludes-digest-provider-payload-coordinates-and-sensitive-facts",
+      "candidate-model-timeout-is-ten-seconds-with-an-eight-to-twelve-second-config-guard",
+      "invalid-json-schema-or-allowlist-output-never-starts-a-repair-call",
+      "transient-transport-failure-stops-after-at-most-two-calls",
+      "all-model-failures-return-deterministic-enumeration-with-sanitized-codes",
+      "runtime-exposes-an-injectable-gateway-for-s2-t009"
+    ]
+  },
+  "pbiTrace": {
+    "pbiId": "PBI-08-A",
+    "acId": "AC-08-A",
+    "taskId": "S2-T008",
+    "moduleFiles": [
+      "backend/app/schemas/llm.py",
+      "app/application/llm_gateway.py",
+      "app/infrastructure/openai_compatible_llm.py",
+      "app/main.py",
+      "app/core/config.py",
+      ".env.example"
+    ],
+    "testFiles": [
+      "backend/tests/test_s2_t008_candidate_selection_gateway.py",
+      "backend/tests/test_s2_t008_traceability.py"
+    ],
+    "fixtureFiles": [
+      "backend/tests/fixtures/s2_t008/candidate_selection_request.json",
+      "backend/tests/fixtures/s2_t008/candidate_selection_proposal.json",
+      "backend/tests/fixtures/s2_t008/redacted_model_request.json"
+    ],
+    "schemaFiles": [
+      "backend/tests/snapshots/s2_t008_provider_candidate_selection.schema.json"
+    ]
+  },
+  "moduleLinkages": [
+    {
+      "sourceTaskId": "S2-T006",
+      "targetTaskId": "S2-T008",
+      "status": "UPSTREAM_FIXTURE_CONTRACT_PENDING",
+      "contract": "ProviderCandidateFact(placeFactId, factDigest, displayName, categoryTags, knownAttributes, riskFlags)",
+      "behavior": "T008 accepts only opaque server-issued IDs and lowercase sha256 digests; it neither creates nor restores Provider facts.",
+      "files": [
+        "backend/app/schemas/llm.py",
+        "backend/tests/fixtures/s2_t008/candidate_selection_request.json"
+      ]
+    },
+    {
+      "sourceTaskId": "S2-T008",
+      "targetTaskId": "S2-T009",
+      "status": "READY_FOR_CONSUMER_INTEGRATION",
+      "contract": "CandidateSelectionGateway.select(ProviderCandidateSelectionRequest) -> CandidateSelectionGatewayResult",
+      "behavior": "A valid model proposal returns only ordered allowlisted placeFactIds and explanations; every failure returns DETERMINISTIC_ENUMERATION so T009 owns fact restoration, fairness, routing, validation and planning.",
+      "files": [
+        "app/application/llm_gateway.py",
+        "app/main.py",
+        "backend/tests/test_s2_t008_candidate_selection_gateway.py"
+      ]
+    },
+    {
+      "sourceTaskId": "S2-T007",
+      "targetTaskId": "S2-T009",
+      "status": "SIBLING_UPSTREAM_NOT_IMPLEMENTED_BY_T008",
+      "contract": "fairness and deterministic tie-break evidence",
+      "behavior": "T007 is a separate input to T009's unique final decision; S2-T008 proposes an allowlisted shortlist and never calculates or overrides fairness.",
+      "files": []
+    },
+    {
+      "sourceTaskId": "S2-T009",
+      "targetTaskId": "S2-T010",
+      "status": "INDIRECT_DOWNSTREAM_ONLY",
+      "contract": "T009 validated candidates and evidence",
+      "behavior": "T008 does not emit UI data or claim T010 completion; the proposal becomes visible only after T009 restores and validates authoritative facts.",
+      "files": []
+    }
+  ],
+  "responsibilityBoundary": {
+    "implemented": [
+      "strict candidate proposal request and response contracts",
+      "redacted OpenAI-compatible model request",
+      "allowlist and semantic validation",
+      "ten-second model timeout",
+      "zero-or-one transport retry and deterministic fallback",
+      "runtime injection port and call-count evidence"
+    ],
+    "notImplementedByS2T008": [
+      "S2-T006 FactRef registry, digest issuance or authoritative fact restoration",
+      "S2-T007 fairness calculation",
+      "S2-T009 deterministic enumeration, route generation or hard validation",
+      "price, route, score, PASS, Constraint, PlanVersion or persistence decisions",
+      "S2-T010 frontend rendering"
+    ]
+  },
+  "neededInputs": [
+    "S2-T006 final FactRef fixture and digest-generation contract or implementation commit",
+    "S2-T009 confirmation that it will consume CandidateSelectionGatewayResult and own deterministic fallback",
+    "six-to-eight real same-city redacted candidate facts for integration evidence",
+    "a newly rotated local BAILIAN_API_KEY only for opt-in live acceptance, never committed or sent in chat",
+    "non-author review plus QA and PO acceptance evidence"
+  ],
+  "localVerification": {
+    "status": "VERIFIED_ON_REMOTE_MAIN_WITH_STRICT_GATEWAY_AND_TRACEABILITY",
+    "verifiedAt": "2026-08-26",
+    "focusedCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_s2_t008_candidate_selection_gateway.py backend/tests/test_s2_t008_traceability.py backend/tests/test_bailian_trip_extractor.py backend/tests/test_trip_draft_llm_integration.py",
+    "focusedResult": "64 passed in 0.92s",
+    "fullCommand": "python -B -m pytest -p no:cacheprovider -q",
+    "fullResult": "228 passed in 10.16s",
+    "frontendTest": "npm test: 31 passed",
+    "frontendBuild": "npm run build passed",
+    "frontendLint": "npm run lint passed"
+  },
+  "externalEvidence": {
+    "pullRequest": null,
+    "ciBuild": null,
+    "reviewer": null,
+    "qa": null,
+    "po": null,
+    "liveModelRun": null
+  }
+}
