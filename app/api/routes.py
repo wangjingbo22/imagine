@@ -28,6 +28,7 @@ async def health(request: Request) -> ApiResponse[dict[str, str]]:
         data={
             "status": "UP",
             "buildSha": settings.build_sha or "unavailable",
+            "naturalLanguageParser": request.app.state.natural_language_parser,
         }
     )
 

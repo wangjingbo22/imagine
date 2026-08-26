@@ -1,0 +1,54 @@
+{
+  "$defs": {
+    "ClarificationQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "questionKey": {"$ref": "#/$defs/ClarificationQuestionKey"},
+        "prompt": {"maxLength": 120, "minLength": 1, "title": "Prompt", "type": "string"},
+        "options": {
+          "items": {"maxLength": 40, "minLength": 1, "type": "string"},
+          "title": "Options",
+          "type": "array"
+        }
+      },
+      "required": ["questionKey", "prompt", "options"],
+      "title": "ClarificationQuestion",
+      "type": "object"
+    },
+    "ClarificationQuestionKey": {
+      "enum": ["EVENT_TYPE_REQUIRED", "LATE_MINUTES_REQUIRED", "FATIGUE_LEVEL_REQUIRED"],
+      "title": "ClarificationQuestionKey",
+      "type": "string"
+    },
+    "ExecutionAdjustmentType": {
+      "enum": ["LATE", "FATIGUE"],
+      "title": "ExecutionAdjustmentType",
+      "type": "string"
+    },
+    "FatigueLevel": {
+      "enum": ["MILD", "MODERATE", "SEVERE"],
+      "title": "FatigueLevel",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A zero-write draft. Only a user-confirmed copy may enter T020.",
+  "properties": {
+    "schemaVersion": {"const": "1.0", "default": "1.0", "title": "Schemaversion", "type": "string"},
+    "eventType": {"anyOf": [{"$ref": "#/$defs/ExecutionAdjustmentType"}, {"type": "null"}]},
+    "taskId": {"maxLength": 64, "minLength": 1, "title": "Taskid", "type": "string"},
+    "lateMinutes": {
+      "anyOf": [{"maximum": 240, "minimum": 1, "type": "integer"}, {"type": "null"}],
+      "title": "Lateminutes"
+    },
+    "fatigueLevel": {"anyOf": [{"$ref": "#/$defs/FatigueLevel"}, {"type": "null"}]},
+    "clarificationQuestions": {
+      "items": {"$ref": "#/$defs/ClarificationQuestion"},
+      "title": "Clarificationquestions",
+      "type": "array"
+    }
+  },
+  "required": ["eventType", "taskId", "lateMinutes", "fatigueLevel", "clarificationQuestions"],
+  "title": "ExecutionEventDraft",
+  "type": "object"
+}

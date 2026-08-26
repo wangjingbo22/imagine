@@ -20,8 +20,7 @@ from app.services.replanning import (
     SelectedReplan,
 )
 from app.services.route_risk import ValidationStatus
-from tests.test_plan_v2_diff import v2_payload
-from tests.test_plan_versions import parse_proposal
+from backend.tests.plan_support import parse_proposal, v2_payload
 
 
 class PassValidator:
