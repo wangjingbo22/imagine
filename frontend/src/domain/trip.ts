@@ -97,6 +97,9 @@ export interface TripDraftConfirmationItem {
 export interface TripDraftParseResult {
   tripId: string
   status: 'DRAFT'
+  recognitionSource: 'BAILIAN' | 'DETERMINISTIC_RULES' | 'DEGRADED_RULES'
+  recognitionModel: string | null
+  degradedReason: string | null
   parsed: {
     cityName: string | null
     travelDate: string | null

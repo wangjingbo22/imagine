@@ -24,6 +24,7 @@ DAY1_TRACE_PATH = (
 INTEGRATED_MAIN_COMMIT = "3b9321c39e794a3e1bcc782cb947219bff197c3d"
 LATEST_MAIN_MERGE_COMMIT = "9a7c290a3af2fe7a4afc9627090366fdc0150299"
 INTEGRATION_ADAPTATION_COMMIT = "d43442c8ada3c741ed43b629aec5b20a291cae07"
+VERIFIED_MAIN_COMMIT = "3e60435fcfde0705149dbc5f340d60e1aa63103c"
 EXPECTED_TASKS = {
     "S1-T011": {
         "pbiId": "PBI-04-A",
@@ -119,8 +120,7 @@ def test_day2_tasks_map_to_real_code_tests_fixtures_and_integrations() -> None:
     } <= set(tasks["S1-T018"]["proves"])
 
     assert {
-        "tests/test_plan_versions.py",
-        "tests/test_plan_v2_diff.py",
+        "backend/tests/plan_support.py",
         "backend/tests/test_planning_http_boundaries.py",
     } <= set(tasks["S1-T022"]["testSupportFiles"])
     assert (
@@ -172,11 +172,13 @@ def test_external_boundaries_and_commit_evidence_are_honest() -> None:
     assert trace["integratedMainCommit"] == INTEGRATED_MAIN_COMMIT
     assert trace["latestMainMergeCommit"] == LATEST_MAIN_MERGE_COMMIT
     assert trace["integrationAdaptationCommit"] == INTEGRATION_ADAPTATION_COMMIT
+    assert trace["verifiedAgainstMainCommit"] == VERIFIED_MAIN_COMMIT
     for commit_key in (
         "implementationCommit",
         "integratedMainCommit",
         "latestMainMergeCommit",
         "integrationAdaptationCommit",
+        "verifiedAgainstMainCommit",
     ):
         commit = trace[commit_key]
         assert re.fullmatch(r"[0-9a-f]{40}", commit)
@@ -243,9 +245,10 @@ def test_local_verification_records_latest_full_and_frontend_results() -> None:
     trace = _trace()
 
     assert trace["localVerification"] == {
-        "status": "VERIFIED_AFTER_LATEST_MAIN_TRUSTED_RUNTIME_INTEGRATION",
+        "status": "VERIFIED_AFTER_LATEST_MAIN_BAILIAN_VISIBILITY_AND_TEST_CLEANUP",
+        "verifiedAt": "2026-08-26",
         "backendCommand": "python -B -m pytest -p no:cacheprovider -q",
-        "backendResult": "261 passed in 4.54s",
+        "backendResult": "170 passed in 4.51s",
         "focusedCommand": (
             "python -B -m pytest -p no:cacheprovider -q "
             "backend/tests/test_candidate_planner.py "
@@ -253,11 +256,11 @@ def test_local_verification_records_latest_full_and_frontend_results() -> None:
             "backend/tests/test_planning_replanning_integration.py "
             "backend/tests/test_planning_http_boundaries.py "
             "backend/tests/test_s1_t022_summary_paths.py "
-            "tests/test_trip_draft_parser.py "
-            "tests/test_execution_expenses.py"
+            "backend/tests/test_trip_draft_llm_integration.py "
+            "backend/tests/test_s1_t017_event_replan.py"
         ),
-        "focusedResult": "76 passed in 2.75s",
-        "frontendTest": "npm test: 16 passed",
+        "focusedResult": "69 passed in 12.23s",
+        "frontendTest": "npm test: 32 passed",
         "frontendBuild": "npm run build passed",
         "frontendLint": "npm run lint passed",
     }

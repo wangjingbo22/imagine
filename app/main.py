@@ -123,8 +123,6 @@ def create_app(
     resolved_settings = settings or get_settings()
     managed_client: AmapClient | None = None
     managed_bailian_extractor: BailianTripDraftExtractor | None = None
-    owns_location_service = service is None
-
     if service is None:
         managed_client = AmapClient(
             api_key=resolved_settings.amap_web_service_key,
@@ -143,7 +141,7 @@ def create_app(
         if resolved_settings.bailian_api_key is not None
         else ""
     )
-    if owns_location_service and bailian_api_key:
+    if bailian_api_key:
         managed_bailian_extractor = BailianTripDraftExtractor(
             api_key=bailian_api_key,
             base_url=resolved_settings.bailian_base_url,
@@ -218,6 +216,11 @@ def create_app(
     )
     app.state.location_service = service
     app.state.settings = resolved_settings
+    app.state.natural_language_parser = (
+        "BAILIAN_CONFIGURED"
+        if managed_bailian_extractor is not None
+        else "DETERMINISTIC_RULES"
+    )
     app.state.trip_draft_service = TripDraftParserService(
         service,
         llm_extractor=managed_bailian_extractor,
@@ -236,6 +239,7 @@ def create_app(
         return {
             "status": "ok",
             "buildSha": resolved_settings.build_sha or "unavailable",
+            "naturalLanguageParser": app.state.natural_language_parser,
         }
 
     @app.get("/docs", include_in_schema=False)

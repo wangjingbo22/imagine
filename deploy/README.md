@@ -9,7 +9,8 @@
 
 Render 会为两个服务自动签发 HTTPS 证书，并为每个服务提供 `onrender.com`
 二级域名。创建 Blueprint 后，需要在 API 服务中填写
-`AMAP_WEB_SERVICE_KEY`。
+`AMAP_WEB_SERVICE_KEY`。要启用百炼自然语言识别，还必须填写
+`BAILIAN_API_KEY`；两项都应使用 Render Secret，不能提交真实值。
 
 前端镜像默认以真实 API 模式构建：`VITE_USE_MOCK_API=false`。浏览器只会请求
 同源的 `/api/*`，再由 Nginx 转发给 API 服务；不要在前端环境变量中填写高德 Key。
@@ -20,8 +21,8 @@ Render 会为两个服务自动签发 HTTPS 证书，并为每个服务提供 `o
 2. 在 Render 选择 **New > Blueprint** 并连接仓库。若名称已被占用，将
    `render.yaml` 中两个 `name` 改成你自己的唯一名称，并同步修改前端的
    `API_UPSTREAM` 与后端的 `CORS_ALLOWED_ORIGINS`。
-3. 在 API 服务的 Environment 中填入 `AMAP_WEB_SERVICE_KEY`，保存并手动
-   重新部署 API。
+3. 在 API 服务的 Environment 中填入 `AMAP_WEB_SERVICE_KEY` 和新建的
+   `BAILIAN_API_KEY`，保存并手动重新部署 API。
 4. 打开 Web 服务的 `https://<web-service-name>.onrender.com` 地址。
 
 Render 的临时文件系统会在重新部署或实例替换时丢失 SQLite 数据。需要保留行程、
@@ -32,11 +33,16 @@ Render 的临时文件系统会在重新部署或实例替换时丢失 SQLite �
 
 ```bash
 curl -fsS https://<api-service-name>.onrender.com/health
+curl -fsS https://<api-service-name>.onrender.com/api/v1/health
 curl -I https://<web-service-name>.onrender.com/
 curl -I https://<web-service-name>.onrender.com/workspace
 ```
 
-`/workspace` 返回前端页面可证明 Nginx SPA 回退正常。
+`/workspace` 返回前端页面可证明 Nginx SPA 回退正常。API 健康检查中的
+`naturalLanguageParser` 为 `BAILIAN_CONFIGURED`，表示当前线上实例已按 Secret 装配
+百炼客户端；`DETERMINISTIC_RULES` 表示未配置 Key。健康检查不主动消耗模型配额，
+因此还要实际调用一次自然语言解析，并确认响应 `recognitionSource` 为 `BAILIAN`；
+若为 `DEGRADED_RULES`，表示该次调用失败并已回退本地规则。
 
 ## Docker 本地生产演练
 
@@ -64,4 +70,4 @@ curl -I http://localhost:8080/workspace
 - 独立域名部署时使用 `VITE_API_BASE_URL` 指定 HTTPS API。
 - 后端通过 `CORS_ALLOWED_ORIGINS` 配置允许的前端 HTTPS 域名，多个域名用逗号分隔。
 - SQLite 数据路径为 `/app/data`；在 Render 控制台加 Persistent Disk 后才会跨部署保留。
-- 不得在镜像、日志或仓库中写入高德 Key。
+- 不得在镜像、日志或仓库中写入高德或百炼 Key。

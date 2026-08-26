@@ -35,6 +35,14 @@ Trip Schema 本身**不包含**：
 
 已经登记的自然语言草稿、约束确认、城市 Provider、PlanVersion、Diff、执行事件和总结接口均调用本地 FastAPI。未登记 URL 和 DTO 前不得新增虚构接口或固定数据回退。
 
+自然语言草稿响应额外返回以下运行证据：
+
+- `recognitionSource`: `BAILIAN`、`DETERMINISTIC_RULES` 或 `DEGRADED_RULES`
+- `recognitionModel`: 在线模型名称；非模型路径为 `null`
+- `degradedReason`: 百炼失败后的非敏感错误码；未降级时为 `null`
+
+页面只能在 `recognitionSource=BAILIAN` 时显示“百炼识别完成”。模型输出仍是候选字段，不能绕过后续确认和服务端规划校验。
+
 ## 3. CreateSingleDayTrip
 
 前端类型：`src/domain/trip.ts` 中的 `CreateSingleDayTrip`。
