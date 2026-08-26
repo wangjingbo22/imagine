@@ -120,3 +120,26 @@ def test_invitation_capacity_is_limited_to_declared_party_size(tmp_path) -> None
     repository.create_invitation(trip_id, organizer_token)
     with pytest.raises(CollaborationStoreError, match="INVITATION_CAPACITY_REACHED"):
         repository.create_invitation(trip_id, organizer_token)
+
+
+def test_three_person_session_waits_for_every_member_and_keeps_drafts_isolated(tmp_path) -> None:
+    repository = SqliteCollaborationRepository(tmp_path / "collaboration.sqlite3")
+    trip_id = uuid4()
+    _, organizer_token = repository.create_session(trip_id, uuid4(), _parsed(), 3)
+    first = repository.create_invitation(trip_id, organizer_token)
+    second = repository.create_invitation(trip_id, organizer_token)
+    first_token = first.invitation_url.rsplit("/", 1)[1]
+    second_token = second.invitation_url.rsplit("/", 1)[1]
+
+    first_draft = _parsed().model_copy(update={"interests": ["博物馆"]})
+    second_draft = _parsed().model_copy(update={"interests": ["美食"]})
+    repository.submit_invitation(first_token, first_draft)
+    waiting = repository.confirm_invitation(first_token)
+    assert waiting.status is CollaborationStatus.COLLECTING_MEMBERS
+    assert next(item for item in waiting.participants if item.participant_id == first.participant_id).parsed.interests == ["博物馆"]
+    assert next(item for item in waiting.participants if item.participant_id == second.participant_id).parsed is None
+
+    repository.submit_invitation(second_token, second_draft)
+    ready = repository.confirm_invitation(second_token)
+    assert ready.status is CollaborationStatus.READY_TO_PLAN
+    assert next(item for item in ready.participants if item.participant_id == second.participant_id).parsed.interests == ["美食"]
