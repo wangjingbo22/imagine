@@ -13,7 +13,7 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from app.schemas.plan import PlanVersion, ProposedPlanVersion
-from app.services.planning.models import CandidatePlanRequest
+from app.services.planning.models import CandidatePlan, CandidatePlanRequest
 
 
 BoundaryKind = Literal["V1", "V2"]
@@ -97,6 +97,167 @@ class SqliteTrustedPlanningRepository:
                 ON trusted_plan_issuances (trip_id, boundary_kind, issuance_state)
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS candidate_plan_reviews (
+                    review_id TEXT PRIMARY KEY,
+                    trip_id TEXT NOT NULL,
+                    candidate_id TEXT NOT NULL,
+                    request_digest TEXT NOT NULL,
+                    request_json TEXT NOT NULL,
+                    candidate_json TEXT NOT NULL,
+                    review_state TEXT NOT NULL
+                        CHECK (review_state IN ('PENDING', 'CONFIRMED')),
+                    confirmation_digest TEXT,
+                    confirmed_request_json TEXT,
+                    issued_plan_id TEXT,
+                    created_at TEXT NOT NULL,
+                    confirmed_at TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_candidate_plan_reviews_trip
+                ON candidate_plan_reviews (trip_id, review_state)
+                """
+            )
+
+    def stage_review(
+        self,
+        *,
+        review_id: str,
+        request: CandidatePlanRequest,
+        candidate: CandidatePlan,
+    ) -> dict[str, Any]:
+        request_json = _canonical_json(
+            request.model_dump(mode="json", by_alias=True)
+        )
+        candidate_json = _canonical_json(
+            candidate.model_dump(mode="json", by_alias=True)
+        )
+        request_digest = hashlib.sha256(request_json.encode("utf-8")).hexdigest()
+        now = datetime.now(UTC).isoformat()
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT * FROM candidate_plan_reviews WHERE review_id = ?",
+                    (review_id,),
+                ).fetchone()
+                if row is None:
+                    connection.execute(
+                        """
+                        INSERT INTO candidate_plan_reviews (
+                            review_id, trip_id, candidate_id, request_digest,
+                            request_json, candidate_json, review_state,
+                            confirmation_digest, confirmed_request_json,
+                            issued_plan_id, created_at, confirmed_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, 'PENDING', NULL, NULL, NULL, ?, NULL)
+                        """,
+                        (
+                            review_id,
+                            str(request.trip.trip_id),
+                            candidate.candidate_id,
+                            request_digest,
+                            request_json,
+                            candidate_json,
+                            now,
+                        ),
+                    )
+                    row = connection.execute(
+                        "SELECT * FROM candidate_plan_reviews WHERE review_id = ?",
+                        (review_id,),
+                    ).fetchone()
+                elif (
+                    row["trip_id"] != str(request.trip.trip_id)
+                    or row["candidate_id"] != candidate.candidate_id
+                    or row["request_digest"] != request_digest
+                    or row["request_json"] != request_json
+                    or row["candidate_json"] != candidate_json
+                ):
+                    raise TrustedPlanningStoreError(
+                        "PLANNING_REVIEW_CONFLICT",
+                        "同一 reviewId 已绑定到不同的候选事实",
+                    )
+                connection.execute("COMMIT")
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+        assert row is not None
+        return dict(row)
+
+    def get_review(self, review_id: str) -> dict[str, Any] | None:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT * FROM candidate_plan_reviews WHERE review_id = ?",
+                (review_id,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def mark_review_confirmed(
+        self,
+        *,
+        review_id: str,
+        confirmation_digest: str,
+        confirmed_request: CandidatePlanRequest,
+        issued_plan_id: UUID,
+    ) -> dict[str, Any]:
+        confirmed_request_json = _canonical_json(
+            confirmed_request.model_dump(mode="json", by_alias=True)
+        )
+        now = datetime.now(UTC).isoformat()
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT * FROM candidate_plan_reviews WHERE review_id = ?",
+                    (review_id,),
+                ).fetchone()
+                if row is None:
+                    raise TrustedPlanningStoreError(
+                        "PLANNING_REVIEW_NOT_FOUND",
+                        "未找到待确认的候选计划",
+                    )
+                if row["review_state"] == "CONFIRMED":
+                    if (
+                        row["confirmation_digest"] != confirmation_digest
+                        or row["confirmed_request_json"] != confirmed_request_json
+                        or row["issued_plan_id"] != str(issued_plan_id)
+                    ):
+                        raise TrustedPlanningStoreError(
+                            "PLANNING_REVIEW_ALREADY_CONFIRMED",
+                            "候选计划已使用不同的确认内容完成签发",
+                        )
+                    connection.execute("COMMIT")
+                    return dict(row)
+                connection.execute(
+                    """
+                    UPDATE candidate_plan_reviews
+                    SET review_state = 'CONFIRMED', confirmation_digest = ?,
+                        confirmed_request_json = ?, issued_plan_id = ?, confirmed_at = ?
+                    WHERE review_id = ?
+                    """,
+                    (
+                        confirmation_digest,
+                        confirmed_request_json,
+                        str(issued_plan_id),
+                        now,
+                        review_id,
+                    ),
+                )
+                row = connection.execute(
+                    "SELECT * FROM candidate_plan_reviews WHERE review_id = ?",
+                    (review_id,),
+                ).fetchone()
+                connection.execute("COMMIT")
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+        assert row is not None
+        return dict(row)
 
     def stage_candidate(
         self,

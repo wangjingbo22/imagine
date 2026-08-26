@@ -1,0 +1,113 @@
+{
+  "draftRequest": {
+    "schemaVersion": "1.0",
+    "tripId": "02400000-0000-4000-8000-000000000001",
+    "referenceDate": "2026-08-26",
+    "naturalLanguageRequest": "北京低体力单人一日游",
+    "cityName": "北京",
+    "travelDate": "2026-09-05",
+    "startTime": "09:00",
+    "endTime": "18:00",
+    "startLocationText": "北京市中心",
+    "endLocationText": "北京市中心",
+    "budgetCents": 35000,
+    "interests": ["历史文化"],
+    "mustVisit": [],
+    "avoidPlaces": [],
+    "assistanceMode": "low-mobility",
+    "assistanceProfile": {
+      "maxSegmentWalkMeters": 800,
+      "maxTransfers": 1,
+      "restIntervalMinutes": 60
+    }
+  },
+  "expectedParticipant": {
+    "nickname": "单人旅客",
+    "assistanceType": "LOW_STAMINA"
+  },
+  "confirmedConstraints": [
+    {
+      "field": "walkLimits.maxContinuousMeters",
+      "operator": "LTE",
+      "value": 800,
+      "scope": "ROUTE_SEGMENT",
+      "hardness": "HARD"
+    },
+    {
+      "field": "maxTransfers",
+      "operator": "LTE",
+      "value": 1,
+      "scope": "ROUTE",
+      "hardness": "HARD"
+    },
+    {
+      "field": "restInterval",
+      "operator": "LTE",
+      "value": 60,
+      "scope": "ROUTE",
+      "hardness": "HARD"
+    }
+  ],
+  "taskSpecs": [
+    {
+      "taskId": "task-palace",
+      "order": 1,
+      "title": "故宫博物院",
+      "category": "CULTURE",
+      "keywords": "故宫博物院",
+      "startAt": "09:30:00",
+      "endAt": "10:30:00",
+      "routeMode": "WALKING",
+      "elapsedSinceRestMinutes": 30,
+      "note": "低体力节奏的上午文化活动"
+    },
+    {
+      "taskId": "task-lunch",
+      "order": 2,
+      "title": "北京风味午餐",
+      "category": "DINING",
+      "keywords": "北京风味午餐",
+      "startAt": "11:00:00",
+      "endAt": "12:00:00",
+      "routeMode": "WALKING",
+      "elapsedSinceRestMinutes": 30,
+      "note": "短距离移动后用餐休息"
+    },
+    {
+      "taskId": "task-return",
+      "order": 3,
+      "title": "返回北京市中心",
+      "category": "RETURN",
+      "keywords": "北京市中心",
+      "startAt": "13:30:00",
+      "endAt": "15:00:00",
+      "routeMode": "WALKING",
+      "elapsedSinceRestMinutes": 45,
+      "note": "按确认终点完成返程"
+    }
+  ],
+  "providerPlaces": [
+    {
+      "keyword": "故宫博物院",
+      "placeId": "poi-palace",
+      "name": "故宫博物院",
+      "location": "116.397000,39.918000",
+      "cost": "",
+      "confirmedPriceCents": 2000
+    },
+    {
+      "keyword": "北京风味午餐",
+      "placeId": "poi-lunch",
+      "name": "北京风味午餐",
+      "location": "116.399000,39.916000",
+      "cost": "30"
+    },
+    {
+      "keyword": "北京市中心",
+      "placeId": "poi-return",
+      "name": "北京市中心",
+      "location": "116.407387,39.904179",
+      "cost": "0"
+    }
+  ]
+}

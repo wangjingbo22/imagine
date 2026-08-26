@@ -18,23 +18,24 @@
   <img src="docs/testing/evidence/s1_t002_confirmation_desktop.jpg" alt="行知旅伴需求输入与关怀画像确认页面" width="900">
 </p>
 
-> 当前阶段：**Sprint 1 Beta** —— 单人单日核心闭环已接通，真实地图与公网发布仍在完善。
+> 当前阶段：**Sprint 1 Beta** —— 单人单日核心闭环、真实起终点和真实地图已接通，费用变化可触发一次服务端重规划；公网发布仍在完善。
 
 ## 项目简介
 
 行知旅伴面向国内城市的单日旅行规划场景。用户可以用自然语言输入城市、日期、预算、兴趣、地点和关怀需求，系统结合高德地点与路线事实，由服务端进行确定性约束校验，形成可执行的单日计划。
 
-在执行过程中，系统记录任务状态和实际消费；当发生费用变化或用户反馈时，可生成单候选 Plan V2，并由用户决定接受或拒绝。这里的边界很明确：**高德提供地点/路线事实，计划由行知旅伴服务端确定性校验**。项目当前定位为 Agent 原型，不宣称已经接入在线大模型或提供完整自动旅行规划。
+在执行过程中，系统记录任务状态和实际消费；实际消费变化可发起服务端重规划评估。服务端读取 CURRENT V1、可信规划事实与执行事件，并在未完成后缀仍可行时生成单个确定性候选 Plan V2，由用户决定接受或拒绝；无可行方案时继续保留 CURRENT V1。这里的边界很明确：**高德提供地点/路线事实，计划由行知旅伴服务端确定性校验**。项目当前定位为 Agent 原型，不宣称已经接入在线大模型或提供完整自动旅行规划。
 
 ## 功能特性
 
 - 自然语言需求解析与歧义确认
+- 显式起终点输入与有限自然语言提取
 - 普通、亲子、低体力、行动辅助四类关怀画像
 - 高德城市、POI、路线距离、时长与来源事实
 - 步行、换乘、休息、时间和预算的确定性校验
 - 服务端签发并确认 Plan V1
 - 开始、完成、跳过和实际消费执行事件
-- 单候选 Plan V2、V1/V2 Diff、接受与拒绝
+- 费用事件驱动的单候选 Plan V2、V1/V2 Diff、接受与拒绝
 - 计划费用、实际费用、任务状态与版本历史基础总结
 
 ## 使用流程
@@ -46,7 +47,7 @@
     → 约束、路线与预算校验
     → 唯一 Plan V1
     → 执行与实际消费
-    → Plan V2 对比与决策
+    → 费用变化发起单次重规划评估（可行时进入 Plan V2 决策）
     → 旅行总结
 ```
 
@@ -59,7 +60,7 @@
   <img src="docs/testing/evidence/s1_t016_expense_refresh_desktop.png" alt="行知旅伴执行与实际消费页面" width="48%">
 </p>
 
-路线相关视图已接入高德地点与路线事实，**地图 Polyline 可视化仍在完善**。上述截图用于展示已验证的需求确认、计划和执行工作台，不代表公网在线体验。
+路线相关视图已接入高德地点、路线事实、道路底图、地点标记和真实 Polyline。上述截图用于展示已验证的需求确认、计划和执行工作台，不代表公网在线体验。
 
 ## 技术架构与技术栈
 
@@ -124,14 +125,18 @@ npm ci
 npm run dev
 ```
 
-`frontend/.env.example` 已提供本地 API 地址及工作流开关，通常无需修改：
+`frontend/.env.example` 已提供本地 API 地址及工作流开关；复制后填写两项前端高德凭据：
 
 ```env
-VITE_API_BASE_URL=http://localhost:8000
+VITE_API_BASE_URL=http://127.0.0.1:8000
+VITE_AMAP_JS_API_KEY=你的Web端（JS API）Key
+VITE_AMAP_SECURITY_JS_CODE=你的安全密钥
 VITE_USE_MOCK_API=false
 VITE_USE_PLAN_VERSION_API=true
 VITE_USE_WORKFLOW_API=true
 ```
+
+前端通过后端调用高德 Web 服务：城市解析、同城 POI 检索和逐段路线规划均使用真实接口；路线总览另用高德 Web 端 JS API 显示道路底图、地点标记和路线轨迹。后端 `AMAP_WEB_SERVICE_KEY` 与前端 `VITE_AMAP_JS_API_KEY` 不是同一个 Key。根目录和前端的真实 `.env` 均受 Git 忽略，不能提交；只提交空值 `.env.example` 供同伴复制。
 
 启动后可访问：
 
@@ -142,7 +147,8 @@ VITE_USE_WORKFLOW_API=true
 ### API Key 安全边界
 
 - 高德 Web Service Key 只放在后端根目录 `.env`。
-- 不要把 Key 写入 `frontend/.env`、前端代码、截图或提交到 Git。
+- 高德 Web端（JS API）Key 和安全密钥只放在本地 `frontend/.env`。
+- 两类 Key 用途不同，均不得写入源码、截图或提交到 Git。
 - `.env` 使用本地副本；测试默认使用模拟高德响应，不需要真实 Key。
 
 ## 测试与质量
@@ -176,10 +182,13 @@ npm run build
 - [x] 执行事件与实际消费记录
 - [x] 单候选 Plan V2、V1/V2 Diff、接受与拒绝
 - [x] 计划费用、实际费用和版本历史基础总结
-- [ ] 自然语言具体起终点提取
-- [ ] 真实地图 Polyline 可视化
-- [ ] 自主多候选生成（T017）
-- [ ] 公网 HTTPS 演示地址
+- [x] 显式起终点输入与有限自然语言提取
+- [x] 高德道路底图、地点标记与真实路线 Polyline
+- [x] S1-T017 费用事件驱动的服务端重规划（单个确定性后缀候选、最多一次 V2）
+- [x] T018 显式多候选校验、最小扰动排序与选中 V2 签发
+- [ ] 服务端自主生成多个候选
+- [x] 公网 HTTPS API 健康检查
+- [ ] 公网 HTTPS 前端演示地址
 
 ### Sprint 2：多人和辅助体验
 
@@ -212,9 +221,10 @@ npm run build
 - [V2.3 项目规划书](doc/行知旅伴_旅行规划Agent_Scrum项目规划_V2.3.docx)
 - [V2.3 产品待办列表](doc/行知旅伴_V2.3_产品待办列表_含负责人.xlsx)
 - [V2.3 Sprint 1 待办列表](doc/行知旅伴_V2.3_Sprint1待办列表_含负责人.xlsx)
-- [API 合同与当前接口](doc/frontend_api_contract.md)
+- [API 合同与当前接口](frontend/src/api/API.md)
 - [部署说明](deploy/README.md)
 - [Sprint 1 验收记录](docs/testing/2026-08-25-wang-jingbo-sprint1-acceptance.md)
+- [S1-T017 事件驱动重规划验收](docs/testing/evidence/s1_t017/clean-slice-acceptance.md)
 - [Sprint 1 评审记录](docs/reviews/2026-08-25-wang-jingbo-sprint1-review.md)
 - [Sprint 1 追溯入口](docs/traceability/sprint1/wang_jingbo_sprint1.md)
 - [AI 使用说明](doc/ai_usage.md)
@@ -224,9 +234,10 @@ npm run build
 当前版本明确保留以下边界：
 
 - 高德负责地点与路线事实，行知旅伴服务端负责确定性约束校验；不把高德描述成整套旅行计划生成器。
-- 自然语言具体起终点提取、真实地图 Polyline、自主多候选 T017 和公网地址仍未完成。
+- 起终点只支持显式输入和有限自然语言表达，复杂自由表达仍需用户确认。
+- Sprint 1 只支持 `EXPENSE_CHANGE` 发起一次服务端重规划评估；T018 能校验并排序调用方显式提交的多个候选，但 T017 当前只提供一个确定性候选，服务端自主多候选生成仍未完成。
 - 2—3 人模式属于 Sprint 2，不把当前单人模式描述为多人公平推荐。
-- 当前没有公网在线体验地址，因此不提供在线体验按钮或远端 CI 徽章。
+- 公网 HTTPS API 已可访问，但仓库配置中的 Web 地址当前没有可用前端服务，因此暂不提供在线体验按钮或远端 CI 徽章。
 
 明确不做：持续 GPS、视频剪辑、全国无障碍保证、优惠券/跑腿，以及第三方批量抓取。
 

@@ -22,8 +22,14 @@ def get_location_service(request: Request) -> AmapLocationService:
 
 
 @router.get("/health", summary="服务健康检查", description="确认本地接口服务是否正常运行。")
-async def health() -> ApiResponse[dict[str, str]]:
-    return ApiResponse(data={"status": "UP"})
+async def health(request: Request) -> ApiResponse[dict[str, str]]:
+    settings = request.app.state.settings
+    return ApiResponse(
+        data={
+            "status": "UP",
+            "buildSha": settings.build_sha or "unavailable",
+        }
+    )
 
 
 @router.post("/cities/resolve", summary="解析目标城市", description="根据国内城市名称解析城市编码和中心坐标。")

@@ -21,11 +21,13 @@ from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.domain.models import ErrorResponse
 from app.infrastructure.amap import AmapClient
+from app.infrastructure.bailian import BailianTripDraftExtractor
 from app.infrastructure.cache import SqliteProviderCache
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.infrastructure.trusted_planning_store import SqliteTrustedPlanningRepository
 from app.infrastructure.workflow_store import SqliteWorkflowRepository
 from app.schemas.validation_error import TripSchemaError, issues_from_pydantic
+from app.services.replanning import SuffixPlanner
 
 
 SWAGGER_CHINESE_SCRIPT = """
@@ -116,9 +118,12 @@ def create_app(
     plan_service: PlanVersionService | None = None,
     workflow_service: WorkflowService | None = None,
     planning_boundary_service: PlanningBoundaryService | None = None,
+    suffix_planner: SuffixPlanner | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     managed_client: AmapClient | None = None
+    managed_bailian_extractor: BailianTripDraftExtractor | None = None
+    owns_location_service = service is None
 
     if service is None:
         managed_client = AmapClient(
@@ -131,6 +136,19 @@ def create_app(
             cache=SqliteProviderCache(resolved_settings.amap_cache_db_path),
             place_ttl_seconds=resolved_settings.amap_place_cache_ttl_seconds,
             route_ttl_seconds=resolved_settings.amap_route_cache_ttl_seconds,
+        )
+
+    bailian_api_key = (
+        resolved_settings.bailian_api_key.get_secret_value().strip()
+        if resolved_settings.bailian_api_key is not None
+        else ""
+    )
+    if owns_location_service and bailian_api_key:
+        managed_bailian_extractor = BailianTripDraftExtractor(
+            api_key=bailian_api_key,
+            base_url=resolved_settings.bailian_base_url,
+            model=resolved_settings.bailian_model,
+            timeout_seconds=resolved_settings.bailian_request_timeout_seconds,
         )
 
     if workflow_service is None:
@@ -159,6 +177,7 @@ def create_app(
             trust_repository=SqliteTrustedPlanningRepository(
                 planning_database_path
             ),
+            suffix_planner=suffix_planner,
         )
 
     @asynccontextmanager
@@ -166,6 +185,8 @@ def create_app(
         yield
         if managed_client is not None:
             await managed_client.close()
+        if managed_bailian_extractor is not None:
+            await managed_bailian_extractor.close()
 
     app = FastAPI(
         title="行知旅伴——张琪 Sprint 1 接口",
@@ -196,7 +217,11 @@ def create_app(
         allow_headers=["Content-Type"],
     )
     app.state.location_service = service
-    app.state.trip_draft_service = TripDraftParserService(service)
+    app.state.settings = resolved_settings
+    app.state.trip_draft_service = TripDraftParserService(
+        service,
+        llm_extractor=managed_bailian_extractor,
+    )
     app.state.plan_version_service = plan_service
     app.state.workflow_service = workflow_service
     app.state.planning_boundary_service = planning_boundary_service
@@ -208,7 +233,10 @@ def create_app(
 
     @app.get("/health", tags=["系统"], summary="健康检查")
     async def health() -> dict[str, str]:
-        return {"status": "ok"}
+        return {
+            "status": "ok",
+            "buildSha": resolved_settings.build_sha or "unavailable",
+        }
 
     @app.get("/docs", include_in_schema=False)
     async def chinese_api_docs() -> HTMLResponse:

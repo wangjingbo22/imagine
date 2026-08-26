@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from copy import deepcopy
+from datetime import datetime
+from hashlib import sha256
+import json
 from typing import Any, Literal
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
+
+from pydantic import ValidationError
 
 from app.application.plan_service import PlanVersionService
 from app.application.workflow_service import WorkflowService
@@ -11,22 +18,50 @@ from app.infrastructure.trusted_planning_store import (
     TrustedPlanningStoreError,
     proposal_digest,
 )
-from app.schemas.plan import PlanVersion, ProposedPlanVersion
-from app.schemas.planning import RegisteredReplan, ReplanGenerationRequest
-from app.services.planning.models import CandidatePlanRequest
+from app.schemas.execution import ExecutionEvent, ExecutionEventType
+from app.schemas.plan import PlanVersion, PlanVersionStatus, ProposedPlanVersion
+from app.schemas.planning import (
+    EventDrivenReplanRequest,
+    RegisteredReplan,
+    ReplanGenerationRequest,
+)
+from app.services.planning.models import (
+    CandidatePlan,
+    CandidatePlanRequest,
+    CandidatePlanReview,
+    CandidateReviewConfirmationRequest,
+    CandidateReviewItem,
+    CandidateTaskFact,
+)
 from app.services.planning.planner import (
     CandidatePlanInputError,
     CandidatePlanRejected,
     candidate_to_proposed_plan_version_v2,
+    candidate_to_proposed_plan_version,
     generate_candidate_plan,
-    generate_proposed_plan_version,
 )
 from app.services.planning.replanning_adapter import T011ReplanCandidateValidator
+from app.services.replanning import (
+    DeterministicRetainedSuffixPlanner,
+    SuffixPlanner,
+    SuffixPlanningInput,
+)
 from app.services.replanning.models import NoFeasibleReplan, ReplanCandidate
 from app.services.replanning.selector import (
     MinimumDisruptionSelector,
     ReplanningContractError,
 )
+
+
+class _InMemoryTrustedCandidateFacts:
+    def __init__(self, records: Mapping[UUID, CandidatePlanRequest]) -> None:
+        self._records = dict(records)
+
+    def get_candidate_request(
+        self,
+        candidate_plan_id: UUID,
+    ) -> CandidatePlanRequest | None:
+        return self._records.get(candidate_plan_id)
 
 
 class PlanningBoundaryService:
@@ -38,10 +73,14 @@ class PlanningBoundaryService:
         plan_service: PlanVersionService,
         workflow_service: WorkflowService,
         trust_repository: SqliteTrustedPlanningRepository,
+        suffix_planner: SuffixPlanner | None = None,
     ) -> None:
         self.plan_service = plan_service
         self.workflow_service = workflow_service
         self.trust_repository = trust_repository
+        self.suffix_planner = suffix_planner or DeterministicRetainedSuffixPlanner()
+        if not isinstance(self.suffix_planner, SuffixPlanner):
+            raise TypeError("suffix_planner must implement SuffixPlanner")
 
     @staticmethod
     def _require_trip_id(trip_id: UUID, request: CandidatePlanRequest) -> None:
@@ -136,6 +175,15 @@ class PlanningBoundaryService:
                     message="已存在的 PlanVersion 与本次服务端生成提案摘要不一致",
                     http_status=409,
                 ) from error
+            if (
+                proposal.version == 2
+                and stored.status is not PlanVersionStatus.PROPOSED
+            ):
+                raise AppError(
+                    code="REPLAN_S1_VERSION_LIMIT",
+                    message="Sprint 1 only supports one Plan V2 adjustment.",
+                    http_status=409,
+                ) from error
             return stored
 
     def generate_v1(
@@ -150,11 +198,33 @@ class PlanningBoundaryService:
         )
         self.workflow_service.require_confirmed_trip(trip_id, request.trip)
         try:
-            proposal = generate_proposed_plan_version(request)
+            candidate = generate_candidate_plan(request)
         except CandidatePlanInputError as error:
             raise self._planner_error(error) from error
         except CandidatePlanRejected as error:
             raise self._rejected_error(error) from error
+
+        if candidate.warnings:
+            review = self._stage_review(candidate, request)
+            raise AppError(
+                code="CANDIDATE_CONFIRMATION_REQUIRED",
+                message="候选计划包含需要用户确认的价格、设施或来源事实",
+                http_status=422,
+                errors=[
+                    {
+                        "code": "CANDIDATE_CONFIRMATION_REQUIRED",
+                        "field": "candidate.metrics.validationStatus",
+                        "message": "only a complete PASS candidate can become ProposedPlanVersion",
+                        "reviewId": review.review_id,
+                        "review": review.model_dump(mode="json", by_alias=True),
+                    }
+                ],
+            )
+
+        try:
+            proposal = candidate_to_proposed_plan_version(candidate, request)
+        except CandidatePlanInputError as error:
+            raise self._planner_error(error) from error
 
         try:
             self.trust_repository.stage_candidate(
@@ -173,23 +243,377 @@ class PlanningBoundaryService:
             raise self._trust_error(error) from error
         return stored
 
-    def generate_v2(
+    def get_review(self, trip_id: UUID, review_id: str) -> CandidatePlanReview:
+        row = self.trust_repository.get_review(review_id)
+        if row is None:
+            raise AppError(
+                code="PLANNING_REVIEW_NOT_FOUND",
+                message="未找到候选计划确认记录",
+                http_status=404,
+            )
+        if row["trip_id"] != str(trip_id):
+            raise AppError(
+                code="PLANNING_REVIEW_SCOPE_MISMATCH",
+                message="候选计划确认记录不属于当前 Trip",
+                http_status=409,
+            )
+        candidate = self._review_candidate(row)
+        return self._review_from_row(row, candidate)
+
+    def confirm_review(
         self,
         trip_id: UUID,
-        request: ReplanGenerationRequest,
+        review_id: str,
+        confirmation: CandidateReviewConfirmationRequest,
+    ) -> PlanVersion:
+        row = self.trust_repository.get_review(review_id)
+        if row is None:
+            raise AppError(
+                code="PLANNING_REVIEW_NOT_FOUND",
+                message="未找到候选计划确认记录",
+                http_status=404,
+            )
+        if row["trip_id"] != str(trip_id):
+            raise AppError(
+                code="PLANNING_REVIEW_SCOPE_MISMATCH",
+                message="候选计划确认记录不属于当前 Trip",
+                http_status=409,
+            )
+
+        confirmation_digest = sha256(
+            json.dumps(
+                confirmation.model_dump(mode="json", by_alias=True),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        if row["review_state"] == "CONFIRMED":
+            if row["confirmation_digest"] != confirmation_digest:
+                raise AppError(
+                    code="PLANNING_REVIEW_ALREADY_CONFIRMED",
+                    message="该候选已使用不同的确认内容完成签发",
+                    http_status=409,
+                )
+            assert row["issued_plan_id"]
+            return self.plan_service.get_plan_version(
+                trip_id,
+                UUID(row["issued_plan_id"]),
+            )
+
+        candidate = self._review_candidate(row)
+        request = self._review_request(row)
+        items = self._review_items(candidate, request)
+        expected_ids = {item.item_id for item in items}
+        supplied = {item.item_id: item for item in confirmation.confirmations}
+        if set(supplied) != expected_ids:
+            raise AppError(
+                code="PLANNING_REVIEW_INCOMPLETE",
+                message="必须逐项确认当前候选的全部未知事实",
+                http_status=422,
+                errors=[
+                    {
+                        "missingItemIds": sorted(expected_ids - set(supplied)),
+                        "unexpectedItemIds": sorted(set(supplied) - expected_ids),
+                    }
+                ],
+            )
+
+        confirmed_request = self._apply_confirmations(
+            request,
+            items,
+            supplied,
+            confirmed_at=datetime.fromisoformat(row["created_at"]),
+        )
+        try:
+            confirmed_candidate = generate_candidate_plan(confirmed_request)
+            proposal = candidate_to_proposed_plan_version(
+                confirmed_candidate,
+                confirmed_request,
+            )
+        except CandidatePlanInputError as error:
+            raise self._planner_error(error) from error
+        except CandidatePlanRejected as error:
+            raise self._rejected_error(error) from error
+
+        try:
+            self.trust_repository.stage_candidate(
+                plan=proposal,
+                request=confirmed_request,
+                boundary_kind="V1",
+                validation=self._proposal_validation(proposal),
+            )
+            stored = self._register_generated(proposal)
+            self.trust_repository.mark_issued(stored)
+            self.trust_repository.mark_review_confirmed(
+                review_id=review_id,
+                confirmation_digest=confirmation_digest,
+                confirmed_request=confirmed_request,
+                issued_plan_id=stored.plan_id,
+            )
+        except TrustedPlanningStoreError as error:
+            raise self._trust_error(error) from error
+        return stored
+
+    def _stage_review(
+        self,
+        candidate: CandidatePlan,
+        request: CandidatePlanRequest,
+    ) -> CandidatePlanReview:
+        review_id = str(
+            uuid5(
+                NAMESPACE_URL,
+                f"xingzhi:candidate-review:{request.trip.trip_id}:{candidate.candidate_id}",
+            )
+        )
+        try:
+            row = self.trust_repository.stage_review(
+                review_id=review_id,
+                request=request,
+                candidate=candidate,
+            )
+        except TrustedPlanningStoreError as error:
+            raise self._trust_error(error) from error
+        return self._review_from_row(row, candidate)
+
+    @staticmethod
+    def _review_candidate(row: dict[str, Any]) -> CandidatePlan:
+        try:
+            return CandidatePlan.model_validate_json(
+                row["candidate_json"], strict=True
+            )
+        except ValidationError as error:
+            raise AppError(
+                code="PLANNING_REVIEW_INVALID",
+                message="保存的候选计划确认记录无法通过严格校验",
+                http_status=409,
+            ) from error
+
+    @staticmethod
+    def _review_request(row: dict[str, Any]) -> CandidatePlanRequest:
+        try:
+            return CandidatePlanRequest.model_validate_json(
+                row["request_json"], strict=True
+            )
+        except ValidationError as error:
+            raise AppError(
+                code="PLANNING_REVIEW_INVALID",
+                message="保存的候选计划事实无法通过严格校验",
+                http_status=409,
+            ) from error
+
+    @classmethod
+    def _review_from_row(
+        cls,
+        row: dict[str, Any],
+        candidate: CandidatePlan,
+    ) -> CandidatePlanReview:
+        request = cls._review_request(row)
+        return CandidatePlanReview(
+            review_id=row["review_id"],
+            trip_id=row["trip_id"],
+            candidate_id=row["candidate_id"],
+            status=row["review_state"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            confirmed_at=(
+                datetime.fromisoformat(row["confirmed_at"])
+                if row["confirmed_at"]
+                else None
+            ),
+            items=cls._review_items(candidate, request),
+        )
+
+    @staticmethod
+    def _review_items(
+        candidate: CandidatePlan,
+        request: CandidatePlanRequest,
+    ) -> tuple[CandidateReviewItem, ...]:
+        tasks = {item.task_id: item for item in request.task_facts}
+        facility_labels = {
+            "ELEVATOR": "电梯",
+            "RAMP": "坡道",
+            "NURSING_ROOM": "母婴室",
+            "ACCESSIBLE_ENTRANCE": "无障碍入口",
+        }
+        output: list[CandidateReviewItem] = []
+        for warning in candidate.warnings:
+            task_id = next(
+                (
+                    candidate_task_id
+                    for candidate_task_id in sorted(tasks, key=len, reverse=True)
+                    if warning.reference_id.startswith(f"{candidate_task_id}.")
+                ),
+                "",
+            )
+            task = tasks.get(task_id)
+            title = task.title if task is not None else "行程"
+            facility_type = (
+                warning.reference_id.rsplit(".", 1)[-1]
+                if warning.code == "UNKNOWN_FACILITY"
+                else None
+            )
+            if warning.code == "UNKNOWN_PRICE":
+                kind = "地点费用" if warning.reference_id.endswith(".placePrice") else "交通费用"
+                label = f"{title} · {kind}"
+                value_type = "PRICE_CENTS"
+            elif warning.code == "UNKNOWN_FACILITY":
+                label = f"{title} · {facility_labels.get(facility_type or '', facility_type or '设施')}"
+                value_type = "FACILITY_STATUS"
+            else:
+                label = f"{title} · 数据来源"
+                value_type = "SOURCE_CONFIRMATION"
+            output.append(
+                CandidateReviewItem(
+                    item_id=f"{warning.code}:{warning.reference_id}",
+                    code=warning.code,
+                    reference_id=warning.reference_id,
+                    field=warning.field,
+                    label=label,
+                    value_type=value_type,
+                    facility_type=facility_type,
+                )
+            )
+        return tuple(output)
+
+    @staticmethod
+    def _apply_confirmations(
+        request: CandidatePlanRequest,
+        items: tuple[CandidateReviewItem, ...],
+        supplied: dict[str, Any],
+        *,
+        confirmed_at: datetime,
+    ) -> CandidatePlanRequest:
+        payload = deepcopy(request.model_dump(mode="json", by_alias=True))
+        task_by_id = {
+            item["taskId"]: item for item in payload["taskFacts"]
+        }
+        provenance = {
+            "provider": "AMAP",
+            "sourceStatus": "USER_CONFIRMED",
+            "fetchedAt": confirmed_at.isoformat(),
+            "isStale": False,
+        }
+        for item in items:
+            value = supplied[item.item_id]
+            task_id = next(
+                (
+                    candidate_task_id
+                    for candidate_task_id in sorted(task_by_id, key=len, reverse=True)
+                    if item.reference_id.startswith(f"{candidate_task_id}.")
+                ),
+                "",
+            )
+            task = task_by_id.get(task_id)
+            if item.value_type == "PRICE_CENTS":
+                if value.amount_cents is None or value.facility_status is not None or value.source_confirmed is not None:
+                    raise AppError(
+                        code="PLANNING_REVIEW_VALUE_INVALID",
+                        message=f"{item.label} 必须填写确认金额（免费填 0）",
+                        http_status=422,
+                    )
+                assert task is not None
+                target = task["place"] if item.reference_id.endswith(".placePrice") else task["route"]
+                target["priceReference"]["amountCents"] = value.amount_cents
+                target["priceReference"]["provenance"] = provenance
+                task["note"] = task["note"].replace(
+                    "仅累计 Provider 已返回的金额，未知价格仍需确认",
+                    "费用已由用户确认并经服务端复算",
+                )
+            elif item.value_type == "FACILITY_STATUS":
+                if value.facility_status is None or value.amount_cents is not None or value.source_confirmed is not None:
+                    raise AppError(
+                        code="PLANNING_REVIEW_VALUE_INVALID",
+                        message=f"{item.label} 必须确认存在或不存在",
+                        http_status=422,
+                    )
+                assert task is not None and item.facility_type is not None
+                matches = [
+                    fact for fact in task["route"]["facilityEvidence"]
+                    if fact["facilityType"] == item.facility_type
+                ]
+                if len(matches) > 1:
+                    raise AppError(
+                        code="PLANNING_REVIEW_REFERENCE_INVALID",
+                        message=f"{item.label} 无法绑定唯一设施证据",
+                        http_status=409,
+                    )
+                if not matches:
+                    fact = {
+                        "facilityType": item.facility_type,
+                        "label": item.label.rsplit(" · ", 1)[-1],
+                        "status": value.facility_status,
+                        "message": value.note or "用户现场确认",
+                        "referenceId": f"user-confirmed:{item.reference_id}",
+                        "provenance": provenance,
+                    }
+                    task["route"]["facilityEvidence"].append(fact)
+                else:
+                    matches[0]["status"] = value.facility_status
+                    matches[0]["message"] = value.note or "用户现场确认"
+                    matches[0]["provenance"] = provenance
+            else:
+                if value.source_confirmed is not True or value.amount_cents is not None or value.facility_status is not None:
+                    raise AppError(
+                        code="PLANNING_REVIEW_VALUE_INVALID",
+                        message=f"{item.label} 必须明确确认来源",
+                        http_status=422,
+                    )
+                if item.reference_id == "trip.startLocation":
+                    payload["startLocation"]["provenance"] = provenance
+                elif item.reference_id == "trip.endLocation":
+                    payload["endLocation"]["provenance"] = provenance
+                else:
+                    assert task is not None
+                    target = task["place"] if item.reference_id.endswith(".placePrice") else task["route"]
+                    target["provenance"] = provenance
+        try:
+            return CandidatePlanRequest.model_validate_json(
+                json.dumps(payload, ensure_ascii=False), strict=True
+            )
+        except ValidationError as error:
+            raise AppError(
+                code="PLANNING_REVIEW_RESULT_INVALID",
+                message="用户确认后的候选事实未通过严格契约校验",
+                http_status=422,
+            ) from error
+
+    def generate_v2_from_events(
+        self,
+        trip_id: UUID,
+        request: EventDrivenReplanRequest,
     ) -> RegisteredReplan:
+        current, events = self._load_current_v1_context(trip_id)
+        current_request = self._load_current_candidate_request(trip_id, current)
+        candidate_request, frozen_task_ids = self._event_driven_candidate_request(
+            current=current,
+            current_request=current_request,
+            events=events,
+        )
+        return self._select_and_register_v2(
+            trip_id=trip_id,
+            current=current,
+            events=events,
+            reason=request.reason,
+            locked_task_ids=frozen_task_ids,
+            candidate_inputs=((candidate_request, 0),),
+        )
+
+    def _load_current_v1_context(
+        self,
+        trip_id: UUID,
+    ) -> tuple[PlanVersion, tuple[ExecutionEvent, ...]]:
         state = self.plan_service.get_trip_state(trip_id)
         current = state.current_plan
         if current is None:
             raise AppError(
                 code="REPLAN_CURRENT_PLAN_REQUIRED",
-                message="生成 Plan V2 前必须存在 CURRENT PlanVersion",
+                message="A CURRENT PlanVersion is required before Plan V2 replanning.",
                 http_status=409,
             )
         if current.version != 1:
             raise AppError(
                 code="REPLAN_S1_VERSION_LIMIT",
-                message="Sprint 1 仅支持从服务端签发的 CURRENT Plan V1 生成一次 V2",
+                message="Sprint 1 only supports replanning from CURRENT Plan V1.",
                 http_status=409,
             )
         try:
@@ -200,19 +624,301 @@ class PlanningBoundaryService:
             )
         except TrustedPlanningStoreError as error:
             raise self._trust_error(error) from error
+        return current, tuple(self.workflow_service.list_events(trip_id))
 
-        events = tuple(self.workflow_service.list_events(trip_id))
+    def _load_current_candidate_request(
+        self,
+        trip_id: UUID,
+        current: PlanVersion,
+    ) -> CandidatePlanRequest:
+        try:
+            facts = self.trust_repository.get_candidate_request(current.plan_id)
+        except TrustedPlanningStoreError as error:
+            raise self._trust_error(error) from error
+        if facts is None or facts.trip.trip_id != trip_id:
+            raise AppError(
+                code="PLANNING_FACTS_INVALID",
+                message="CURRENT Plan V1 is missing trusted CandidatePlanRequest facts.",
+                http_status=409,
+            )
+        self._require_current_request_matches_plan(current, facts)
+        return facts
+
+    @staticmethod
+    def _require_current_request_matches_plan(
+        current: PlanVersion,
+        request: CandidatePlanRequest,
+    ) -> None:
+        plan_tasks = tuple(current.days[0].tasks)
+        fact_ids = tuple(fact.task_id for fact in request.task_facts)
+        plan_ids = tuple(task.task_id for task in plan_tasks)
+        fact_orders = tuple(fact.order for fact in request.task_facts)
+        plan_orders = tuple(task.order for task in plan_tasks)
+        if fact_ids != plan_ids or fact_orders != plan_orders:
+            raise AppError(
+                code="REPLAN_CURRENT_FACTS_MISMATCH",
+                message="CURRENT Plan V1 tasks do not match trusted planning facts.",
+                http_status=409,
+                errors=[
+                    {
+                        "planTaskIds": list(plan_ids),
+                        "factTaskIds": list(fact_ids),
+                    }
+                ],
+            )
+
+    def _event_driven_candidate_request(
+        self,
+        *,
+        current: PlanVersion,
+        current_request: CandidatePlanRequest,
+        events: Sequence[ExecutionEvent],
+    ) -> tuple[CandidatePlanRequest, tuple[str, ...]]:
+        self._require_current_request_matches_plan(current, current_request)
+        tasks = tuple(current.days[0].tasks)
+        task_index = {task.task_id: index for index, task in enumerate(tasks)}
+        prefix_length, actual_spent_cents = self._project_event_prefix(
+            current=current,
+            events=events,
+            task_index=task_index,
+        )
+        if prefix_length >= len(tasks):
+            raise AppError(
+                code="REPLAN_SUFFIX_EMPTY",
+                message="No unfinished suffix remains for S1-T017 replanning.",
+                http_status=409,
+            )
+
+        frozen_task_ids = tuple(task.task_id for task in tasks[:prefix_length])
+        suffix_facts = tuple(current_request.task_facts[prefix_length:])
+        planned_suffix = self._plan_suffix(
+            SuffixPlanningInput(
+                task_facts=suffix_facts,
+                frozen_task_ids=frozen_task_ids,
+                actual_spent_cents=actual_spent_cents,
+            ),
+            original_suffix=suffix_facts,
+            start_order=prefix_length + 1,
+        )
+        payload = current_request.model_dump(mode="json", by_alias=True)
+        payload["taskFacts"] = [
+            item.model_dump(mode="json", by_alias=True)
+            for item in (
+                *current_request.task_facts[:prefix_length],
+                *planned_suffix,
+            )
+        ]
+        try:
+            candidate_request = CandidatePlanRequest.model_validate_json(
+                json.dumps(payload, ensure_ascii=False),
+                strict=True,
+            )
+        except ValidationError as error:
+            raise AppError(
+                code="REPLAN_SUFFIX_PLANNER_INVALID",
+                message="Suffix planner output did not produce a valid CandidatePlanRequest.",
+                http_status=422,
+                errors=[{"path": "taskFacts", "message": str(error)}],
+            ) from error
+        return candidate_request, frozen_task_ids
+
+    @staticmethod
+    def _project_event_prefix(
+        *,
+        current: PlanVersion,
+        events: Sequence[ExecutionEvent],
+        task_index: Mapping[str, int],
+    ) -> tuple[int, int]:
+        if not events:
+            raise AppError(
+                code="REPLAN_EVENTS_REQUIRED",
+                message="Event-driven replanning requires at least one execution event.",
+                http_status=409,
+            )
+
+        frozen_indexes: list[int] = []
+        expense_task_ids: set[str] = set()
+        completed_task_ids: set[str] = set()
+        actual_spent_cents = 0
+        for index, event in enumerate(events):
+            if event.trip_id != current.trip_snapshot.trip_id:
+                raise AppError(
+                    code="REPLAN_EVENT_TRIP_MISMATCH",
+                    message="Execution event belongs to another Trip.",
+                    http_status=409,
+                    errors=[{"path": f"events[{index}].tripId"}],
+                )
+            if event.plan_version_id != current.plan_id:
+                raise AppError(
+                    code="REPLAN_EVENT_PLAN_MISMATCH",
+                    message="Execution event does not belong to CURRENT Plan V1.",
+                    http_status=409,
+                    errors=[{"path": f"events[{index}].planVersionId"}],
+                )
+            if event.task_id not in task_index:
+                raise AppError(
+                    code="REPLAN_EVENT_TASK_NOT_FOUND",
+                    message="Execution event task is not in CURRENT Plan V1.",
+                    http_status=409,
+                    errors=[{"path": f"events[{index}].taskId"}],
+                )
+            if event.event_type is ExecutionEventType.EXPENSE:
+                if event.amount_cents is None:
+                    raise AppError(
+                        code="REPLAN_EXPENSE_AMOUNT_REQUIRED",
+                        message="EXPENSE events must include amountCents.",
+                        http_status=409,
+                    )
+                expense_task_ids.add(event.task_id)
+                actual_spent_cents += event.amount_cents
+            elif event.event_type is ExecutionEventType.COMPLETE:
+                completed_task_ids.add(event.task_id)
+                frozen_indexes.append(task_index[event.task_id])
+            elif event.event_type in {ExecutionEventType.START, ExecutionEventType.SKIP}:
+                frozen_indexes.append(task_index[event.task_id])
+
+        missing_expense = tuple(
+            sorted(completed_task_ids - expense_task_ids, key=task_index.__getitem__)
+        )
+        if missing_expense:
+            raise AppError(
+                code="REPLAN_EXPENSE_INCOMPLETE",
+                message="Every COMPLETE task must have an explicit EXPENSE event.",
+                http_status=409,
+                errors=[{"taskIds": list(missing_expense)}],
+            )
+
+        if not expense_task_ids:
+            raise AppError(
+                code="REPLAN_EXPENSE_REQUIRED",
+                message="EXPENSE_CHANGE replanning requires an EXPENSE event.",
+                http_status=409,
+            )
+
+        prefix_length = max(frozen_indexes) + 1 if frozen_indexes else 0
+        return prefix_length, actual_spent_cents
+
+    def _plan_suffix(
+        self,
+        planning_input: SuffixPlanningInput,
+        *,
+        original_suffix: Sequence[CandidateTaskFact],
+        start_order: int,
+    ) -> tuple[CandidateTaskFact, ...]:
+        try:
+            planned = self.suffix_planner.plan_suffix(planning_input)
+        except Exception as error:
+            raise AppError(
+                code="REPLAN_SUFFIX_PLANNER_FAILED",
+                message="Suffix planner failed while producing a candidate suffix.",
+                http_status=422,
+            ) from error
+        return self._normalize_suffix_facts(
+            planned,
+            original_suffix=original_suffix,
+            frozen_task_ids=planning_input.frozen_task_ids,
+            start_order=start_order,
+        )
+
+    @classmethod
+    def _normalize_suffix_facts(
+        cls,
+        planned: object,
+        *,
+        original_suffix: Sequence[CandidateTaskFact],
+        frozen_task_ids: Sequence[str],
+        start_order: int,
+    ) -> tuple[CandidateTaskFact, ...]:
+        if not isinstance(planned, Sequence) or isinstance(planned, (str, bytes)):
+            raise cls._suffix_planner_invalid(
+                "suffix",
+                "Suffix planner must return a sequence of CandidateTaskFact objects.",
+            )
+        if len(planned) != len(original_suffix):
+            raise cls._suffix_planner_invalid(
+                "suffix",
+                "Suffix planner must return exactly the unfinished suffix length.",
+            )
+
+        frozen = set(frozen_task_ids)
+        original_order_by_task = {
+            fact.task_id: fact.order for fact in original_suffix
+        }
+        seen: set[str] = set()
+        output: list[CandidateTaskFact] = []
+        for offset, item in enumerate(planned):
+            fact = cls._strict_task_fact(item, path=f"suffix[{offset}]")
+            expected_order = start_order + offset
+            if fact.order != expected_order:
+                raise cls._suffix_planner_invalid(
+                    f"suffix[{offset}].order",
+                    "Suffix planner must preserve contiguous suffix order.",
+                )
+            if fact.task_id in frozen:
+                raise cls._suffix_planner_invalid(
+                    f"suffix[{offset}].taskId",
+                    "Suffix planner must not return frozen tasks.",
+                )
+            original_order = original_order_by_task.get(fact.task_id)
+            if original_order is not None and original_order != fact.order:
+                raise cls._suffix_planner_invalid(
+                    f"suffix[{offset}].taskId",
+                    "Existing suffix task ids cannot move across order slots.",
+                )
+            if fact.task_id in seen:
+                raise cls._suffix_planner_invalid(
+                    f"suffix[{offset}].taskId",
+                    "Suffix planner returned duplicate task ids.",
+                )
+            seen.add(fact.task_id)
+            output.append(fact)
+        return tuple(output)
+
+    @staticmethod
+    def _strict_task_fact(value: object, *, path: str) -> CandidateTaskFact:
+        try:
+            if not isinstance(value, CandidateTaskFact):
+                raise TypeError("expected CandidateTaskFact")
+            raw = value.model_dump_json(by_alias=True, warnings="error")
+            return CandidateTaskFact.model_validate_json(raw, strict=True)
+        except (AttributeError, TypeError, ValueError, ValidationError) as error:
+            raise PlanningBoundaryService._suffix_planner_invalid(
+                path,
+                str(error),
+            ) from error
+
+    @staticmethod
+    def _suffix_planner_invalid(path: str, message: str) -> AppError:
+        return AppError(
+            code="REPLAN_SUFFIX_PLANNER_INVALID",
+            message="Suffix planner returned invalid output.",
+            http_status=422,
+            errors=[{"path": path, "message": message}],
+        )
+
+    def _select_and_register_v2(
+        self,
+        *,
+        trip_id: UUID,
+        current: PlanVersion,
+        events: Sequence[ExecutionEvent],
+        reason: Any,
+        locked_task_ids: Sequence[str],
+        candidate_inputs: Sequence[tuple[CandidatePlanRequest, int]],
+    ) -> RegisteredReplan:
         candidates: list[ReplanCandidate] = []
+        candidate_requests: dict[UUID, CandidatePlanRequest] = {}
+        satisfaction_loss_by_plan_id: dict[UUID, int] = {}
         generation_failures: list[dict[str, Any]] = []
-        for index, candidate_input in enumerate(request.candidates):
-            self._require_trip_id(trip_id, candidate_input.request)
+        for index, (candidate_request, satisfaction_loss) in enumerate(candidate_inputs):
+            self._require_trip_id(trip_id, candidate_request)
             try:
-                generated = generate_candidate_plan(candidate_input.request)
+                generated = generate_candidate_plan(candidate_request)
                 proposal = candidate_to_proposed_plan_version_v2(
                     generated,
-                    candidate_input.request,
+                    candidate_request,
                     current,
-                    reason=request.reason,
+                    reason=reason,
                 )
             except CandidatePlanRejected as error:
                 generation_failures.append(
@@ -238,39 +944,34 @@ class PlanningBoundaryService:
                 )
                 continue
 
-            try:
-                self.trust_repository.stage_candidate(
-                    plan=proposal,
-                    request=candidate_input.request,
-                    boundary_kind="V2",
-                    validation=self._proposal_validation(proposal),
-                )
-            except TrustedPlanningStoreError as error:
-                raise self._trust_error(error) from error
+            candidate_requests[proposal.plan_id] = candidate_request
+            satisfaction_loss_by_plan_id[proposal.plan_id] = satisfaction_loss
             candidates.append(
                 ReplanCandidate(
                     plan=proposal,
-                    satisfaction_loss=candidate_input.satisfaction_loss,
+                    satisfaction_loss=satisfaction_loss,
                 )
             )
 
         if not candidates:
             raise AppError(
                 code="REPLAN_NO_FEASIBLE_CANDIDATE",
-                message="所有候选均未通过服务端 T011 校验",
+                message="No candidate passed server-side T011 validation.",
                 http_status=422,
                 errors=generation_failures,
             )
 
         selector = MinimumDisruptionSelector(
-            T011ReplanCandidateValidator(self.trust_repository)
+            T011ReplanCandidateValidator(
+                _InMemoryTrustedCandidateFacts(candidate_requests)
+            )
         )
         try:
             outcome = selector.select(
                 current_plan=current,
                 candidates=tuple(candidates),
                 events=events,
-                locked_task_ids=request.locked_task_ids,
+                locked_task_ids=locked_task_ids,
             )
         except ReplanningContractError as error:
             raise self._contract_error(error) from error
@@ -278,7 +979,7 @@ class PlanningBoundaryService:
         if isinstance(outcome, NoFeasibleReplan):
             raise AppError(
                 code="REPLAN_NO_FEASIBLE_CANDIDATE",
-                message="T018 未找到满足执行冻结前缀和 HARD 约束的候选",
+                message="T018 found no candidate satisfying frozen-prefix and HARD constraints.",
                 http_status=422,
                 errors=[
                     *generation_failures,
@@ -303,11 +1004,8 @@ class PlanningBoundaryService:
             if item.candidate_plan_id == selected_plan_id
         )
         assert assessment.modified_task_count is not None
-        selected_input = next(
-            item for item in candidates if item.plan.plan_id == selected_plan_id
-        )
-
-        stored = self._register_generated(outcome.selected_plan)
+        selected_request = candidate_requests[selected_plan_id]
+        selected_satisfaction_loss = satisfaction_loss_by_plan_id[selected_plan_id]
         selection_validation = {
             **self._proposal_validation(outcome.selected_plan),
             "selector": "T018_MINIMUM_DISRUPTION",
@@ -321,6 +1019,13 @@ class PlanningBoundaryService:
             ],
         }
         try:
+            self.trust_repository.stage_candidate(
+                plan=outcome.selected_plan,
+                request=selected_request,
+                boundary_kind="V2",
+                validation=selection_validation,
+            )
+            stored = self._register_generated(outcome.selected_plan)
             self.trust_repository.mark_issued(
                 stored,
                 validation=selection_validation,
@@ -331,10 +1036,29 @@ class PlanningBoundaryService:
         return RegisteredReplan(
             plan=stored,
             disruption_score=assessment.modified_task_count,
-            satisfaction_loss=selected_input.satisfaction_loss,
+            satisfaction_loss=selected_satisfaction_loss,
             frozen_task_ids=outcome.frozen_task_ids,
             assessments=outcome.assessments,
             validation_report=outcome.validation_report,
+        )
+
+    def generate_v2(
+        self,
+        trip_id: UUID,
+        request: ReplanGenerationRequest,
+    ) -> RegisteredReplan:
+        current, events = self._load_current_v1_context(trip_id)
+        candidate_inputs = tuple(
+            (candidate_input.request, candidate_input.satisfaction_loss)
+            for candidate_input in request.candidates
+        )
+        return self._select_and_register_v2(
+            trip_id=trip_id,
+            current=current,
+            events=events,
+            reason=request.reason,
+            locked_task_ids=request.locked_task_ids,
+            candidate_inputs=candidate_inputs,
         )
 
     def require_v1_confirmation(self, trip_id: UUID, plan_id: UUID) -> None:

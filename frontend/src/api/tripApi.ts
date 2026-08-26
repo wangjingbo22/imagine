@@ -3,6 +3,8 @@ import type {
   AddressResolution,
   AssistanceProfile,
   CandidatePlanRequest,
+  CandidatePlanReview,
+  CandidateReviewConfirmationInput,
   CityResolution,
   CityContext,
   ConstraintConfirmationResult,
@@ -26,6 +28,7 @@ import type {
   TripPlanState,
 } from '../domain/trip'
 import { request } from './client'
+import { createExpenseChangeReplanRequest } from '../services/executionReplan'
 
 export const USE_PLAN_VERSION_API =
   (import.meta.env.VITE_USE_PLAN_VERSION_API ?? 'true') === 'true'
@@ -94,6 +97,26 @@ export const tripApi = {
     )
   },
 
+  getPlanReview(tripId: string, reviewId: string) {
+    return request<CandidatePlanReview>(
+      `/api/v1/trips/${tripId}/plan-reviews/${reviewId}`,
+    )
+  },
+
+  confirmPlanReview(
+    tripId: string,
+    reviewId: string,
+    confirmations: CandidateReviewConfirmationInput[],
+  ) {
+    return request<StoredPlanVersion>(
+      `/api/v1/trips/${tripId}/plan-reviews/${reviewId}/confirm`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ schemaVersion: '1.0', confirmations }),
+      },
+    )
+  },
+
   getPlanningFacts(tripId: string) {
     return request<CandidatePlanRequest>(
       `/api/v1/trips/${tripId}/planning-facts`,
@@ -104,6 +127,13 @@ export const tripApi = {
     return request<RegisteredReplan>(`/api/v1/trips/${tripId}/replans`, {
       method: 'POST',
       body: JSON.stringify(input),
+    })
+  },
+
+  replanFromEvents(tripId: string) {
+    return request<RegisteredReplan>(`/api/v1/trips/${tripId}/replans/from-events`, {
+      method: 'POST',
+      body: JSON.stringify(createExpenseChangeReplanRequest()),
     })
   },
 

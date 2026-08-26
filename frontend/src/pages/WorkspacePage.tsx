@@ -2,19 +2,14 @@ import {
   ArrowRight,
   BadgeCheck,
   BusFront,
-  Camera,
   Check,
   CheckCircle2,
   ChevronDown,
   CircleDollarSign,
   Clock3,
-  Download,
-  FileVideo,
   Footprints,
-  Image,
   LoaderCircle,
   Layers3,
-  Map,
   MapPin,
   MessageSquareText,
   Navigation,
@@ -25,26 +20,25 @@ import {
   Send,
   Sparkles,
   Telescope,
-  Trash2,
-  Upload,
   Utensils,
-  Video,
   Wallet,
   X,
 } from 'lucide-react'
-import { type ChangeEvent, useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { tripApi, USE_PLAN_VERSION_API } from '../api/tripApi'
 import { AppShell } from '../components/AppShell'
+import { RouteOverview } from '../components/RouteOverview'
 import type {
   CandidatePlanRequest,
+  CandidatePlanReview,
+  CandidateReviewConfirmationInput,
   CreateSingleDayTrip,
   ExecutionEvent,
   PlanSnapshot,
   PlanningConstraint,
   PlanVersionDiff,
-  PlanVersionReason,
   Provenance,
   SourceStatus,
   StoredPlanVersion,
@@ -53,12 +47,20 @@ import type {
   TripSummary,
 } from '../domain/trip'
 import {
-  buildAmapReplanCandidate,
   loadAmapPlan,
   type AmapPlanResult,
   type LocationEvidence,
 } from '../services/amapPlan'
 import { compileAssistanceConstraints } from '../services/assistanceConstraints'
+import {
+  decideAndContinueExecution,
+  executionEventIdempotencyKey,
+  firstUnfinishedTaskIndex,
+  parseYuanAmountToCents,
+  plannedPlusFiftyYuan,
+  sprint1SummaryView,
+  submitTaskCompletionEvents,
+} from '../services/executionReplan'
 import { facilityEvidenceNeedsConfirmation } from '../services/routeRiskFacts'
 import { restoreDraftFromPlanningFacts } from '../services/planningFacts'
 import {
@@ -66,16 +68,9 @@ import {
   S1_REPLAN_LIMIT_MESSAGE,
 } from '../services/replanPolicy'
 
-type WorkspaceView = 'plan' | 'execute' | 'diff' | 'summary'
+const S1_EVENT_REPLAN_ONLY_MESSAGE = 'Sprint1仅支持实际消费变化触发V2'
 
-interface MediaAsset {
-  id: string
-  taskId: string
-  type: 'photo' | 'video'
-  name: string
-  dataUrl: string
-  createdAt: string
-}
+type WorkspaceView = 'plan' | 'execute' | 'diff' | 'summary'
 
 const views: Array<{ value: WorkspaceView; label: string }> = [
   { value: 'plan', label: '计划工作台' },
@@ -183,15 +178,6 @@ function describePlanningConstraint(constraint: PlanningConstraint) {
   }
 }
 
-function escapeHtml(value: string) {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;')
-}
-
 function toDisplayPlan(plan: StoredPlanVersion): PlanSnapshot {
   const coordinates: Array<[number, number]> = [
     [22, 71],
@@ -217,9 +203,12 @@ function toDisplayPlan(plan: StoredPlanVersion): PlanSnapshot {
       durationMinutes: task.durationMinutes,
       transport: task.transport,
       costCents: task.costCents,
-      priceKnown: !task.note.includes('未知价格仍需确认'),
+      priceKnown: true,
       walkMeters: task.walkMeters,
-      note: task.note,
+      note: task.note.replace(
+        '仅累计 Provider 已返回的金额，未知价格仍需确认',
+        '费用已由用户确认并经服务端复算',
+      ),
       status: index === 0 ? 'completed' : index === 1 ? 'current' : 'upcoming',
       coordinates: coordinates[index] ?? [50, 50],
     })),
@@ -269,7 +258,6 @@ export function WorkspacePage() {
   const [isPreparingV2, setIsPreparingV2] = useState(false)
   const [isDecidingV2, setIsDecidingV2] = useState(false)
   const [isWritingEvent, setIsWritingEvent] = useState(false)
-  const [advanceAfterDecision, setAdvanceAfterDecision] = useState(false)
   const [planLifecycleError, setPlanLifecycleError] = useState('')
   const [actualCost, setActualCost] = useState('0')
   const [currentTaskIndex, setCurrentTaskIndex] = useState(0)
@@ -282,12 +270,8 @@ export function WorkspacePage() {
   const [recommendationRound, setRecommendationRound] = useState(1)
   const [isRegenerating, setIsRegenerating] = useState(false)
   const [appliedFeedback, setAppliedFeedback] = useState<string[]>([])
-  const [executionFeedback, setExecutionFeedback] = useState('')
   const [executionAdjustmentCount, setExecutionAdjustmentCount] = useState(0)
   const [executionNotice, setExecutionNotice] = useState('')
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
-  const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([])
-  const [mediaError, setMediaError] = useState('')
   const [providerPlan, setProviderPlan] = useState<PlanSnapshot | null>(
     navigationState?.amapPlanResult?.plan ?? null,
   )
@@ -300,6 +284,11 @@ export function WorkspacePage() {
   const [planningIssue, setPlanningIssue] = useState(
     navigationState?.amapPlanResult?.planningIssue ?? null,
   )
+  const [candidateReview, setCandidateReview] = useState<CandidatePlanReview | null>(
+    navigationState?.amapPlanResult?.planningIssue?.review ?? null,
+  )
+  const [reviewValues, setReviewValues] = useState<Record<string, string>>({})
+  const [isConfirmingEvidence, setIsConfirmingEvidence] = useState(false)
   const [planningTripSnapshot, setPlanningTripSnapshot] = useState<
     CandidatePlanRequest['trip'] | StoredPlanVersion['tripSnapshot'] | null
   >(
@@ -336,12 +325,9 @@ export function WorkspacePage() {
       const skipped = state.events
         .filter((event) => event.eventType === 'SKIP')
         .map((event) => event.taskId)
-      const terminal = new Set([...completed, ...skipped])
-      const unfinishedIndex = display.tasks.findIndex(
-        (task) => !terminal.has(task.id),
-      )
+      const unfinishedIndex = firstUnfinishedTaskIndex(current, state.events)
       const nextIndex =
-        unfinishedIndex < 0 ? Math.max(0, display.tasks.length - 1) : unfinishedIndex
+        unfinishedIndex === null ? Math.max(0, display.tasks.length - 1) : unfinishedIndex
       setCompletedTaskIds([...new Set(completed)])
       setSkippedTaskIds([...new Set(skipped)])
       setActualSpentCents(
@@ -350,12 +336,13 @@ export function WorkspacePage() {
           .reduce((total, event) => total + (event.amountCents ?? 0), 0),
       )
       setCurrentTaskIndex(nextIndex)
-      const nextTask = unfinishedIndex < 0 ? null : display.tasks[nextIndex]
+      const nextTask = unfinishedIndex === null ? null : display.tasks[nextIndex]
       if (nextTask) {
         setActualCost(String(nextTask.costCents / 100))
       }
     }
-    if (state.tripStatus === 'COMPLETED') {
+    if (state.tripStatus === 'COMPLETED' ||
+        (state.currentPlan && firstUnfinishedTaskIndex(state.currentPlan, state.events) === null)) {
       setView('summary')
     }
   }, [])
@@ -397,11 +384,8 @@ export function WorkspacePage() {
       setSkippedTaskIds([...new Set(skipped)])
       setActualSpentCents(response.data.actualBudget?.actualSpentCents ?? 0)
       if (stored) {
-        const resolved = new Set([...completed, ...skipped])
-        const nextIndex = stored.days[0].tasks.findIndex(
-          (task) => !resolved.has(task.taskId),
-        )
-        const restoredIndex = nextIndex >= 0
+        const nextIndex = firstUnfinishedTaskIndex(stored, response.data.events)
+        const restoredIndex = nextIndex !== null
           ? nextIndex
           : Math.max(0, stored.days[0].tasks.length - 1)
         setCurrentTaskIndex(restoredIndex)
@@ -462,6 +446,7 @@ export function WorkspacePage() {
       setCandidateRequest(result.candidateRequest)
       setPlanningTripSnapshot(result.candidateRequest.trip)
       setPlanningIssue(result.planningIssue)
+      setCandidateReview(result.planningIssue?.review ?? null)
       setPersistedPlanId(result.registeredPlan?.planId ?? null)
       setLocationEvidenceError('')
     }).catch((error: unknown) => {
@@ -514,23 +499,30 @@ export function WorkspacePage() {
     )
   }
   const activePlan = availablePlan
+  const serverPlanReady = Boolean(persistedPlanId) &&
+    activePlan.validationStatus === 'PASS' &&
+    !planningIssue
+  const hasIssuedPassPlan = serverPlanReady
   const remainingBudgetCents = Math.max(0, budgetCents - activePlan.totalCostCents)
   const budgetUsagePercent = budgetCents > 0
     ? Math.min(100, Math.round(activePlan.totalCostCents / budgetCents * 100))
     : 0
-  const unknownPriceCount = locationEvidence
+  const unknownPriceCount = hasIssuedPassPlan ? 0 : locationEvidence
     ? locationEvidence.places.filter((place) => place.priceReference.amountCents === null).length +
       locationEvidence.routes.filter((route) => route.priceReference.amountCents === null).length
     : activePlan.tasks.filter((task) => task.priceKnown === false).length
   const currentTask = activePlan.tasks[currentTaskIndex]
-  const nextTask = activePlan.tasks[currentTaskIndex + 1]
-  const selectedTask = activePlan.tasks.find((task) => task.id === selectedTaskId)
-  const actualExpenseCents = Math.max(0, Number(actualCost) || 0) * 100
+  const nextTask = activePlan.tasks.find(
+    (task) => task.order > (currentTask?.order ?? 0),
+  )
+  const parsedActualExpenseCents = parseYuanAmountToCents(actualCost)
+  const actualExpenseCents = parsedActualExpenseCents ?? 0
   const expenseDeltaCents = actualExpenseCents - (currentTask?.costCents ?? 0)
   const expenseDifferenceLabel =
     expenseDeltaCents === 0
       ? '实际消费与计划一致'
       : `比计划${expenseDeltaCents > 0 ? '多花' : '少花'} ${formatMoney(Math.abs(expenseDeltaCents))}`
+  const summaryView = summary ? sprint1SummaryView(summary, formatMoney) : null
   const executionProgress = Math.round(
     ((completedTaskIds.length + skippedTaskIds.length) / activePlan.tasks.length) * 100,
   )
@@ -579,13 +571,10 @@ export function WorkspacePage() {
     (route) => route.facilityEvidence,
   ) ?? []
   const facilityEvidence = routeFacilityEvidence
-  const facilityNeedsConfirmation = Boolean(locationEvidence) && (
+  const facilityNeedsConfirmation = !hasIssuedPassPlan && Boolean(locationEvidence) && (
     facilityEvidence.length === 0 ||
     facilityEvidence.some(facilityEvidenceNeedsConfirmation)
   )
-  const serverPlanReady = Boolean(persistedPlanId) &&
-    activePlan.validationStatus === 'PASS' &&
-    !planningIssue
   const canCreatePlanV2 = canRequestS1PlanV2(
     storedCurrentPlan?.version ?? null,
     executionAdjustmentCount,
@@ -647,6 +636,7 @@ export function WorkspacePage() {
       setCandidateRequest(result.candidateRequest)
       setPlanningTripSnapshot(result.candidateRequest.trip)
       setPlanningIssue(result.planningIssue)
+      setCandidateReview(result.planningIssue?.review ?? null)
       setPersistedPlanId(result.registeredPlan?.planId ?? null)
       setRecommendationRound((current) => current + 1)
       setAppliedFeedback(feedback)
@@ -671,14 +661,13 @@ export function WorkspacePage() {
     if (!tripId) {
       throw new Error('当前页面缺少 tripId。')
     }
-    const amountSuffix = eventType === 'EXPENSE' ? `:${amountCents ?? 0}` : ''
     await tripApi.createExecutionEvent(tripId, {
       schemaVersion: '1.0',
       taskId,
       planVersionId: planId,
       eventType,
       amountCents,
-      idempotencyKey: `${planId}:${taskId}:${eventType}${amountSuffix}`,
+      idempotencyKey: executionEventIdempotencyKey(planId, taskId, eventType, amountCents),
       occurredAt: new Date().toISOString(),
     })
     const restored = await tripApi.getTrip(tripId)
@@ -722,7 +711,13 @@ export function WorkspacePage() {
       const restored = await tripApi.getTrip(tripId)
       if (restored.data.currentPlan) {
         applyTripState(restored.data)
-        await startTask(restored.data.currentPlan, 0)
+        const firstIndex = firstUnfinishedTaskIndex(
+          restored.data.currentPlan,
+          restored.data.events,
+        )
+        if (firstIndex !== null) {
+          await startTask(restored.data.currentPlan, firstIndex)
+        }
       }
       setView('execute')
     } catch (error) {
@@ -732,11 +727,76 @@ export function WorkspacePage() {
     }
   }
 
-  async function preparePlanV2(
-    reason: Exclude<PlanVersionReason, 'INITIAL_PLAN'>,
-    feedback: string,
-    lockedThroughIndex: number,
-  ) {
+  async function handleConfirmEvidence() {
+    if (!tripId || !candidateReview) return
+    const confirmations: CandidateReviewConfirmationInput[] = []
+    for (const item of candidateReview.items) {
+      const raw = reviewValues[item.itemId]?.trim() ?? ''
+      if (!raw) {
+        setPlanLifecycleError(`请先完成“${item.label}”的确认。`)
+        return
+      }
+      if (item.valueType === 'PRICE_CENTS') {
+        const amountYuan = Number(raw)
+        if (!Number.isFinite(amountYuan) || amountYuan < 0) {
+          setPlanLifecycleError(`“${item.label}”金额必须是不小于 0 的数字。`)
+          return
+        }
+        confirmations.push({
+          itemId: item.itemId,
+          amountCents: Math.round(amountYuan * 100),
+          facilityStatus: null,
+          sourceConfirmed: null,
+          note: amountYuan === 0 ? '用户确认为免费或无额外费用' : '用户确认金额',
+        })
+      } else if (item.valueType === 'FACILITY_STATUS') {
+        if (raw !== 'PASS' && raw !== 'FAIL') {
+          setPlanLifecycleError(`请确认“${item.label}”存在或不存在。`)
+          return
+        }
+        confirmations.push({
+          itemId: item.itemId,
+          amountCents: null,
+          facilityStatus: raw,
+          sourceConfirmed: null,
+          note: raw === 'PASS' ? '用户确认设施存在' : '用户确认设施不存在',
+        })
+      } else {
+        confirmations.push({
+          itemId: item.itemId,
+          amountCents: null,
+          facilityStatus: null,
+          sourceConfirmed: raw === 'CONFIRMED',
+          note: '用户确认数据来源',
+        })
+      }
+    }
+
+    setIsConfirmingEvidence(true)
+    setPlanLifecycleError('')
+    try {
+      const response = await tripApi.confirmPlanReview(
+        tripId,
+        candidateReview.reviewId,
+        confirmations,
+      )
+      const stored = response.data
+      setProviderPlan(toDisplayPlan(stored))
+      setPersistedPlanId(stored.planId)
+      setPlanningTripSnapshot(stored.tripSnapshot)
+      setPlanningIssue(null)
+      setCandidateReview(null)
+      const facts = await tripApi.getPlanningFacts(tripId)
+      setCandidateRequest(facts.data)
+      setPlanLifecycleError('价格、设施与来源事实已由服务端重新校验，Plan V1 已获得 PASS。')
+    } catch (error) {
+      setPlanLifecycleError(error instanceof Error ? error.message : '候选事实确认失败')
+    } finally {
+      setIsConfirmingEvidence(false)
+    }
+  }
+
+  async function preparePlanV2() {
     if (!tripId || !storedCurrentPlan) {
       throw new Error('未恢复当前 Plan V1，暂时不能生成 Plan V2。')
     }
@@ -748,51 +808,7 @@ export function WorkspacePage() {
       return
     }
 
-    const originalTasks = storedCurrentPlan.days[0].tasks
-    const replaceIndex = originalTasks.findIndex((_, index) => index > lockedThroughIndex)
-    if (replaceIndex < 0) {
-      throw new Error('当前没有可调整的未完成任务。')
-    }
-    if (!planningDraft) {
-      throw new Error('缺少服务端签发规划事实，不能重新请求高德地点与路线。')
-    }
-    if (!candidateRequest) {
-      throw new Error('缺少服务端签发 Plan V1 时使用的原始事实，刷新后请重新从新建行程进入。')
-    }
-    const extraQuery = reason === 'EXPENSE_CHANGE'
-      ? '免费景点'
-      : reason === 'FATIGUE'
-        ? '室内景点'
-        : reason === 'DELAY'
-          ? '附近景点'
-          : feedback.slice(0, 30)
-    const providerResult = await buildAmapReplanCandidate(
-      tripId,
-      planningDraft,
-      candidateRequest,
-      undefined,
-      {
-        feedback,
-        lockedThroughIndex,
-        extraQueries: [extraQuery],
-        excludePlaceIds: originalTasks.map((task) => task.taskId),
-        preferredMaxWalkMeters: reason === 'FATIGUE'
-          ? Math.max(100, Math.round(planningDraft.assistanceProfile.maxSegmentWalkMeters * 0.7))
-          : undefined,
-      },
-    )
-    const lockedTaskIds = originalTasks
-      .slice(0, Math.max(0, lockedThroughIndex + 1))
-      .map((task) => task.taskId)
-    const selected = await tripApi.selectReplan(tripId, {
-      schemaVersion: '1.0',
-      reason,
-      lockedTaskIds,
-      candidates: [{
-        request: providerResult.candidateRequest,
-        satisfactionLoss: 0,
-      }],
-    })
+    const selected = await tripApi.replanFromEvents(tripId)
     const diff = await tripApi.getPlanDiff(tripId, selected.data.plan.planId)
     setCandidatePlanV2(selected.data.plan)
     setPlanDiff(diff.data)
@@ -806,17 +822,18 @@ export function WorkspacePage() {
     setIsDecidingV2(true)
     setPlanLifecycleError('')
     try {
-      if (decision === 'accept') {
-        await tripApi.acceptPlanV2(tripId, candidatePlanV2.planId)
-      } else {
-        await tripApi.rejectPlanV2(tripId, candidatePlanV2.planId)
-      }
-      const restored = await tripApi.getTrip(tripId)
-      if (!restored.data.currentPlan) {
-        throw new Error('决策完成后未找到 CURRENT 版本。')
-      }
-      const nextDisplayPlan = toDisplayPlan(restored.data.currentPlan)
-      applyTripState(restored.data)
+      const continuation = await decideAndContinueExecution(
+        decision,
+        candidatePlanV2.planId,
+        {
+          acceptPlan: (planId) => tripApi.acceptPlanV2(tripId, planId),
+          rejectPlan: (planId) => tripApi.rejectPlanV2(tripId, planId),
+          restoreTrip: async () => (await tripApi.getTrip(tripId)).data,
+          applyRestoredState: applyTripState,
+          startTask,
+          showSummary: () => setView('summary'),
+        },
+      )
       setCandidatePlanV2(null)
       setPlanDiff(null)
       setExecutionNotice(
@@ -824,18 +841,8 @@ export function WorkspacePage() {
           ? '已接受 Plan V2；Plan V1 已转为历史版本。'
           : '已拒绝 Plan V2；继续执行原 Plan V1。',
       )
-      setExecutionAdjustmentCount((current) => current + 1)
-      if (advanceAfterDecision) {
-        const nextIndex = currentTaskIndex + 1
-        const next = nextDisplayPlan.tasks[nextIndex]
-        setAdvanceAfterDecision(false)
-        if (!next) {
-          setView('summary')
-        } else {
-          await startTask(restored.data.currentPlan, nextIndex)
-          setView('execute')
-        }
-      } else {
+      setExecutionAdjustmentCount(continuation.adjustmentCount)
+      if (continuation.nextTaskIndex !== null) {
         setView('execute')
       }
     } catch (error) {
@@ -852,15 +859,19 @@ export function WorkspacePage() {
     setIsWritingEvent(true)
     setPlanLifecycleError('')
     try {
-      await recordExecutionEvent(
+      const restored = await recordExecutionEvent(
         storedCurrentPlan.planId,
         currentTask.id,
         'SKIP',
       )
-      const nextIndex = currentTaskIndex + 1
-      if (storedCurrentPlan.days[0].tasks[nextIndex]) {
-        await startTask(storedCurrentPlan, nextIndex)
+      const nextIndex = restored.currentPlan
+        ? firstUnfinishedTaskIndex(restored.currentPlan, restored.events)
+        : null
+      if (restored.currentPlan && nextIndex !== null) {
+        await startTask(restored.currentPlan, nextIndex)
         setView('execute')
+      } else {
+        setView('summary')
       }
     } catch (error) {
       setPlanLifecycleError(error instanceof Error ? error.message : '跳过任务失败')
@@ -873,143 +884,79 @@ export function WorkspacePage() {
     if (!currentTask || !storedCurrentPlan) {
       return
     }
+    if (parsedActualExpenseCents === null) {
+      setPlanLifecycleError('实际消费金额必须是非负数字。')
+      return
+    }
     setIsWritingEvent(true)
     setPlanLifecycleError('')
     try {
-      await recordExecutionEvent(
-        storedCurrentPlan.planId,
-        currentTask.id,
-        'EXPENSE',
-        actualExpenseCents,
+      const completionStates: TripPlanState[] = []
+      await submitTaskCompletionEvents(
+        actualCost,
+        async (eventType, amountCents = null) => {
+          const restored = await recordExecutionEvent(
+            storedCurrentPlan.planId,
+            currentTask.id,
+            eventType,
+            amountCents,
+          )
+          completionStates.push(restored)
+        },
       )
-      await recordExecutionEvent(
-        storedCurrentPlan.planId,
-        currentTask.id,
-        'COMPLETE',
-      )
+      const completedState = completionStates.at(-1)
+      if (!completedState) {
+        throw new Error('完成任务事件没有返回服务端状态。')
+      }
+      const nextIndex = completedState.currentPlan
+        ? firstUnfinishedTaskIndex(completedState.currentPlan, completedState.events)
+        : null
       if (
         expenseDeltaCents !== 0 &&
-        currentTaskIndex < activePlan.tasks.length - 1 &&
+        nextIndex !== null &&
         USE_PLAN_VERSION_API &&
         canCreatePlanV2
       ) {
         setIsPreparingV2(true)
-        setAdvanceAfterDecision(true)
-        await preparePlanV2('EXPENSE_CHANGE', expenseDifferenceLabel, currentTaskIndex)
-        setIsPreparingV2(false)
+        try {
+          await preparePlanV2()
+          setIsPreparingV2(false)
+          return
+        } catch (error) {
+          setIsPreparingV2(false)
+          setPlanLifecycleError(error instanceof Error ? error.message : '生成 Plan V2 失败')
+          setExecutionNotice('费用变化已记录；Plan V2 暂不可行，继续执行当前 Plan V1。')
+          if (tripId) {
+            const restored = await tripApi.getTrip(tripId)
+            applyTripState(restored.data)
+            const restoredIndex = restored.data.currentPlan
+              ? firstUnfinishedTaskIndex(restored.data.currentPlan, restored.data.events)
+              : null
+            if (restored.data.currentPlan && restoredIndex !== null) {
+              await startTask(restored.data.currentPlan, restoredIndex)
+              setView('execute')
+            } else {
+              setView('summary')
+            }
+          }
+        }
         return
       }
       if (expenseDeltaCents !== 0 && !canCreatePlanV2) {
         setExecutionNotice(`费用变化已记录；${S1_REPLAN_LIMIT_MESSAGE} 将继续执行当前计划。`)
       }
-      const nextIndex = currentTaskIndex + 1
-      if (storedCurrentPlan.days[0].tasks[nextIndex]) {
-        await startTask(storedCurrentPlan, nextIndex)
+      if (completedState.currentPlan && nextIndex !== null) {
+        await startTask(completedState.currentPlan, nextIndex)
         setView('execute')
+      } else {
+        setView('summary')
       }
     } catch (error) {
-      setAdvanceAfterDecision(false)
       setIsPreparingV2(false)
       setPlanLifecycleError(error instanceof Error ? error.message : '完成任务失败')
     } finally {
       setIsWritingEvent(false)
     }
-  }
-
-  async function handleExecutionFeedback() {
-    const feedback = executionFeedback.trim()
-    if (!feedback) {
-      return
-    }
-    if (!canCreatePlanV2) {
-      setPlanLifecycleError(S1_REPLAN_LIMIT_MESSAGE)
-      return
-    }
-    setIsPreparingV2(true)
-    setAdvanceAfterDecision(false)
-    setPlanLifecycleError('')
-    setExecutionFeedback('')
-    try {
-      await preparePlanV2('USER_FEEDBACK', feedback, currentTaskIndex)
-    } catch (error) {
-      setPlanLifecycleError(error instanceof Error ? error.message : '生成 Plan V2 失败')
-    } finally {
-      setIsPreparingV2(false)
-    }
-  }
-
-  function handleMediaUpload(
-    event: ChangeEvent<HTMLInputElement>,
-    type: MediaAsset['type'],
-  ) {
-    const input = event.currentTarget
-    const file = input.files?.[0]
-    if (!file || !selectedTask) {
-      return
-    }
-    const expectedPrefix = type === 'photo' ? 'image/' : 'video/'
-    const maxSize = type === 'photo' ? 5 * 1024 * 1024 : 30 * 1024 * 1024
-    if (!file.type.startsWith(expectedPrefix)) {
-      setMediaError(`请选择${type === 'photo' ? '图片' : '视频'}文件。`)
-      input.value = ''
-      return
-    }
-    if (file.size > maxSize) {
-      setMediaError(`${type === 'photo' ? '图片不能超过 5MB' : '视频不能超过 30MB'}。`)
-      input.value = ''
-      return
-    }
-
-    setMediaError('')
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = reader.result
-      if (typeof dataUrl !== 'string') {
-        setMediaError('素材读取失败，请重新选择文件。')
-        return
-      }
-      setMediaAssets((current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          taskId: selectedTask.id,
-          type,
-          name: file.name,
-          dataUrl,
-          createdAt: new Date().toISOString(),
-        },
-      ])
-    }
-    reader.onerror = () => setMediaError('素材读取失败，请重新选择文件。')
-    reader.readAsDataURL(file)
-    input.value = ''
-  }
-
-  function handleExportSummary() {
-    const taskRows = activePlan.tasks.map((task) => {
-      const status = skippedTaskIds.includes(task.id)
-        ? '已跳过'
-        : completedTaskIds.includes(task.id)
-          ? '已完成'
-          : '未执行'
-      return `<tr><td>${task.order}</td><td>${escapeHtml(task.title)}</td><td>${escapeHtml(task.timeRange)}</td><td>${status}</td></tr>`
-    }).join('')
-    const mediaHtml = mediaAssets.length > 0
-      ? mediaAssets.map((asset) => asset.type === 'photo'
-          ? `<figure><img src="${asset.dataUrl}" alt="${escapeHtml(asset.name)}"><figcaption>${escapeHtml(asset.name)}</figcaption></figure>`
-          : `<figure><video controls src="${asset.dataUrl}"></video><figcaption>${escapeHtml(asset.name)}</figcaption></figure>`,
-        ).join('')
-      : '<p>本次旅行没有保存照片或视频。</p>'
-    const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>行知旅伴旅行总结</title><style>body{font-family:system-ui,sans-serif;max-width:960px;margin:40px auto;padding:0 24px;color:#172033}h1{font-size:36px}section{margin-top:32px}table{width:100%;border-collapse:collapse}th,td{padding:12px;border-bottom:1px solid #e5eaf1;text-align:left}.media{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.media img,.media video{width:100%;max-height:360px;object-fit:cover;border-radius:12px}figcaption{margin-top:6px;color:#667085;font-size:12px}</style></head><body><h1>${escapeHtml(planningDraft?.cityName ?? activePlan.cityName)}旅行总结</h1><p>完成 ${summary?.completedTaskIds.length ?? completedTaskIds.length}/${summary?.totalTasks ?? activePlan.tasks.length} 个任务，跳过 ${summary?.skippedTaskIds.length ?? skippedTaskIds.length} 个任务，实际花费 ${formatMoney(summary?.actualCostCents ?? actualSpentCents)}。</p><section><h2>实际行程</h2><table><thead><tr><th>#</th><th>地点</th><th>时间</th><th>状态</th></tr></thead><tbody>${taskRows}</tbody></table></section><section><h2>旅行影像</h2><div class="media">${mediaHtml}</div></section></body></html>`
-    const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }))
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `${planningDraft?.cityName ?? activePlan.cityName}旅行总结.html`
-    anchor.style.display = 'none'
-    document.body.append(anchor)
-    anchor.click()
-    anchor.remove()
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
   return (
@@ -1086,9 +1033,6 @@ export function WorkspacePage() {
                         <span><Footprints size={15} /> {task.walkMeters} 米</span>
                       </div>
                       <div className="task-note"><BadgeCheck size={15} /> {task.note}</div>
-                      <button className="task-guide-button" onClick={() => setSelectedTaskId(task.id)} type="button">
-                        <Camera size={15} /> 查看拍照与视频指导
-                      </button>
                     </div>
                   </article>
                 ))}
@@ -1096,23 +1040,11 @@ export function WorkspacePage() {
             </section>
 
             <aside className="insight-column">
-              <section className="map-card">
-                <div className="map-card__toolbar">
-                  <span><Map size={16} /> 路线总览</span>
-                  <button type="button">查看大图</button>
-                </div>
-                <div className="map-canvas">
-                  <span className="map-road map-road--one" />
-                  <span className="map-road map-road--two" />
-                  <span className="map-river" />
-                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                    <path d="M22 71 C30 62, 34 62, 43 58 S54 42, 61 34 S72 28, 78 19" />
-                  </svg>
-                  {activePlan.tasks.map((task) => (
-                    <span className="map-pin" key={task.id} style={{ left: `${task.coordinates[0]}%`, top: `${task.coordinates[1]}%` }}>{task.order}</span>
-                  ))}
-                </div>
-              </section>
+              <RouteOverview
+                cityName={activePlan.cityName}
+                evidence={locationEvidence}
+                startLocationText={candidateRequest?.trip.days[0].startLocationText ?? null}
+              />
               <section className="metric-card">
                 <div className="metric-card__head"><span>Provider 已知费用</span><strong>{formatMoney(activePlan.totalCostCents)} / {formatMoney(budgetCents)}</strong></div>
                 <div className="progress-bar"><i style={{ width: `${budgetUsagePercent}%` }} /></div>
@@ -1140,8 +1072,19 @@ export function WorkspacePage() {
                 {facilityEvidence.length > 0 ? facilityEvidence.map((evidence, index) => (
                   <div className="warning-row" key={`${evidence.referenceId}-${evidence.facilityType}-${index}`}>
                     <MapPin size={16} />
-                    <span>{evidence.label}<small>{evidence.message}</small></span>
-                    <small>{facilityEvidenceNeedsConfirmation(evidence) ? '待确认' : evidence.status}</small>
+                    <span>
+                      {evidence.label}
+                      <small>
+                        {serverPlanReady
+                          ? '用户确认结果已保存，服务端已重新校验'
+                          : evidence.message}
+                      </small>
+                    </span>
+                    <small>
+                      {serverPlanReady
+                        ? '用户已确认'
+                        : facilityEvidenceNeedsConfirmation(evidence) ? '待确认' : evidence.status}
+                    </small>
                   </div>
                 )) : (
                   <div className="warning-row">
@@ -1156,6 +1099,106 @@ export function WorkspacePage() {
                   </p>
                 )}
               </section>
+              {candidateReview && (
+                <section className="evidence-review-card" aria-live="polite">
+                  <div className="source-card__head">
+                    <span><ShieldCheck size={18} /> 补齐可信事实</span>
+                    <strong>{candidateReview.items.length} 项待确认</strong>
+                  </div>
+                  <p>高德没有返回这些事实。请按实际情况填写；提交后由服务端重新计算，页面不能自行改成 PASS。</p>
+                  {candidateReview.items.some((item) => item.valueType === 'FACILITY_STATUS') && (
+                    <div className="evidence-review-bulk">
+                      <span>设施批量确认：</span>
+                      <button
+                        onClick={() => setReviewValues((current) => ({
+                          ...current,
+                          ...Object.fromEntries(candidateReview.items
+                            .filter((item) => item.valueType === 'FACILITY_STATUS')
+                            .map((item) => [item.itemId, 'PASS'])),
+                        }))}
+                        type="button"
+                      >全部现场确认存在</button>
+                      <button
+                        onClick={() => setReviewValues((current) => ({
+                          ...current,
+                          ...Object.fromEntries(candidateReview.items
+                            .filter((item) => item.valueType === 'FACILITY_STATUS')
+                            .map((item) => [item.itemId, 'FAIL'])),
+                        }))}
+                        type="button"
+                      >全部现场确认未发现</button>
+                    </div>
+                  )}
+                  <div className="evidence-review-list">
+                    {candidateReview.items.map((item) => (
+                      <div className="evidence-review-row" key={item.itemId}>
+                        <label htmlFor={`review-${item.itemId}`}>{item.label}</label>
+                        {item.valueType === 'PRICE_CENTS' ? (
+                          <div className="evidence-price-input">
+                            <span>¥</span>
+                            <input
+                              id={`review-${item.itemId}`}
+                              min="0"
+                              placeholder="填写实际或估算金额"
+                              step="0.01"
+                              type="number"
+                              value={reviewValues[item.itemId] ?? ''}
+                              onChange={(event) => setReviewValues((current) => ({
+                                ...current,
+                                [item.itemId]: event.target.value,
+                              }))}
+                            />
+                            <button
+                              onClick={() => setReviewValues((current) => ({
+                                ...current,
+                                [item.itemId]: '0',
+                              }))}
+                              type="button"
+                            >
+                              确认为免费
+                            </button>
+                          </div>
+                        ) : item.valueType === 'FACILITY_STATUS' ? (
+                          <select
+                            id={`review-${item.itemId}`}
+                            value={reviewValues[item.itemId] ?? ''}
+                            onChange={(event) => setReviewValues((current) => ({
+                              ...current,
+                              [item.itemId]: event.target.value,
+                            }))}
+                          >
+                            <option value="">请选择</option>
+                            <option value="PASS">现场确认存在</option>
+                            <option value="FAIL">现场确认不存在</option>
+                          </select>
+                        ) : (
+                          <button
+                            className={reviewValues[item.itemId] === 'CONFIRMED' ? 'is-confirmed' : ''}
+                            id={`review-${item.itemId}`}
+                            onClick={() => setReviewValues((current) => ({
+                              ...current,
+                              [item.itemId]: 'CONFIRMED',
+                            }))}
+                            type="button"
+                          >
+                            {reviewValues[item.itemId] === 'CONFIRMED' ? '已确认来源' : '确认该来源'}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    className="button button--primary evidence-review-submit"
+                    disabled={isConfirmingEvidence}
+                    onClick={() => void handleConfirmEvidence()}
+                    type="button"
+                  >
+                    {isConfirmingEvidence
+                      ? <><LoaderCircle className="spin-icon" size={16} /> 服务端重新校验中…</>
+                      : <><Check size={16} /> 提交确认并重新校验</>}
+                  </button>
+                </section>
+              )}
               <section className="explanation-card">
                 <div className="explanation-card__head">
                   <span><Sparkles size={18} /> Agent 推荐理由</span>
@@ -1184,7 +1227,9 @@ export function WorkspacePage() {
                   <CircleDollarSign size={15} />
                   <span>Provider 价格</span>
                   <strong className={priceProvenance?.sourceStatus === 'UNKNOWN' ? 'needs-confirmation' : ''}>
-                    {knownPrice?.amountCents !== null && knownPrice?.amountCents !== undefined
+                    {serverPlanReady
+                      ? 'Provider 原值 + 用户确认 · 已完整'
+                      : knownPrice?.amountCents !== null && knownPrice?.amountCents !== undefined
                       ? `${formatMoney(knownPrice.amountCents)} · ${sourceStatusLabels[knownPrice.provenance.sourceStatus]}`
                       : priceProvenance
                         ? '未知待确认'
@@ -1202,7 +1247,9 @@ export function WorkspacePage() {
                   <MapPin size={15} />
                   <span>路线设施证据</span>
                   <strong className={facilityNeedsConfirmation ? 'needs-confirmation' : ''}>
-                    {facilityNeedsConfirmation
+                    {serverPlanReady
+                      ? '用户确认后服务端已复算'
+                      : facilityNeedsConfirmation
                       ? `${Math.max(1, facilityEvidence.filter(facilityEvidenceNeedsConfirmation).length)} 项待确认`
                       : '已核验'}
                   </strong>
@@ -1231,7 +1278,9 @@ export function WorkspacePage() {
                             <span>{formatSource(place.provenance)}</span>
                             <b className={place.priceReference.amountCents === null ? 'needs-confirmation' : ''}>
                               {place.priceReference.amountCents === null
-                                ? '价格未知待确认'
+                                ? serverPlanReady
+                                  ? '用户已确认并复算'
+                                  : '价格未知待确认'
                                 : `参考 ${formatMoney(place.priceReference.amountCents)}`}
                             </b>
                           </div>
@@ -1243,7 +1292,9 @@ export function WorkspacePage() {
                         <Route size={17} />
                         <span>
                           <strong>
-                            {index === 0 ? '城市中心' : locationEvidence.places[index - 1]?.name}
+                            {index === 0
+                              ? candidateRequest?.trip.days[0].startLocationText ?? '行程起点'
+                              : locationEvidence.places[index - 1]?.name}
                             {' → '}{locationEvidence.places[index]?.name}
                           </strong>
                           <small>
@@ -1452,7 +1503,7 @@ export function WorkspacePage() {
                   </div>
                 </div>
                 <div className="current-task-card__content">
-                  <span className="category-chip">任务 {currentTaskIndex + 1} / {activePlan.tasks.length} · {currentTask?.category}</span>
+                  <span className="category-chip">任务 {currentTask?.order ?? 0} / {activePlan.tasks.length} · {currentTask?.category}</span>
                   <h3>{currentTask?.title}</h3>
                   <p><MapPin size={16} /> {planningDraft?.cityName ?? activePlan.cityName} · 当前任务目的地</p>
                   <div className="current-task-metrics">
@@ -1460,9 +1511,6 @@ export function WorkspacePage() {
                     <div><Navigation size={19} /><span>预计步行<strong>{currentTask?.walkMeters ?? 0} 米</strong></span></div>
                     <div><Wallet size={19} /><span>计划消费<strong>{formatMoney(currentTask?.costCents ?? 0)}</strong></span></div>
                   </div>
-                  <button className="task-guide-button task-guide-button--large" onClick={() => setSelectedTaskId(currentTask?.id ?? null)} type="button">
-                    <Camera size={16} /> 进入地点体验与拍摄指导
-                  </button>
                 </div>
               </article>
 
@@ -1475,6 +1523,14 @@ export function WorkspacePage() {
                   <span>实际消费金额</span>
                   <div><b>¥</b><input value={actualCost} onChange={(event) => setActualCost(event.target.value)} /></div>
                 </label>
+                <button
+                  className="button button--soft"
+                  disabled={!currentTask || isPreparingV2 || isWritingEvent}
+                  onClick={() => setActualCost(plannedPlusFiftyYuan(currentTask?.costCents ?? 0))}
+                  type="button"
+                >
+                  按计划 + ¥50
+                </button>
                 <div className="budget-alert">
                   <CircleDollarSign size={19} />
                   <div>
@@ -1542,28 +1598,21 @@ export function WorkspacePage() {
                   <span><MessageSquareText size={18} /> 随时反馈给 Agent</span>
                 </div>
                 <textarea
-                  disabled={!canCreatePlanV2}
+                  disabled
                   maxLength={160}
-                  onChange={(event) => setExecutionFeedback(event.target.value)}
-                  placeholder={canCreatePlanV2
-                    ? '例如：有点累了、想提前吃饭、希望减少后面的步行……'
-                    : S1_REPLAN_LIMIT_MESSAGE}
-                  value={executionFeedback}
+                  placeholder={S1_EVENT_REPLAN_ONLY_MESSAGE}
+                  readOnly
+                  value=""
                 />
                 <button
                   className="button button--soft"
-                  disabled={isPreparingV2 || !executionFeedback.trim() || !canCreatePlanV2}
-                  onClick={() => void handleExecutionFeedback()}
+                  disabled
                   type="button"
                 >
-                  {isPreparingV2 ? <LoaderCircle className="spin-icon" size={15} /> : <Send size={15} />}
-                  {isPreparingV2
-                    ? '正在生成候选方案…'
-                    : canCreatePlanV2
-                      ? '生成 Plan V2 候选方案'
-                      : '本迭代已完成 V2 调整'}
+                  <Send size={15} />
+                  实际消费变化才会触发 V2
                 </button>
-                {!canCreatePlanV2 && <p>{S1_REPLAN_LIMIT_MESSAGE}</p>}
+                <p>{S1_EVENT_REPLAN_ONLY_MESSAGE}</p>
                 {executionNotice && <p><CheckCircle2 size={14} /> {executionNotice}</p>}
                 {planLifecycleError && <p className="media-error">{planLifecycleError}</p>}
               </section>
@@ -1584,27 +1633,15 @@ export function WorkspacePage() {
               <span className="summary-icon"><BadgeCheck size={34} /></span>
               <span className="section-kicker">JOURNEY COMPLETE</span>
               <h2>今天，你和{planningDraft?.cityName ?? activePlan.cityName}认真地见了一面。</h2>
-              <p>行程已经结束。每一次完成、跳过、反馈和拍摄记录都已保存在这份总结中。</p>
+              <p>行程已经结束。以下数字和版本历史均来自服务端总结。</p>
             </div>
-            <div className="summary-metrics">
-              <article><span>任务完成</span><strong>{summary?.completedTaskIds.length ?? completedTaskIds.length}<small>/{summary?.totalTasks ?? activePlan.tasks.length}</small></strong><i style={{ width: `${((summary?.completedTaskIds.length ?? completedTaskIds.length) / (summary?.totalTasks ?? activePlan.tasks.length)) * 100}%` }} /></article>
-              <article><span>实际花费</span><strong>{formatMoney(summary?.actualCostCents ?? actualSpentCents)}</strong><small>计划 {formatMoney(summary?.plannedCostCents ?? activePlan.totalCostCents)} · {(summary?.differenceCents ?? (actualSpentCents - activePlan.totalCostCents)) >= 0 ? '+' : '-'}{formatMoney(Math.abs(summary?.differenceCents ?? (actualSpentCents - activePlan.totalCostCents)))}</small></article>
-              <article><span>关怀满足率</span><strong>100<small>%</small></strong><small>4 项硬约束全部满足</small></article>
-              <article><span>最终版本</span><strong>V{summary?.currentPlanVersion ?? storedCurrentPlan?.version ?? 1}</strong><small>{summary ? `${summary.planHistory.length} 个版本可追溯` : `${executionAdjustmentCount} 次调整`}</small></article>
-            </div>
-            <div className="memory-route">
-              <div className="panel-heading"><div><span className="section-kicker">ACTUAL TIMELINE</span><h2>实际旅程</h2></div><Route size={22} /></div>
-              {activePlan.tasks
-                .filter((task) => completedTaskIds.includes(task.id) || skippedTaskIds.includes(task.id))
-                .map((task, index) => (
-                <div className="memory-stop" key={task.id}>
-                  <span>{index + 1}</span>
-                  <div><strong>{task.title}</strong><small>{task.timeRange} · {skippedTaskIds.includes(task.id) ? '已跳过' : '实际完成'}</small></div>
-                  {skippedTaskIds.includes(task.id) ? <X size={19} /> : <CheckCircle2 size={19} />}
-                </div>
-              ))}
-            </div>
-            {summary && (
+            {summaryView?.visibleSections.includes('metrics') && <div className="summary-metrics">
+              <article><span>任务完成</span><strong>{summaryView ? summaryView.completion.completed : '—'}<small>{summaryView ? `/${summaryView.completion.total}` : ''}</small></strong><i style={{ width: `${summaryView?.completion.progressPercent ?? 0}%` }} /></article>
+              <article><span>实际花费</span><strong>{summaryView?.cost.actual ?? '—'}</strong><small>{summaryView?.cost.detail ?? '等待服务端总结'}</small></article>
+              <article><span>事件记录</span><strong>{summaryView?.eventCount ?? '—'}</strong><small>服务端事件流</small></article>
+              <article><span>最终版本</span><strong>{summaryView?.version.current ?? '—'}</strong><small>{summaryView ? `${summaryView.version.historyCount} 个版本可追溯` : '等待服务端总结'}</small></article>
+            </div>}
+            {summaryView?.visibleSections.includes('history') && summary && (
               <div className="summary-history">
                 <div className="panel-heading">
                   <div><span className="section-kicker">PLAN HISTORY</span><h2>版本变化</h2></div>
@@ -1618,91 +1655,7 @@ export function WorkspacePage() {
                 ))}
               </div>
             )}
-            <div className="summary-media">
-              <div className="panel-heading">
-                <div><span className="section-kicker">TRAVEL MEDIA</span><h2>旅行影像</h2></div>
-                <button className="button button--primary" onClick={handleExportSummary} type="button"><Download size={16} /> 导出旅行总结</button>
-              </div>
-              {mediaAssets.length > 0 ? (
-                <div className="summary-media__grid">
-                  {mediaAssets.map((asset) => (
-                    <article key={asset.id}>
-                      {asset.type === 'photo'
-                        ? <img alt={asset.name} src={asset.dataUrl} />
-                        : <video controls src={asset.dataUrl} />}
-                      <div><span>{asset.type === 'photo' ? <Image size={14} /> : <FileVideo size={14} />}{asset.name}</span></div>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <div className="summary-media__empty"><Camera size={24} /><span>本次旅行还没有保存照片或视频</span></div>
-              )}
-            </div>
           </section>
-        )}
-        {selectedTask && (
-          <div className="place-experience-backdrop" onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setSelectedTaskId(null)
-            }
-          }}>
-            <section className="place-experience-modal" aria-modal="true" role="dialog">
-              <header>
-                <div>
-                  <span className="section-kicker">AGENT CREATIVE GUIDE</span>
-                  <h2>{selectedTask.title}</h2>
-                  <p>{selectedTask.category} · {selectedTask.timeRange}</p>
-                </div>
-                <button onClick={() => setSelectedTaskId(null)} type="button"><X size={20} /></button>
-              </header>
-              <div className="creative-guide-grid">
-                <article>
-                  <span className="creative-guide-icon"><Camera size={22} /></span>
-                  <h3>拍照指导</h3>
-                  <ol>
-                    <li>先拍一张包含环境的横向全景，保留地点标志。</li>
-                    <li>人物放在画面三分线位置，避免正午顶光直射面部。</li>
-                    <li>补拍门票、餐食或建筑细节，方便总结页讲故事。</li>
-                  </ol>
-                </article>
-                <article>
-                  <span className="creative-guide-icon"><Video size={22} /></span>
-                  <h3>视频分镜指导</h3>
-                  <ol>
-                    <li>开场 3 秒：稳定拍摄地点名称或入口。</li>
-                    <li>过程 5—8 秒：缓慢横移，记录人物与环境互动。</li>
-                    <li>结尾 3 秒：拍下离开路线或一句现场感受。</li>
-                  </ol>
-                </article>
-              </div>
-              <div className="media-upload-area">
-                <div>
-                  <h3>保存本次体验</h3>
-                  <p>照片上限 5MB，视频上限 30MB；素材仅保存在当前演示会话中。</p>
-                </div>
-                <div className="media-upload-actions">
-                  <label className="button button--ghost"><Upload size={16} /> 上传照片<input accept="image/*" hidden onChange={(event) => handleMediaUpload(event, 'photo')} type="file" /></label>
-                  <label className="button button--ghost"><Video size={16} /> 上传视频<input accept="video/*" hidden onChange={(event) => handleMediaUpload(event, 'video')} type="file" /></label>
-                </div>
-                {mediaError && <p className="media-error">{mediaError}</p>}
-              </div>
-              <div className="saved-media">
-                <div className="panel-heading"><h3>已保存素材</h3><small>{mediaAssets.filter((asset) => asset.taskId === selectedTask.id).length} 项</small></div>
-                {mediaAssets.some((asset) => asset.taskId === selectedTask.id) ? (
-                  <div className="saved-media__grid">
-                    {mediaAssets.filter((asset) => asset.taskId === selectedTask.id).map((asset) => (
-                      <article key={asset.id}>
-                        {asset.type === 'photo'
-                          ? <img alt={asset.name} src={asset.dataUrl} />
-                          : <video controls src={asset.dataUrl} />}
-                        <div><span>{asset.name}</span><button onClick={() => setMediaAssets((current) => current.filter((item) => item.id !== asset.id))} type="button"><Trash2 size={14} /></button></div>
-                      </article>
-                    ))}
-                  </div>
-                ) : <div className="saved-media__empty">还没有保存素材</div>}
-              </div>
-            </section>
-          </div>
         )}
       </main>
     </AppShell>

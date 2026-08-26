@@ -19,12 +19,18 @@ import { useNavigate } from 'react-router-dom'
 import { tripApi } from '../api/tripApi'
 import { buildAssistanceProfile } from '../api/tripContract'
 import { AppShell } from '../components/AppShell'
+import {
+  buildNaturalLanguageParseInput,
+  splitPlaceInput,
+  toRecognizedFormPatch,
+} from '../services/tripDraftRecognition'
 import type {
   AssistanceMode,
   ConstraintProfileStatus,
   TripDraftConfirmationItem,
   TripDraftInput,
   TripDraftParseInput,
+  TripDraftParseResult,
 } from '../domain/trip'
 
 const assistanceOptions: Array<{
@@ -46,6 +52,9 @@ export function PlannerPage() {
   const [tripId] = useState(() => crypto.randomUUID())
   const [assistanceMode, setAssistanceMode] = useState<AssistanceMode>('low-mobility')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [analysisMessage, setAnalysisMessage] = useState('')
+  const [lastAnalyzedRequest, setLastAnalyzedRequest] = useState('')
   const [isConfirmingConstraints, setIsConfirmingConstraints] = useState(false)
   const [constraintStatus, setConstraintStatus] =
     useState<ConstraintProfileStatus>('DRAFT')
@@ -56,9 +65,12 @@ export function PlannerPage() {
   const [travelDate, setTravelDate] = useState('2026-08-26')
   const [startTime, setStartTime] = useState('09:00')
   const [endTime, setEndTime] = useState('20:00')
+  const [startLocationText, setStartLocationText] = useState('北京市中心')
+  const [endLocationText, setEndLocationText] = useState('北京市中心')
+  const [endSameAsStart, setEndSameAsStart] = useState(true)
   const [budget, setBudget] = useState('350')
   const [interests, setInterests] = useState(['历史文化', '特色餐饮', '城市漫步'])
-  const [mustVisitInput, setMustVisitInput] = useState('中国国家博物馆')
+  const [mustVisitInput, setMustVisitInput] = useState('')
   const [avoidInput, setAvoidInput] = useState('排队过久的网红店')
   const [maxSegmentWalkMeters, setMaxSegmentWalkMeters] = useState('500')
   const [maxTransfers, setMaxTransfers] = useState('2')
@@ -78,10 +90,12 @@ export function PlannerPage() {
     travelDate,
     startTime,
     endTime,
+    startLocationText: startLocationText.trim(),
+    endLocationText: (endSameAsStart ? startLocationText : endLocationText).trim(),
     budgetCents: Math.round(Number(budget) * 100),
     interests,
-    mustVisit: mustVisitInput.trim() ? [mustVisitInput.trim()] : [],
-    avoidPlaces: avoidInput.trim() ? [avoidInput.trim()] : [],
+    mustVisit: splitPlaceInput(mustVisitInput),
+    avoidPlaces: splitPlaceInput(avoidInput),
     assistanceMode,
     assistanceProfile: {
       maxSegmentWalkMeters: Number(maxSegmentWalkMeters),
@@ -95,6 +109,8 @@ export function PlannerPage() {
     budget,
     cityName,
     endTime,
+    endLocationText,
+    endSameAsStart,
     interests,
     maxSegmentWalkMeters,
     maxTransfers,
@@ -102,6 +118,7 @@ export function PlannerPage() {
     request,
     restIntervalMinutes,
     startTime,
+    startLocationText,
     travelDate,
   ])
   const assistanceProfile = useMemo(
@@ -131,6 +148,86 @@ export function PlannerPage() {
     )
   }
 
+  function handleCityNameChange(nextCityName: string) {
+    const previousCityName = cityName.trim()
+    const previousDefaultLocation = `${previousCityName}市中心`
+    const nextDefaultLocation = `${nextCityName.trim()}市中心`
+    setCityName(nextCityName)
+    setStartLocationText((current) => current === previousDefaultLocation ? nextDefaultLocation : current)
+    setEndLocationText((current) => current === previousDefaultLocation ? nextDefaultLocation : current)
+    setRequest((current) => {
+      const previousDefault = `我一个人在${previousCityName}玩一天，喜欢历史和特色餐饮，希望少走路，晚上 8 点前结束。`
+      return current === previousDefault
+        ? `我一个人在${nextCityName.trim()}玩一天，喜欢历史和特色餐饮，希望少走路，晚上 8 点前结束。`
+        : current
+    })
+  }
+
+  function handleStartLocationChange(value: string) {
+    setStartLocationText(value)
+    if (endSameAsStart) setEndLocationText(value)
+  }
+
+  function handleRequestChange(value: string) {
+    setRequest(value)
+    setLastAnalyzedRequest('')
+    setAnalysisMessage('')
+    setConfirmationItems([])
+  }
+
+  function applyRecognizedFields(parsed: TripDraftParseResult['parsed']) {
+    const patch = toRecognizedFormPatch(parsed)
+    if (patch.cityName) setCityName(patch.cityName)
+    if (patch.travelDate) setTravelDate(patch.travelDate)
+    if (patch.startTime) setStartTime(patch.startTime)
+    if (patch.endTime) setEndTime(patch.endTime)
+    if (patch.startLocationText) setStartLocationText(patch.startLocationText)
+    if (patch.endLocationText) setEndLocationText(patch.endLocationText)
+    setEndSameAsStart(patch.endSameAsStart)
+    if (patch.budgetYuan !== null) setBudget(patch.budgetYuan)
+    setInterests(patch.interests)
+    setMustVisitInput(patch.mustVisitText)
+    setAvoidInput(patch.avoidPlacesText)
+  }
+
+  function naturalLanguageParseInput(): TripDraftParseInput {
+    return buildNaturalLanguageParseInput({
+      tripId,
+      naturalLanguageRequest: request,
+      assistanceMode,
+      assistanceProfile: {
+        maxSegmentWalkMeters: Number(maxSegmentWalkMeters),
+        maxTransfers: Number(maxTransfers),
+        restIntervalMinutes: Number(restIntervalMinutes),
+      },
+    })
+  }
+
+  async function handleAnalyzeRequest() {
+    if (!canParse) {
+      setSubmitError('请先输入自然语言行程需求。')
+      return
+    }
+    setSubmitError('')
+    setAnalysisMessage('')
+    setIsAnalyzing(true)
+    try {
+      const response = await tripApi.createDraft(naturalLanguageParseInput())
+      applyRecognizedFields(response.data.parsed)
+      setConfirmationItems(response.data.confirmationItems)
+      setLastAnalyzedRequest(request.trim())
+      setAnalysisMessage(
+        response.data.confirmationItems.length > 0
+          ? `已识别并回填，仍有 ${response.data.confirmationItems.length} 项需要确认。`
+          : '识别完成，城市、日期、时间、预算和地点限制已填入表单。',
+      )
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : '自然语言识别失败，请稍后重试。')
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
+
   async function handleSubmit() {
     if (!canParse) {
       setSubmitError('请先输入自然语言行程需求。')
@@ -145,19 +242,21 @@ export function PlannerPage() {
     setIsSubmitting(true)
     try {
       const budgetNumber = Number(budget)
-      const parseInput: TripDraftParseInput = {
+      let parseInput: TripDraftParseInput = {
         schemaVersion: '1.0',
         tripId,
         cityName: cityName.trim() || null,
         travelDate: travelDate || null,
         startTime: startTime || null,
         endTime: endTime || null,
+        startLocationText: startLocationText.trim() || null,
+        endLocationText: (endSameAsStart ? startLocationText : endLocationText).trim() || null,
         budgetCents: Number.isFinite(budgetNumber) && budgetNumber > 0
           ? Math.round(budgetNumber * 100)
           : null,
         interests,
-        mustVisit: mustVisitInput.trim() ? [mustVisitInput.trim()] : [],
-        avoidPlaces: avoidInput.trim() ? [avoidInput.trim()] : [],
+        mustVisit: splitPlaceInput(mustVisitInput),
+        avoidPlaces: splitPlaceInput(avoidInput),
         assistanceMode,
         assistanceProfile: {
           maxSegmentWalkMeters: Number(maxSegmentWalkMeters),
@@ -166,7 +265,20 @@ export function PlannerPage() {
         },
         naturalLanguageRequest: request,
       }
-      const response = await tripApi.createDraft(parseInput)
+      let response
+      if (lastAnalyzedRequest !== request.trim()) {
+        parseInput = naturalLanguageParseInput()
+        response = await tripApi.createDraft(parseInput)
+        applyRecognizedFields(response.data.parsed)
+        setLastAnalyzedRequest(request.trim())
+        setAnalysisMessage(
+          response.data.confirmationItems.length > 0
+            ? `已识别并回填，仍有 ${response.data.confirmationItems.length} 项需要确认。`
+            : '识别完成，已使用识别结果继续生成。',
+        )
+      } else {
+        response = await tripApi.createDraft(parseInput)
+      }
       if (!response.data.canPlan || !response.data.trip) {
         setConfirmationItems(response.data.confirmationItems)
         setSubmitError('请根据确认清单补全或修正字段；确认完成前不会进入规划。')
@@ -176,7 +288,8 @@ export function PlannerPage() {
       const parsed = response.data.parsed
       if (
         !parsed.cityName || !parsed.travelDate || !parsed.startTime ||
-        !parsed.endTime || parsed.budgetCents === null
+        !parsed.endTime || !parsed.startLocationText ||
+        !parsed.endLocationText || parsed.budgetCents === null
       ) {
         throw new Error('解析结果缺少生成统一 Trip 所需字段。')
       }
@@ -186,6 +299,21 @@ export function PlannerPage() {
         travelDate: parsed.travelDate,
         startTime: parsed.startTime,
         endTime: parsed.endTime,
+        startLocationText: parsed.startLocationText,
+        endLocationText: parsed.endLocationText,
+        budgetCents: parsed.budgetCents,
+        interests: parsed.interests,
+        mustVisit: parsed.mustVisit,
+        avoidPlaces: parsed.avoidPlaces,
+      }
+      parseInput = {
+        ...parseInput,
+        cityName: parsed.cityName,
+        travelDate: parsed.travelDate,
+        startTime: parsed.startTime,
+        endTime: parsed.endTime,
+        startLocationText: parsed.startLocationText,
+        endLocationText: parsed.endLocationText,
         budgetCents: parsed.budgetCents,
         interests: parsed.interests,
         mustVisit: parsed.mustVisit,
@@ -255,20 +383,68 @@ export function PlannerPage() {
           <div className="form-section">
             <label className="field-label" htmlFor="trip-request">自然语言描述</label>
             <div className="smart-textarea">
-              <textarea id="trip-request" maxLength={300} value={request} onChange={(event) => setRequest(event.target.value)} />
+              <textarea id="trip-request" maxLength={300} value={request} onChange={(event) => handleRequestChange(event.target.value)} />
               <div className="smart-textarea__footer">
-                <span><Sparkles size={15} /> Agent 将识别城市、兴趣和硬约束</span>
-                <span>{request.length}/300</span>
+                <span className="smart-textarea__hint"><Sparkles size={15} /> 百炼将识别城市、日期、时间、预算和地点限制</span>
+                <div className="smart-textarea__actions">
+                  <span>{request.length}/300</span>
+                  <button
+                    disabled={isAnalyzing || !canParse}
+                    onClick={handleAnalyzeRequest}
+                    type="button"
+                  >
+                    <Sparkles size={14} />
+                    {isAnalyzing ? '正在识别…' : '智能识别并填入'}
+                  </button>
+                </div>
               </div>
             </div>
+            {analysisMessage && (
+              <p className="recognition-status" role="status">
+                <Check size={14} /> {analysisMessage}
+              </p>
+            )}
           </div>
 
           <div className="form-grid">
-            <label className="input-card">
+            <div className="input-card">
               <span><MapPin size={18} /> 目标城市</span>
-              <input value={cityName} onChange={(event) => setCityName(event.target.value)} />
+              <input value={cityName} onChange={(event) => handleCityNameChange(event.target.value)} />
               <small>提交后解析 cityCode 与中心坐标</small>
+            </div>
+            <label className="input-card">
+              <span><MapPin size={18} /> 当天真实起点</span>
+              <input
+                aria-label="当天真实起点"
+                placeholder="酒店、车站或详细地址"
+                value={startLocationText}
+                onChange={(event) => handleStartLocationChange(event.target.value)}
+              />
+              <small>会在目标城市内通过高德解析坐标</small>
             </label>
+            <div className="input-card">
+              <span><MapPin size={18} /> 当天结束地点</span>
+              <input
+                aria-label="当天结束地点"
+                disabled={endSameAsStart}
+                placeholder="酒店、车站或详细地址"
+                value={endSameAsStart ? startLocationText : endLocationText}
+                onChange={(event) => setEndLocationText(event.target.value)}
+              />
+              <small>
+                <label className="inline-check">
+                  <input
+                    checked={endSameAsStart}
+                    onChange={(event) => {
+                      setEndSameAsStart(event.target.checked)
+                      if (event.target.checked) setEndLocationText(startLocationText)
+                    }}
+                    type="checkbox"
+                  />
+                  终点与起点相同
+                </label>
+              </small>
+            </div>
             <label className="input-card">
               <span><CalendarDays size={18} /> 出行日期</span>
               <input type="date" value={travelDate} onChange={(event) => setTravelDate(event.target.value)} />

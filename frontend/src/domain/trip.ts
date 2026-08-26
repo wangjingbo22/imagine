@@ -56,6 +56,8 @@ export interface TripDraftInput {
   travelDate: string
   startTime: string
   endTime: string
+  startLocationText: string
+  endLocationText: string
   budgetCents: number
   interests: string[]
   mustVisit: string[]
@@ -71,13 +73,16 @@ export interface TripDraftInput {
 
 export interface TripDraftParseInput extends Omit<
   TripDraftInput,
-  'cityName' | 'travelDate' | 'startTime' | 'endTime' | 'budgetCents'
+  'cityName' | 'travelDate' | 'startTime' | 'endTime' |
+  'startLocationText' | 'endLocationText' | 'budgetCents'
 > {
   tripId: string
   cityName: string | null
   travelDate: string | null
   startTime: string | null
   endTime: string | null
+  startLocationText: string | null
+  endLocationText: string | null
   budgetCents: number | null
 }
 
@@ -97,6 +102,8 @@ export interface TripDraftParseResult {
     travelDate: string | null
     startTime: string | null
     endTime: string | null
+    startLocationText: string | null
+    endLocationText: string | null
     budgetCents: number | null
     interests: string[]
     mustVisit: string[]
@@ -190,6 +197,7 @@ export interface RouteStep {
   distanceMeters: number | null
   durationSeconds: number | null
   transport: string | null
+  polyline?: GeoPoint[]
 }
 
 export type FacilityType = 'ELEVATOR' | 'RAMP' | 'NURSING_ROOM' | 'ACCESSIBLE_ENTRANCE'
@@ -442,6 +450,35 @@ export interface StoredPlanVersion extends PlanVersionProposal {
   confirmedAt: string | null
 }
 
+export interface CandidateReviewItem {
+  itemId: string
+  code: 'UNKNOWN_PRICE' | 'UNKNOWN_SOURCE' | 'UNKNOWN_FACILITY'
+  referenceId: string
+  field: string
+  label: string
+  valueType: 'PRICE_CENTS' | 'FACILITY_STATUS' | 'SOURCE_CONFIRMATION'
+  facilityType: FacilityType | null
+}
+
+export interface CandidatePlanReview {
+  schemaVersion: '1.0'
+  reviewId: string
+  tripId: string
+  candidateId: string
+  status: 'PENDING' | 'CONFIRMED'
+  createdAt: string
+  confirmedAt: string | null
+  items: CandidateReviewItem[]
+}
+
+export interface CandidateReviewConfirmationInput {
+  itemId: string
+  amountCents: number | null
+  facilityStatus: 'PASS' | 'FAIL' | null
+  sourceConfirmed: boolean | null
+  note: string
+}
+
 export interface ReplanRequestCandidate {
   request: CandidatePlanRequest
   satisfactionLoss: number
@@ -452,6 +489,11 @@ export interface ReplanGenerationRequest {
   reason: Exclude<PlanVersionReason, 'INITIAL_PLAN'>
   lockedTaskIds: string[]
   candidates: ReplanRequestCandidate[]
+}
+
+export interface EventDrivenReplanRequest {
+  schemaVersion: '1.0'
+  reason: 'EXPENSE_CHANGE'
 }
 
 export type ReplanRuleDomain = 'BUDGET' | 'TIME' | 'ROUTE' | 'CARE'
