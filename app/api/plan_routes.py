@@ -27,6 +27,12 @@ def get_planning_boundary(request: Request) -> PlanningBoundaryService:
     return service
 
 
+def require_s2_organizer(trip_id: UUID, request: Request) -> None:
+    request.app.state.collaboration_service.assert_planning_ready(
+        trip_id, request.headers.get("X-Organizer-Token")
+    )
+
+
 @router.post(
     "/trips/{trip_id}/plan-versions",
     summary="拒绝客户端直接登记 PlanVersion",
@@ -54,9 +60,11 @@ async def register_plan_version(
 async def confirm_plan_version(
     trip_id: UUID,
     plan_id: UUID,
+    request: Request,
     service: PlanVersionService = Depends(get_plan_service),
     planning: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
+    require_s2_organizer(trip_id, request)
     planning.require_v1_confirmation(trip_id, plan_id)
     return ApiResponse(data=service.confirm(trip_id, plan_id))
 
@@ -106,9 +114,11 @@ async def get_plan_diff(
 async def accept_plan_v2(
     trip_id: UUID,
     plan_id: UUID,
+    request: Request,
     service: PlanVersionService = Depends(get_plan_service),
     planning: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
+    require_s2_organizer(trip_id, request)
     planning.require_v2_acceptance(trip_id, plan_id)
     return ApiResponse(data=service.accept_v2(trip_id, plan_id))
 
@@ -121,6 +131,8 @@ async def accept_plan_v2(
 async def reject_plan_v2(
     trip_id: UUID,
     plan_id: UUID,
+    request: Request,
     service: PlanVersionService = Depends(get_plan_service),
 ) -> ApiResponse:
+    require_s2_organizer(trip_id, request)
     return ApiResponse(data=service.reject_v2(trip_id, plan_id))

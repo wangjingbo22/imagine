@@ -28,7 +28,8 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("BUILD_SHA", "RENDER_GIT_COMMIT"),
     )
     cors_allowed_origins: str = (
-        "http://localhost:5173,http://127.0.0.1:5173"
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "http://localhost:5174,http://127.0.0.1:5174"
     )
 
     @property
