@@ -14,6 +14,7 @@ from app.api.trip_draft_routes import router as trip_draft_router
 from app.api.workflow_routes import router as workflow_router
 from app.api.collaboration_routes import router as collaboration_router
 from app.api.recommendation_routes import router as recommendation_router
+from app.api.media_routes import router as media_router
 from app.application.collaboration_service import CollaborationService
 from app.application.amap_service import AmapLocationService
 from app.application.planning_boundary_service import PlanningBoundaryService
@@ -222,6 +223,7 @@ def create_app(
     )
     app.state.location_service = service
     app.state.settings = resolved_settings
+    app.state.media_database_path = resolved_settings.plan_version_db_path
     app.state.trip_draft_service = TripDraftParserService(
         service,
         llm_extractor=managed_bailian_extractor,
@@ -240,6 +242,7 @@ def create_app(
     app.include_router(trip_draft_router)
     app.include_router(collaboration_router)
     app.include_router(recommendation_router)
+    app.include_router(media_router)
     app.include_router(workflow_router)
 
     @app.get("/health", tags=["系统"], summary="健康检查")

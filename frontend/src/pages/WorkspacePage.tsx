@@ -30,6 +30,7 @@ import { ApiError } from '../api/client'
 import { tripApi, USE_PLAN_VERSION_API } from '../api/tripApi'
 import { AppShell } from '../components/AppShell'
 import { RouteOverview } from '../components/RouteOverview'
+import { TaskPhotoCard } from '../components/TaskPhotoCard'
 import type {
   CandidatePlanRequest,
   CandidatePlanReview,
@@ -1569,6 +1570,7 @@ export function WorkspacePage() {
                     <RefreshCw size={17} />
                   </button>
                 </div>
+                {tripId && currentTask && <TaskPhotoCard tripId={tripId} taskId={currentTask.id} />}
               </div>
             </div>
 
