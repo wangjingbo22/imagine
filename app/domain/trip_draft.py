@@ -68,6 +68,29 @@ class ParsedTripFields(DraftContractModel):
     avoid_places: list[str] = Field(default_factory=list)
 
 
+class LlmTripDraftFields(DraftContractModel):
+    """Untrusted candidate fields extracted by an LLM before rule validation."""
+
+    city_name: str | None = None
+    travel_date: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    start_location_text: str | None = None
+    end_location_text: str | None = None
+    budget_cents: int | None = Field(default=None, ge=0)
+    interests: list[str] = Field(default_factory=list)
+    must_visit: list[str] = Field(default_factory=list)
+    avoid_places: list[str] = Field(default_factory=list)
+
+
+class TripDraftExtractionError(RuntimeError):
+    """Raised when an optional LLM extractor cannot provide trusted JSON."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
 class TripDraftParseResult(DraftContractModel):
     trip_id: str
     status: Literal["DRAFT"] = "DRAFT"
@@ -80,7 +103,9 @@ class TripDraftParseResult(DraftContractModel):
 __all__ = [
     "ConfirmationItem",
     "DraftAssistanceInput",
+    "LlmTripDraftFields",
     "ParsedTripFields",
     "TripDraftParseRequest",
     "TripDraftParseResult",
+    "TripDraftExtractionError",
 ]

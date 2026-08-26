@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, time, timedelta
+import logging
 import re
 from typing import Protocol
 from unicodedata import normalize
@@ -8,7 +9,9 @@ from uuid import uuid4
 
 from app.domain.trip_draft import (
     ConfirmationItem,
+    LlmTripDraftFields,
     ParsedTripFields,
+    TripDraftExtractionError,
     TripDraftParseRequest,
     TripDraftParseResult,
 )
@@ -37,22 +40,42 @@ _INTEREST_NAMES = (
     "历史", "美食", "亲子", "公园", "建筑", "购物",
 )
 _AMBIGUOUS_DATE_WORDS = ("周末", "下周", "过几天", "改天", "某天")
+logger = logging.getLogger(__name__)
 
 
 class CityResolver(Protocol):
     async def resolve_city(self, city_name: str): ...
 
 
+class NaturalLanguageExtractor(Protocol):
+    async def extract(
+        self,
+        *,
+        text: str,
+        reference_date: date,
+    ) -> LlmTripDraftFields: ...
+
+
 class TripDraftParserService:
-    def __init__(self, city_resolver: CityResolver) -> None:
+    def __init__(
+        self,
+        city_resolver: CityResolver,
+        llm_extractor: NaturalLanguageExtractor | None = None,
+    ) -> None:
         self._city_resolver = city_resolver
+        self._llm_extractor = llm_extractor
 
     async def parse(self, request: TripDraftParseRequest) -> TripDraftParseResult:
         text = normalize("NFKC", request.natural_language_request).strip()
         reference = request.reference_date or date.today()
         items: list[ConfirmationItem] = []
+        llm = await self._extract_llm_candidates(text, reference)
 
-        city_name = _non_blank(request.city_name) or _extract_city(text)
+        city_name = (
+            _non_blank(request.city_name)
+            or _extract_city(text)
+            or _non_blank(llm.city_name)
+        )
         if city_name is None:
             items.append(_missing("city", "cityName", "请确认目标城市"))
 
@@ -63,6 +86,8 @@ class TripDraftParserService:
             travel_date, date_issue = _extract_date(text, reference)
             if date_issue is not None:
                 items.append(date_issue)
+            elif travel_date is None:
+                travel_date = _explicit_date(llm.travel_date)
         if travel_date is None and not any(item.path == "travelDate" for item in items):
             items.append(_missing("date", "travelDate", "请确认具体出行日期"))
 
@@ -73,6 +98,12 @@ class TripDraftParserService:
         if request.end_time and explicit_end is None:
             items.append(_invalid("end-time", "endTime", "结束时间格式必须为 HH:mm"))
         extracted_start, extracted_end, time_issues = _extract_time_window(text)
+        llm_start = _explicit_time(llm.start_time)
+        llm_end = _explicit_time(llm.end_time)
+        if extracted_start is None and not any(item.path == "startTime" for item in time_issues):
+            extracted_start = llm_start
+        if extracted_end is None and not any(item.path == "endTime" for item in time_issues):
+            extracted_end = llm_end
         start_time = explicit_start or extracted_start
         end_time = explicit_end or extracted_end
         if explicit_start is not None:
@@ -93,26 +124,39 @@ class TripDraftParserService:
         if budget_cents is None:
             budget_cents = _extract_budget_cents(text)
         if budget_cents is None:
+            budget_cents = llm.budget_cents
+        if budget_cents is None:
             items.append(_missing("budget", "budgetCents", "请确认本次行程总预算"))
 
         default_location = f"{city_name}市中心" if city_name else None
         start_location_text = (
             _non_blank(request.start_location_text)
             or _extract_start_location(text)
+            or _non_blank(llm.start_location_text)
             or default_location
         )
         end_location_text = (
             _non_blank(request.end_location_text)
             or _extract_end_location(text)
+            or _non_blank(llm.end_location_text)
             or start_location_text
         )
 
-        interests = _unique(request.interests or _extract_interests(text))
+        interests = _unique(
+            request.interests
+            or [*_extract_interests(text), *llm.interests]
+        )
         if not interests:
             items.append(_missing("interests", "interests", "请至少确认一项兴趣"))
 
-        must_visit = _unique(request.must_visit or _extract_places(text, "must"))
-        avoid_places = _unique(request.avoid_places or _extract_places(text, "avoid"))
+        must_visit = _unique(
+            request.must_visit
+            or [*_extract_places(text, "must"), *llm.must_visit]
+        )
+        avoid_places = _unique(
+            request.avoid_places
+            or [*_extract_places(text, "avoid"), *llm.avoid_places]
+        )
         conflicts = sorted({_key(item) for item in must_visit} & {_key(item) for item in avoid_places})
         if conflicts:
             items.append(
@@ -240,6 +284,22 @@ class TripDraftParserService:
             can_plan=True,
             trip=trip,
         )
+
+    async def _extract_llm_candidates(
+        self,
+        text: str,
+        reference: date,
+    ) -> LlmTripDraftFields:
+        if self._llm_extractor is None:
+            return LlmTripDraftFields()
+        try:
+            return await self._llm_extractor.extract(
+                text=text,
+                reference_date=reference,
+            )
+        except TripDraftExtractionError as error:
+            logger.warning("百炼字段提取已回退到确定性规则: %s", error.code)
+            return LlmTripDraftFields()
 
     @staticmethod
     def require_planning_ready(result: TripDraftParseResult) -> CreateSingleDayTrip:

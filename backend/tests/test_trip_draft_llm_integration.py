@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+import pytest
+
+from app.application.trip_draft_service import TripDraftParserService
+from app.domain.models import CityResolution, Provenance, SourceStatus
+from app.domain.trip_draft import LlmTripDraftFields, TripDraftParseRequest
+from app.schemas.trip import CityContext, GeoPoint, ProviderConfig
+
+
+class FixtureCityResolver:
+    async def resolve_city(self, city_name: str) -> CityResolution:
+        assert city_name == "武汉"
+        return CityResolution(
+            cityContext=CityContext(
+                country_code="CN",
+                city_code="420100",
+                city_name="武汉市",
+                center=GeoPoint(longitude=114.305393, latitude=30.593099),
+                provider_config=ProviderConfig(
+                    provider="AMAP",
+                    coordinate_system="GCJ02",
+                ),
+            ),
+            provenance=Provenance(
+                sourceStatus=SourceStatus.VERIFIED_CACHE,
+                fetchedAt=datetime(2026, 8, 26, tzinfo=UTC),
+                isStale=False,
+            ),
+        )
+
+
+class FixtureLlmExtractor:
+    async def extract(self, *, text: str, reference_date) -> LlmTripDraftFields:
+        assert text == "请按我的完整安排生成行程"
+        assert reference_date.isoformat() == "2026-08-26"
+        return LlmTripDraftFields(
+            city_name="武汉",
+            travel_date="2026-09-03",
+            start_time="09:30",
+            end_time="19:00",
+            start_location_text="武汉站",
+            end_location_text="汉口站",
+            budget_cents=50_000,
+            interests=["建筑"],
+            must_visit=["黄鹤楼"],
+            avoid_places=["拥挤商场"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_llm_candidates_enter_trip_only_after_rule_validation() -> None:
+    service = TripDraftParserService(
+        FixtureCityResolver(),
+        llm_extractor=FixtureLlmExtractor(),
+    )
+
+    result = await service.parse(
+        TripDraftParseRequest(
+            natural_language_request="请按我的完整安排生成行程",
+            reference_date="2026-08-26",
+        )
+    )
+
+    assert result.can_plan is True
+    assert result.confirmation_items == []
+    assert result.trip is not None
+    assert result.trip.city_context.city_code == "420100"
+    assert result.trip.total_budget_cents == 50_000
+    assert result.trip.days[0].start_location_text == "武汉站"
+    assert result.trip.days[0].end_location_text == "汉口站"
+    assert [item.value for item in result.trip.participants[0].preferences] == [
+        "建筑",
+        "黄鹤楼",
+        "拥挤商场",
+    ]

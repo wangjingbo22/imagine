@@ -19,12 +19,18 @@ import { useNavigate } from 'react-router-dom'
 import { tripApi } from '../api/tripApi'
 import { buildAssistanceProfile } from '../api/tripContract'
 import { AppShell } from '../components/AppShell'
+import {
+  buildNaturalLanguageParseInput,
+  splitPlaceInput,
+  toRecognizedFormPatch,
+} from '../services/tripDraftRecognition'
 import type {
   AssistanceMode,
   ConstraintProfileStatus,
   TripDraftConfirmationItem,
   TripDraftInput,
   TripDraftParseInput,
+  TripDraftParseResult,
 } from '../domain/trip'
 
 const assistanceOptions: Array<{
@@ -46,6 +52,9 @@ export function PlannerPage() {
   const [tripId] = useState(() => crypto.randomUUID())
   const [assistanceMode, setAssistanceMode] = useState<AssistanceMode>('low-mobility')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [analysisMessage, setAnalysisMessage] = useState('')
+  const [lastAnalyzedRequest, setLastAnalyzedRequest] = useState('')
   const [isConfirmingConstraints, setIsConfirmingConstraints] = useState(false)
   const [constraintStatus, setConstraintStatus] =
     useState<ConstraintProfileStatus>('DRAFT')
@@ -85,8 +94,8 @@ export function PlannerPage() {
     endLocationText: (endSameAsStart ? startLocationText : endLocationText).trim(),
     budgetCents: Math.round(Number(budget) * 100),
     interests,
-    mustVisit: mustVisitInput.trim() ? [mustVisitInput.trim()] : [],
-    avoidPlaces: avoidInput.trim() ? [avoidInput.trim()] : [],
+    mustVisit: splitPlaceInput(mustVisitInput),
+    avoidPlaces: splitPlaceInput(avoidInput),
     assistanceMode,
     assistanceProfile: {
       maxSegmentWalkMeters: Number(maxSegmentWalkMeters),
@@ -159,6 +168,66 @@ export function PlannerPage() {
     if (endSameAsStart) setEndLocationText(value)
   }
 
+  function handleRequestChange(value: string) {
+    setRequest(value)
+    setLastAnalyzedRequest('')
+    setAnalysisMessage('')
+    setConfirmationItems([])
+  }
+
+  function applyRecognizedFields(parsed: TripDraftParseResult['parsed']) {
+    const patch = toRecognizedFormPatch(parsed)
+    if (patch.cityName) setCityName(patch.cityName)
+    if (patch.travelDate) setTravelDate(patch.travelDate)
+    if (patch.startTime) setStartTime(patch.startTime)
+    if (patch.endTime) setEndTime(patch.endTime)
+    if (patch.startLocationText) setStartLocationText(patch.startLocationText)
+    if (patch.endLocationText) setEndLocationText(patch.endLocationText)
+    setEndSameAsStart(patch.endSameAsStart)
+    if (patch.budgetYuan !== null) setBudget(patch.budgetYuan)
+    setInterests(patch.interests)
+    setMustVisitInput(patch.mustVisitText)
+    setAvoidInput(patch.avoidPlacesText)
+  }
+
+  function naturalLanguageParseInput(): TripDraftParseInput {
+    return buildNaturalLanguageParseInput({
+      tripId,
+      naturalLanguageRequest: request,
+      assistanceMode,
+      assistanceProfile: {
+        maxSegmentWalkMeters: Number(maxSegmentWalkMeters),
+        maxTransfers: Number(maxTransfers),
+        restIntervalMinutes: Number(restIntervalMinutes),
+      },
+    })
+  }
+
+  async function handleAnalyzeRequest() {
+    if (!canParse) {
+      setSubmitError('请先输入自然语言行程需求。')
+      return
+    }
+    setSubmitError('')
+    setAnalysisMessage('')
+    setIsAnalyzing(true)
+    try {
+      const response = await tripApi.createDraft(naturalLanguageParseInput())
+      applyRecognizedFields(response.data.parsed)
+      setConfirmationItems(response.data.confirmationItems)
+      setLastAnalyzedRequest(request.trim())
+      setAnalysisMessage(
+        response.data.confirmationItems.length > 0
+          ? `已识别并回填，仍有 ${response.data.confirmationItems.length} 项需要确认。`
+          : '识别完成，城市、日期、时间、预算和地点限制已填入表单。',
+      )
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : '自然语言识别失败，请稍后重试。')
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
+
   async function handleSubmit() {
     if (!canParse) {
       setSubmitError('请先输入自然语言行程需求。')
@@ -173,7 +242,7 @@ export function PlannerPage() {
     setIsSubmitting(true)
     try {
       const budgetNumber = Number(budget)
-      const parseInput: TripDraftParseInput = {
+      let parseInput: TripDraftParseInput = {
         schemaVersion: '1.0',
         tripId,
         cityName: cityName.trim() || null,
@@ -186,8 +255,8 @@ export function PlannerPage() {
           ? Math.round(budgetNumber * 100)
           : null,
         interests,
-        mustVisit: mustVisitInput.trim() ? [mustVisitInput.trim()] : [],
-        avoidPlaces: avoidInput.trim() ? [avoidInput.trim()] : [],
+        mustVisit: splitPlaceInput(mustVisitInput),
+        avoidPlaces: splitPlaceInput(avoidInput),
         assistanceMode,
         assistanceProfile: {
           maxSegmentWalkMeters: Number(maxSegmentWalkMeters),
@@ -196,7 +265,20 @@ export function PlannerPage() {
         },
         naturalLanguageRequest: request,
       }
-      const response = await tripApi.createDraft(parseInput)
+      let response
+      if (lastAnalyzedRequest !== request.trim()) {
+        parseInput = naturalLanguageParseInput()
+        response = await tripApi.createDraft(parseInput)
+        applyRecognizedFields(response.data.parsed)
+        setLastAnalyzedRequest(request.trim())
+        setAnalysisMessage(
+          response.data.confirmationItems.length > 0
+            ? `已识别并回填，仍有 ${response.data.confirmationItems.length} 项需要确认。`
+            : '识别完成，已使用识别结果继续生成。',
+        )
+      } else {
+        response = await tripApi.createDraft(parseInput)
+      }
       if (!response.data.canPlan || !response.data.trip) {
         setConfirmationItems(response.data.confirmationItems)
         setSubmitError('请根据确认清单补全或修正字段；确认完成前不会进入规划。')
@@ -212,6 +294,19 @@ export function PlannerPage() {
         throw new Error('解析结果缺少生成统一 Trip 所需字段。')
       }
       const draft: TripDraftInput = {
+        ...parseInput,
+        cityName: parsed.cityName,
+        travelDate: parsed.travelDate,
+        startTime: parsed.startTime,
+        endTime: parsed.endTime,
+        startLocationText: parsed.startLocationText,
+        endLocationText: parsed.endLocationText,
+        budgetCents: parsed.budgetCents,
+        interests: parsed.interests,
+        mustVisit: parsed.mustVisit,
+        avoidPlaces: parsed.avoidPlaces,
+      }
+      parseInput = {
         ...parseInput,
         cityName: parsed.cityName,
         travelDate: parsed.travelDate,
@@ -288,12 +383,27 @@ export function PlannerPage() {
           <div className="form-section">
             <label className="field-label" htmlFor="trip-request">自然语言描述</label>
             <div className="smart-textarea">
-              <textarea id="trip-request" maxLength={300} value={request} onChange={(event) => setRequest(event.target.value)} />
+              <textarea id="trip-request" maxLength={300} value={request} onChange={(event) => handleRequestChange(event.target.value)} />
               <div className="smart-textarea__footer">
-                <span><Sparkles size={15} /> Agent 将识别城市、兴趣和硬约束</span>
-                <span>{request.length}/300</span>
+                <span className="smart-textarea__hint"><Sparkles size={15} /> 百炼将识别城市、日期、时间、预算和地点限制</span>
+                <div className="smart-textarea__actions">
+                  <span>{request.length}/300</span>
+                  <button
+                    disabled={isAnalyzing || !canParse}
+                    onClick={handleAnalyzeRequest}
+                    type="button"
+                  >
+                    <Sparkles size={14} />
+                    {isAnalyzing ? '正在识别…' : '智能识别并填入'}
+                  </button>
+                </div>
               </div>
             </div>
+            {analysisMessage && (
+              <p className="recognition-status" role="status">
+                <Check size={14} /> {analysisMessage}
+              </p>
+            )}
           </div>
 
           <div className="form-grid">
