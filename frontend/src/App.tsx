@@ -3,7 +3,9 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { useLocation } from 'react-router-dom'
 import { AgentProcessPage } from './pages/AgentProcessPage'
 import { HomePage } from './pages/HomePage'
-import { PlannerPage } from './pages/PlannerPage'
+import { ConversationPlannerPage } from './pages/ConversationPlannerPage'
+import { MemberConversationPage } from './pages/MemberConversationPage'
+import { RecommendationPage } from './pages/RecommendationPage'
 import { WorkspacePage } from './pages/WorkspacePage'
 
 function MotionController() {
@@ -46,7 +48,9 @@ function App() {
       <MotionController />
       <Routes>
         <Route path="/" element={<HomePage />} />
-        <Route path="/plan" element={<PlannerPage />} />
+        <Route path="/plan" element={<ConversationPlannerPage />} />
+        <Route path="/join/:token" element={<MemberConversationPage />} />
+        <Route path="/recommendation/:tripId" element={<RecommendationPage />} />
         <Route path="/generating" element={<AgentProcessPage />} />
         <Route path="/workspace" element={<WorkspacePage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
