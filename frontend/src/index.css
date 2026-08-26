@@ -21,6 +21,7 @@
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
+html, body, #root { max-width: 100%; overflow-x: hidden; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: #f4f7f3; }
 button, input, textarea { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
@@ -398,6 +399,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .planner-layout { display: block; }.planner-sidebar { padding: 28px 20px; }.planner-sidebar h1 { font-size: 28px; }.step-list { margin: 30px 0 10px; grid-template-columns: repeat(5, 1fr); gap: 4px; }.step-list li { min-height: auto; display: block; text-align: center; }.step-list li::after { left: calc(50% + 16px); top: 15px; width: calc(100% - 32px); height: 1px; }.step-list li > span { margin: 0 auto; }.step-list li div { display: none; }.privacy-note { display: none; }
   .planner-panel { padding: 30px 20px; }.planner-panel__header { align-items: start; gap: 10px; }.planner-panel h2 { font-size: 24px; }.save-state { display: none; }.form-grid { grid-template-columns: 1fr; }.assistance-grid { grid-template-columns: 1fr 1fr; }.constraint-summary { align-items: start; gap: 8px; }.constraint-summary p { max-width: 190px; }.planner-actions .button { padding-inline: 14px; }
   .conversation-card, .confirmation-card { margin-top: 22px; padding: 18px; border-radius: 19px; }.question-bubble { padding: 18px; }.question-bubble h3 { font-size: 21px; }.conversation-textarea { min-height: 100px; }.confirmation-grid { grid-template-columns: 1fr; }.invite-row { grid-template-columns: 54px minmax(0, 1fr); }.invite-row .button { grid-column: 2; justify-self: start; }
+  .entry-mode-grid, .join-entry { grid-template-columns: 1fr; }.join-entry > span { min-width: 0; }.join-entry .button { width: 100%; }.entry-mode-grid button { min-height: 116px; }
   .entry-mode-card { margin-top: 22px; padding: 20px; }.entry-mode-grid { grid-template-columns: 1fr; }.join-entry { grid-template-columns: 1fr; align-items: stretch; }.party-picker { align-items: flex-start; flex-direction: column; }
   .shared-trip-card__grid { grid-template-columns: 1fr 1fr; }
   .answer-hints { grid-template-columns: 1fr; }.recommendation-layout { width: calc(100% - 30px); padding: 28px 0 60px; }.recommendation-hero { padding: 25px 22px; border-radius: 21px; }
