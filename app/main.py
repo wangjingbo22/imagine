@@ -26,6 +26,7 @@ from app.application.llm_gateway import (
 from app.application.execution_event_draft_service import ExecutionEventDraftService
 from app.application.planning_boundary_service import PlanningBoundaryService
 from app.application.plan_service import PlanVersionService
+from app.application.recommendation_service import RecommendationOrchestrationService
 from app.application.trip_draft_service import TripDraftParserService
 from app.application.workflow_service import WorkflowService
 from app.core.config import Settings, get_settings
@@ -134,6 +135,7 @@ def create_app(
     plan_service: PlanVersionService | None = None,
     workflow_service: WorkflowService | None = None,
     planning_boundary_service: PlanningBoundaryService | None = None,
+    recommendation_service: RecommendationOrchestrationService | None = None,
     suffix_planner: SuffixPlanner | None = None,
     candidate_selection_gateway: CandidateSelectionGateway | None = None,
     execution_event_draft_service: ExecutionEventDraftService | None = None,
@@ -267,6 +269,10 @@ def create_app(
                 "description": "由 T011 生成可信 V1，并由 T011 + T018 校验和选择 V2。",
             },
             {
+                "name": "多人公平推荐编排",
+                "description": "恢复 FactRef、校验千问白名单提议、构建真实路线候选并执行公平唯一裁决。",
+            },
+            {
                 "name": "执行中迟到与疲劳调整",
                 "description": "S2-T019 草稿解析和 S2-T020 确定性临时约束。",
             },
@@ -306,6 +312,7 @@ def create_app(
     app.state.plan_version_service = plan_service
     app.state.workflow_service = workflow_service
     app.state.planning_boundary_service = planning_boundary_service
+    app.state.recommendation_service = recommendation_service
     app.include_router(router)
     app.include_router(execution_adjustment_router)
     app.include_router(plan_router)
