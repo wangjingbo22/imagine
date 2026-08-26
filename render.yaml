@@ -7,6 +7,16 @@ services:
     envVars:
       - key: AMAP_WEB_SERVICE_KEY
         sync: false
+      - key: BAILIAN_API_KEY
+        sync: false
+      - key: BAILIAN_BASE_URL
+        value: https://dashscope.aliyuncs.com/compatible-mode/v1
+      - key: BAILIAN_MODEL
+        value: qwen3.7-plus
+      - key: BAILIAN_REQUEST_TIMEOUT_SECONDS
+        value: 45
+      - key: BAILIAN_EXECUTION_EVENT_TIMEOUT_SECONDS
+        value: 10
       - key: CORS_ALLOWED_ORIGINS
         value: https://imagine-1-31o2.onrender.com
       - key: PLAN_VERSION_DB_PATH

@@ -42,4 +42,4 @@ npm run build
 npm run lint
 ```
 
-本次远端 main 测试支持迁移验收结果：排除尚未纳入 Sprint1 的 S2-T008 新测试后，后端 `167 passed`；Day2/runtime 聚焦回归 `68 passed`；前端测试 `31/31 passed`；前端 build 与 lint 均通过。PR、CI Build、QA 和 PO 属于外部证据，当前没有时保持为空，不以本地结果冒充。
+融合 S2-T007、S2-T008、S2-T019 与 S2-T020 后的本地验证结果：后端全量 `270 passed`；Sprint1 Day2/runtime 聚焦回归 `69 passed`；前端测试 `32/32 passed`；前端 build 与 lint 均通过。PR、CI Build、QA 和 PO 属于外部证据，当前没有时保持为空，不以本地结果冒充。

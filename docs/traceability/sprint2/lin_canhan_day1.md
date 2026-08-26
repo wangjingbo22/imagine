@@ -1,41 +1,47 @@
-# 林粲涵 Sprint 2 Day 1 代码追溯
+# 林粲涵 Sprint 2 Day1：S2-T019 / S2-T020 追溯
 
-本交付只实现 `S2-T008 / PBI-08-A / AC-08-A` 的候选地点提议 Gateway，基于已核验的远端 `origin/main@3e60435fcfde0705149dbc5f340d60e1aa63103c`。机器可读追溯见 `lin_canhan_day1.json`。
+本交付最初在团队 `main@3e60435fcfde0705149dbc5f340d60e1aa63103c` 上验证，以林粲涵分支基线 `299341928f7d3c0474328219083e821bcb026498` 开发，核心实现提交为 `f095e6973dced01d0f2498386e7b62779073053a`；现已与 `main@b88aeee441f1160243acf55521d50e4e1c26d7b9` 的 S2-T007 及 `lin_canhan_s2_t008_day1.*` 中的 S2-T008 合并。
 
-## PBI → AC → Task → 模块 → 验收证据
+## PBI / AC / Task
 
-| PBI / AC | Task | 生产模块 | 验收证据 | 联动 |
+| PBI | AC | Task | Day1 状态 | 主要证据 |
 |---|---|---|---|---|
-| PBI-08-A / AC-08-A | S2-T008 | `schemas/llm.py`、`llm_gateway.py`、`openai_compatible_llm.py` | 固定 JSON Schema、6–8 个唯一 FactRef、2–3 个白名单地点、10 秒超时、最多 2 次传输调用、格式/Schema/越权输出不发修复调用、失败转确定性枚举 | S2-T006 → S2-T008 → S2-T009 →（间接）S2-T010 |
+| PBI-11-B | AC-11-B | S2-T019 | IMPLEMENTED | 严格事件草稿 Schema、口语 Fixture、端到端 10 秒截止时间、固定表单降级、零写入 HTTP 测试 |
+| PBI-11-B | AC-11-B | S2-T020 | IMPLEMENTED | 确定性规则表、边界 Fixture、可见原因快照、Profile/Plan 状态不变断言 |
+| PBI-11-B | AC-11-B | S2-T021 / S2-T022 | NOT IMPLEMENTED BY DAY1 | 仅冻结下游 `EventConstraintSet` 接口；不伪造 from-events 重规划或 V2 决策完成 |
 
-## 真实模块联动
+需求原文来自 Sprint2 待办表的 `SprintBacklog模板!A23:V24`、`PBI追溯!A11:J11`、`LLM JSON契约!A29:H36`。
 
-- `S2-T006 → S2-T008`：输入契约只接受 `placeFactId`、`sha256:<64 lowercase hex>` 摘要及安全属性。T008 不生成 FactRef，也不接触坐标、Provider 原文、价格或路线。最新版 main 还没有 T006 的正式 registry/fixture，因此追溯明确标为 `UPSTREAM_FIXTURE_CONTRACT_PENDING`。
-- `S2-T008 → S2-T009`：运行时暴露可注入的 `CandidateSelectionGateway`。成功只返回有序、唯一且属于请求白名单的地点 Fact ID；超时、鉴权、网络、非 JSON、Schema 错误或越权 ID 都返回 `DETERMINISTIC_ENUMERATION`，由 T009 继续确定性枚举，不进行第三次“修复”模型调用。
-- `S2-T007 → S2-T009`：公平性与确定性平局裁决是 T009 的另一条独立输入。T008 不计算分数，也不覆盖 T007 的裁决证据。
-- `S2-T009 → S2-T010`：属于间接下游。T009 必须恢复 T006 权威事实、执行公平性/路线/硬约束校验后才能交给 UI；本交付不虚报 T009 或 T010 已完成。
+## 可执行联动
 
-## 安全与职责边界
+```text
+S2-T019 rawText/currentTask
+  → 百炼严格 JSON（总计 10 秒截止）或固定表单降级
+  → ExecutionEventDraft
+  → 用户显式确认
+  → ConfirmedExecutionAdjustment
+  → S2-T020 确定性编译
+  → EventConstraintSet + 可见原因 + 稳定摘要
+  → S2-T021（Day2）从可信 CURRENT/FactRef 重编译并规划未完成后缀
+  → S2-T022 Diff/接受/拒绝
+```
 
-- 发给模型的 payload 不含 `factDigest`、坐标、Provider 原始响应、价格、路线、评分、约束或计划状态。
-- 所有模型可见自由文本先经过敏感词与 Prompt Injection 守卫；输出理由必须为每个入选地点命中至少一项输入标签/属性，风险提示必须能追溯到入选地点已有的 `riskFlags`。这些文本仍是非权威解释，程序不能据此改变 Provider 事实。
-- 模型输出使用 `extra=forbid`；禁止价格、路线、分数、`PASS`、`planId`、版本状态及“保证/确保可达”等断言。
-- 风险提示只能表达未知、未确认、待核实或缺失事实。
-- HTTP 错误与 Provider 响应会转换成稳定错误码，不把 Key、原始错误体或模型内部内容带到业务层。
-- 无 Key 时记录 `0` 次调用并直接进入确定性枚举；真实 Key 只应由本地或部署环境配置，不能提交到仓库。
+现有 S1 `ExecutionEventType` 仍严格为 START/COMPLETE/SKIP/EXPENSE；本交付没有让未确认的 LATE/FATIGUE 进入持久化。`EventConstraintSet` 也不会追加到 S1-T007 `confirmedConstraints`，因此不会破坏 AssistanceProfile 的 canonical 编译与现有 CandidatePlan 校验。
 
-## 仍需团队提供
+## 验收结果
 
-1. S2-T006 最终 FactRef Fixture、摘要生成规则或实现提交。
-2. S2-T009 消费接口确认，以及“模型失败后由 T009 枚举”的联调入口。
-3. 6–8 个同城、已脱敏、由服务端签发的真实候选事实。
-4. 仅用于现场验收的新百炼 Key（环境变量配置，不发聊天、不入 Git）。
-5. 非作者 Review、CI、QA 与 PO 验收记录。
+- S2-T019/T020 专项：`19 passed in 0.70s`
+- 融合 S2-T007 与 S2-T008 后的后端全量：`270 passed in 8.89s`
+- 前端 Node 测试：`32 passed`
+- 前端生产构建与 lint：PASS
+- `git diff --check`：PASS
 
-## 本地验收结果
+机器可读文件为 `docs/traceability/sprint2/lin_canhan_day1.json`；测试会逐项验证模块、Fixture、快照、PBI 联动和本交付未越界实现前端/T021。
 
-- S2-T008 与既有百炼解析聚焦回归：`64 passed`。
-- 后端全量：`228 passed`。
-- 前端兼容回归：`31 passed`，build 与 lint 均通过。
+## 待团队确认
 
-精确命令与耗时以 JSON 中 `localVerification` 为准；PR、CI、QA、PO 与真实模型调用未发生时保持为空，不用本地 Mock 结果冒充外部证据。
+1. 待 PO 最终确认疲劳三级的总步行、单段步行和休息间隔阈值；当前项目默认值记录在规则表中。
+2. 待 PO 确认迟到超过剩余时间时，是编译为 0 后交 T021 判无解，还是立即返回冲突。
+3. 待王敬博确认 T023 的接口调用方式和固定问题文案；本交付提供 HTTP 契约与 Fixture，不实现页面。
+4. Day2 接 S2-T021 前，需要陈梓元交付 S2-T005/S2-T006 的可信 CURRENT、多人执行和 FactRef 最终契约。
+5. 在线百炼验收需要一枚已轮换的 Key，仅放部署 Secret；不要发送到聊天或提交仓库。

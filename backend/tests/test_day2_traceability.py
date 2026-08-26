@@ -245,14 +245,10 @@ def test_local_verification_records_latest_full_and_frontend_results() -> None:
     trace = _trace()
 
     assert trace["localVerification"] == {
-        "status": "VERIFIED_ON_REMOTE_MAIN_AFTER_TEST_SUPPORT_MIGRATION",
+        "status": "VERIFIED_AFTER_S2_T008_T019_T020_INTEGRATION",
         "verifiedAt": "2026-08-26",
-        "backendCommand": (
-            "python -B -m pytest -p no:cacheprovider -q "
-            "--ignore=backend/tests/test_s2_t008_candidate_selection_gateway.py "
-            "--ignore=backend/tests/test_s2_t008_traceability.py"
-        ),
-        "backendResult": "167 passed in 8.52s",
+        "backendCommand": "python -B -m pytest -p no:cacheprovider -q",
+        "backendResult": "270 passed in 8.89s",
         "focusedCommand": (
             "python -B -m pytest -p no:cacheprovider -q "
             "backend/tests/test_candidate_planner.py "
@@ -263,8 +259,8 @@ def test_local_verification_records_latest_full_and_frontend_results() -> None:
             "backend/tests/test_trip_draft_llm_integration.py "
             "backend/tests/test_s1_t017_event_replan.py"
         ),
-        "focusedResult": "68 passed in 7.72s",
-        "frontendTest": "npm test: 31 passed",
+        "focusedResult": "69 passed in 6.62s",
+        "frontendTest": "npm test: 32 passed",
         "frontendBuild": "npm run build passed",
         "frontendLint": "npm run lint passed",
     }

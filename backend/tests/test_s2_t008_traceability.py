@@ -13,9 +13,9 @@ TRACE_PATH = (
     / "docs"
     / "traceability"
     / "sprint2"
-    / "lin_canhan_day1.json"
+    / "lin_canhan_s2_t008_day1.json"
 )
-REMOTE_MAIN_COMMIT = "3e60435fcfde0705149dbc5f340d60e1aa63103c"
+REMOTE_MAIN_COMMIT = "b88aeee441f1160243acf55521d50e4e1c26d7b9"
 
 
 def _trace() -> dict[str, object]:
@@ -90,10 +90,15 @@ def test_cross_module_linkages_are_explicit_and_honest() -> None:
     assert "T009 owns" in consumer["behavior"]
 
     fairness = linkages[("S2-T007", "S2-T009")]
-    assert fairness["status"] == "SIBLING_UPSTREAM_NOT_IMPLEMENTED_BY_T008"
+    assert fairness["status"] == "UPSTREAM_IMPLEMENTATION_AVAILABLE_ON_MAIN"
     assert "fairness" in fairness["contract"]
     assert "never calculates or overrides fairness" in fairness["behavior"]
-    assert fairness["files"] == []
+    assert "aggregate providerFactDigest" in fairness["behavior"]
+    assert fairness["files"] == [
+        "backend/app/services/fairness/models.py",
+        "backend/app/services/fairness/service.py",
+        "backend/tests/test_s2_t007_fairness.py",
+    ]
 
     ui = linkages[("S2-T009", "S2-T010")]
     assert ui["status"] == "INDIRECT_DOWNSTREAM_ONLY"
@@ -171,7 +176,7 @@ def test_responsibility_boundary_forbids_planning_decisions() -> None:
 
 def test_local_verification_records_the_actual_acceptance_run() -> None:
     assert _trace()["localVerification"] == {
-        "status": "VERIFIED_ON_REMOTE_MAIN_WITH_STRICT_GATEWAY_AND_TRACEABILITY",
+        "status": "VERIFIED_AFTER_MAIN_S2_T007_AND_LCH_T019_T020_INTEGRATION",
         "verifiedAt": "2026-08-26",
         "focusedCommand": (
             "python -B -m pytest -p no:cacheprovider -q "
@@ -180,10 +185,10 @@ def test_local_verification_records_the_actual_acceptance_run() -> None:
             "backend/tests/test_bailian_trip_extractor.py "
             "backend/tests/test_trip_draft_llm_integration.py"
         ),
-        "focusedResult": "64 passed in 0.92s",
+        "focusedResult": "65 passed in 1.06s",
         "fullCommand": "python -B -m pytest -p no:cacheprovider -q",
-        "fullResult": "228 passed in 10.16s",
-        "frontendTest": "npm test: 31 passed",
+        "fullResult": "270 passed in 8.89s",
+        "frontendTest": "npm test: 32 passed",
         "frontendBuild": "npm run build passed",
         "frontendLint": "npm run lint passed",
     }

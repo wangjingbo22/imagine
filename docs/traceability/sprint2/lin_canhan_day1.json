@@ -1,172 +1,165 @@
 {
   "schemaVersion": "1.0",
+  "sprint": "Sprint2",
+  "deliveryDay": "Day1",
   "owner": "林粲涵",
-  "sprint": "Sprint 2",
-  "scope": "DAY_1",
-  "verifiedAgainst": {
-    "remoteBranch": "origin/main",
-    "remoteMainCommit": "3e60435fcfde0705149dbc5f340d60e1aa63103c",
-    "verifiedAt": "2026-08-26"
-  },
-  "task": {
-    "taskId": "S2-T008",
-    "pbiId": "PBI-08-A",
-    "acId": "AC-08-A",
-    "owner": "林粲涵",
-    "priority": "Must",
-    "plannedDay": "Day1",
-    "estimateHours": 3,
-    "status": "IMPLEMENTED_WITH_UPSTREAM_FIXTURE_PENDING",
-    "dependsOn": ["S2-T006"],
-    "consumedBy": ["S2-T009"],
-    "indirectlyVisibleIn": ["S2-T010"],
-    "codeFiles": [
-      "backend/app/schemas/llm.py",
-      "app/application/llm_gateway.py",
-      "app/infrastructure/openai_compatible_llm.py"
-    ],
-    "integrationFiles": [
-      "app/main.py",
-      "app/core/config.py",
-      ".env.example"
-    ],
-    "testFiles": [
-      "backend/tests/test_s2_t008_candidate_selection_gateway.py",
-      "backend/tests/test_s2_t008_traceability.py"
-    ],
-    "fixtures": [
-      "backend/tests/fixtures/s2_t008/candidate_selection_request.json",
-      "backend/tests/fixtures/s2_t008/candidate_selection_proposal.json",
-      "backend/tests/fixtures/s2_t008/redacted_model_request.json"
-    ],
-    "schemaSnapshots": [
-      "backend/tests/snapshots/s2_t008_provider_candidate_selection.schema.json"
-    ],
-    "proves": [
-      "request-admits-exactly-six-to-eight-unique-server-factrefs",
-      "fact-digest-is-a-lowercase-sha256-identity",
-      "allowed-task-count-is-fixed-to-three-or-four",
-      "proposal-selects-two-to-three-unique-allowlisted-place-fact-ids",
-      "strict-json-schema-rejects-every-extra-field",
-      "model-cannot-author-price-route-score-pass-plan-or-version-state",
-      "risk-notes-only-report-unknown-or-unconfirmed-facts-without-guarantees",
-      "each-selected-place-and-risk-note-is-grounded-in-the-request-safe-projection",
-      "prompt-injection-or-sensitive-text-in-the-safe-projection-is-rejected-before-model-call",
-      "model-payload-excludes-digest-provider-payload-coordinates-and-sensitive-facts",
-      "candidate-model-timeout-is-ten-seconds-with-an-eight-to-twelve-second-config-guard",
-      "invalid-json-schema-or-allowlist-output-never-starts-a-repair-call",
-      "transient-transport-failure-stops-after-at-most-two-calls",
-      "all-model-failures-return-deterministic-enumeration-with-sanitized-codes",
-      "runtime-exposes-an-injectable-gateway-for-s2-t009"
-    ]
-  },
-  "pbiTrace": {
-    "pbiId": "PBI-08-A",
-    "acId": "AC-08-A",
-    "taskId": "S2-T008",
-    "moduleFiles": [
-      "backend/app/schemas/llm.py",
-      "app/application/llm_gateway.py",
-      "app/infrastructure/openai_compatible_llm.py",
-      "app/main.py",
-      "app/core/config.py",
-      ".env.example"
-    ],
-    "testFiles": [
-      "backend/tests/test_s2_t008_candidate_selection_gateway.py",
-      "backend/tests/test_s2_t008_traceability.py"
-    ],
-    "fixtureFiles": [
-      "backend/tests/fixtures/s2_t008/candidate_selection_request.json",
-      "backend/tests/fixtures/s2_t008/candidate_selection_proposal.json",
-      "backend/tests/fixtures/s2_t008/redacted_model_request.json"
-    ],
-    "schemaFiles": [
-      "backend/tests/snapshots/s2_t008_provider_candidate_selection.schema.json"
-    ]
-  },
-  "moduleLinkages": [
+  "verifiedAgainstMainCommit": "3e60435fcfde0705149dbc5f340d60e1aa63103c",
+  "integratedWithMainCommit": "b88aeee441f1160243acf55521d50e4e1c26d7b9",
+  "deliveryBaseCommit": "299341928f7d3c0474328219083e821bcb026498",
+  "implementationCommit": "f095e6973dced01d0f2498386e7b62779073053a",
+  "relatedDeliveryTrace": "docs/traceability/sprint2/lin_canhan_s2_t008_day1.json",
+  "requirementsSource": [
     {
-      "sourceTaskId": "S2-T006",
-      "targetTaskId": "S2-T008",
-      "status": "UPSTREAM_FIXTURE_CONTRACT_PENDING",
-      "contract": "ProviderCandidateFact(placeFactId, factDigest, displayName, categoryTags, knownAttributes, riskFlags)",
-      "behavior": "T008 accepts only opaque server-issued IDs and lowercase sha256 digests; it neither creates nor restores Provider facts.",
-      "files": [
-        "backend/app/schemas/llm.py",
-        "backend/tests/fixtures/s2_t008/candidate_selection_request.json"
-      ]
+      "file": "行知旅伴_V2.3_Sprint2待办列表_含负责人 (2).xlsx",
+      "sheet": "SprintBacklog模板",
+      "range": "A23:V24"
     },
     {
-      "sourceTaskId": "S2-T008",
-      "targetTaskId": "S2-T009",
-      "status": "READY_FOR_CONSUMER_INTEGRATION",
-      "contract": "CandidateSelectionGateway.select(ProviderCandidateSelectionRequest) -> CandidateSelectionGatewayResult",
-      "behavior": "A valid model proposal returns only ordered allowlisted placeFactIds and explanations; every failure returns DETERMINISTIC_ENUMERATION so T009 owns fact restoration, fairness, routing, validation and planning.",
-      "files": [
-        "app/application/llm_gateway.py",
-        "app/main.py",
-        "backend/tests/test_s2_t008_candidate_selection_gateway.py"
-      ]
+      "file": "行知旅伴_V2.3_Sprint2待办列表_含负责人 (2).xlsx",
+      "sheet": "PBI追溯",
+      "range": "A11:J11"
     },
     {
-      "sourceTaskId": "S2-T007",
-      "targetTaskId": "S2-T009",
-      "status": "SIBLING_UPSTREAM_NOT_IMPLEMENTED_BY_T008",
-      "contract": "fairness and deterministic tie-break evidence",
-      "behavior": "T007 is a separate input to T009's unique final decision; S2-T008 proposes an allowlisted shortlist and never calculates or overrides fairness.",
-      "files": []
-    },
-    {
-      "sourceTaskId": "S2-T009",
-      "targetTaskId": "S2-T010",
-      "status": "INDIRECT_DOWNSTREAM_ONLY",
-      "contract": "T009 validated candidates and evidence",
-      "behavior": "T008 does not emit UI data or claim T010 completion; the proposal becomes visible only after T009 restores and validates authoritative facts.",
-      "files": []
+      "file": "行知旅伴_V2.3_Sprint2待办列表_含负责人 (2).xlsx",
+      "sheet": "LLM JSON契约",
+      "range": "A29:H36"
     }
   ],
-  "responsibilityBoundary": {
-    "implemented": [
-      "strict candidate proposal request and response contracts",
-      "redacted OpenAI-compatible model request",
-      "allowlist and semantic validation",
-      "ten-second model timeout",
-      "zero-or-one transport retry and deterministic fallback",
-      "runtime injection port and call-count evidence"
-    ],
-    "notImplementedByS2T008": [
-      "S2-T006 FactRef registry, digest issuance or authoritative fact restoration",
-      "S2-T007 fairness calculation",
-      "S2-T009 deterministic enumeration, route generation or hard validation",
-      "price, route, score, PASS, Constraint, PlanVersion or persistence decisions",
-      "S2-T010 frontend rendering"
-    ]
+  "pbi": {
+    "pbiId": "PBI-11-B",
+    "acceptanceCriteriaId": "AC-11-B",
+    "day1Coverage": "S2-T019_AND_S2-T020_IMPLEMENTED",
+    "remainingTasks": ["S2-T021", "S2-T022"]
   },
-  "neededInputs": [
-    "S2-T006 final FactRef fixture and digest-generation contract or implementation commit",
-    "S2-T009 confirmation that it will consume CandidateSelectionGatewayResult and own deterministic fallback",
-    "six-to-eight real same-city redacted candidate facts for integration evidence",
-    "a newly rotated local BAILIAN_API_KEY only for opt-in live acceptance, never committed or sent in chat",
-    "non-author review plus QA and PO acceptance evidence"
+  "tasks": [
+    {
+      "taskId": "S2-T019",
+      "pbiId": "PBI-11-B",
+      "acceptanceCriteriaId": "AC-11-B",
+      "status": "IMPLEMENTED",
+      "dependsOn": ["EXISTING_BAILIAN_OPENAI_COMPATIBLE_ADAPTER"],
+      "consumedBy": ["S2-T020", "S2-T021", "S2-T023"],
+      "moduleFiles": [
+        "backend/app/schemas/execution_adjustment.py",
+        "app/application/execution_event_draft_service.py",
+        "app/infrastructure/bailian_execution_event.py",
+        "app/api/execution_adjustment_routes.py"
+      ],
+      "integrationFiles": [
+        "app/core/config.py",
+        "app/main.py",
+        ".env.example",
+        "render.yaml",
+        "docker-compose.prod.yml",
+        ".agent/api_contracts.md",
+        "frontend/src/api/API.md"
+      ],
+      "contractFiles": [
+        "backend/schemas/execution_event_draft.schema.json"
+      ],
+      "fixtureFiles": [
+        "backend/tests/fixtures/execution_adjustments/s2_t019_colloquial_cases.json"
+      ],
+      "testFiles": [
+        "backend/tests/test_s2_t019_execution_event_draft.py",
+        "backend/tests/test_s2_t019_t020_http.py"
+      ],
+      "proves": [
+        "late-and-fatigue-colloquial-drafts",
+        "fixed-question-keys-for-ambiguity",
+        "strict-json-and-extra-forbid",
+        "one-shot-end-to-end-ten-second-deadline",
+        "deterministic-form-fallback",
+        "zero-write-no-profile-constraint-or-plan-state"
+      ]
+    },
+    {
+      "taskId": "S2-T020",
+      "pbiId": "PBI-11-B",
+      "acceptanceCriteriaId": "AC-11-B",
+      "status": "IMPLEMENTED",
+      "dependsOn": ["S2-T019"],
+      "consumedBy": ["S2-T021", "S2-T023"],
+      "moduleFiles": [
+        "backend/app/schemas/execution_adjustment.py",
+        "backend/app/services/execution_adjustments/compiler.py",
+        "backend/app/services/execution_adjustments/__init__.py"
+      ],
+      "integrationFiles": [
+        "app/api/execution_adjustment_routes.py",
+        ".agent/api_contracts.md",
+        "frontend/src/api/API.md"
+      ],
+      "ruleFiles": [
+        "docs/rules/s2_t020_execution_adjustment_rules.md"
+      ],
+      "fixtureFiles": [
+        "backend/tests/fixtures/execution_adjustments/s2_t020_boundary_cases.json",
+        "backend/tests/snapshots/s2_t020_visible_reasons.json"
+      ],
+      "testFiles": [
+        "backend/tests/test_s2_t020_event_constraint_compiler.py",
+        "backend/tests/test_s2_t019_t020_http.py"
+      ],
+      "proves": [
+        "late-tightens-only-remaining-time",
+        "fatigue-tightens-only-walking-and-rest",
+        "never-relaxes-existing-server-limits",
+        "confirmed-event-required",
+        "same-input-same-output-and-digest",
+        "visible-reason-snapshot",
+        "long-term-profile-and-plan-state-unchanged"
+      ]
+    }
+  ],
+  "crossTaskLinkages": [
+    {
+      "from": "S2-T019",
+      "to": "S2-T020",
+      "artifact": "ConfirmedExecutionAdjustment",
+      "status": "EXECUTABLE_AND_TESTED"
+    },
+    {
+      "from": "S2-T020",
+      "to": "S2-T021",
+      "artifact": "EventConstraintSet",
+      "status": "DOWNSTREAM_PORT_ONLY_NOT_IMPLEMENTED_BY_DAY1"
+    },
+    {
+      "from": "S2-T019",
+      "to": "S2-T023",
+      "artifact": "ExecutionEventDraft plus fixed clarification questions",
+      "status": "FIXTURE_AND_HTTP_CONTRACT_READY_UI_NOT_IMPLEMENTED_HERE"
+    },
+    {
+      "from": "S2-T020",
+      "to": "S1-T007",
+      "artifact": "separate transient EventConstraintSet",
+      "status": "ISOLATED_MUST_NOT_APPEND_TO_CONFIRMED_CONSTRAINTS"
+    }
+  ],
+  "integrationBoundaries": [
+    "LLM only extracts an untrusted zero-write draft",
+    "program owns fixed questions confirmation validation and constraint conversion",
+    "existing START COMPLETE SKIP EXPENSE persistence is unchanged",
+        "AssistanceProfile and S1-T007 confirmedConstraints are unchanged",
+    "S2-T021 must recompute from trusted CURRENT task facts and the confirmed event",
+    "no frontend component is implemented by this delivery"
   ],
   "localVerification": {
-    "status": "VERIFIED_ON_REMOTE_MAIN_WITH_STRICT_GATEWAY_AND_TRACEABILITY",
-    "verifiedAt": "2026-08-26",
-    "focusedCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_s2_t008_candidate_selection_gateway.py backend/tests/test_s2_t008_traceability.py backend/tests/test_bailian_trip_extractor.py backend/tests/test_trip_draft_llm_integration.py",
-    "focusedResult": "64 passed in 0.92s",
-    "fullCommand": "python -B -m pytest -p no:cacheprovider -q",
-    "fullResult": "228 passed in 10.16s",
-    "frontendTest": "npm test: 31 passed",
-    "frontendBuild": "npm run build passed",
-    "frontendLint": "npm run lint passed"
+    "focusedCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_s2_t019_execution_event_draft.py backend/tests/test_s2_t020_event_constraint_compiler.py backend/tests/test_s2_t019_t020_http.py",
+    "focusedResult": "19 passed in 0.70s",
+    "backendCommand": "python -B -m pytest -p no:cacheprovider -q",
+    "backendResult": "270 passed in 8.89s",
+    "frontendTest": "32 passed",
+    "frontendBuild": "PASS",
+    "frontendLint": "PASS",
+    "diffCheck": "PASS"
   },
-  "externalEvidence": {
-    "pullRequest": null,
-    "ciBuild": null,
-    "reviewer": null,
-    "qa": null,
-    "po": null,
-    "liveModelRun": null
-  }
+  "productDecisionsStillNeeded": [
+    "PO must confirm MILD MODERATE SEVERE walking and rest thresholds",
+    "PO must confirm whether lateMinutes beyond remaining time compiles to zero or returns an immediate conflict",
+    "Wang Jingbo must confirm S2-T023 endpoint and fixed question copy consumption",
+    "S2-T021 needs final S2-T005 and S2-T006 trusted CURRENT and FactRef contracts"
+  ]
 }

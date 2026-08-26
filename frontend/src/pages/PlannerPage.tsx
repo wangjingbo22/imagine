@@ -21,6 +21,7 @@ import { buildAssistanceProfile } from '../api/tripContract'
 import { AppShell } from '../components/AppShell'
 import {
   buildNaturalLanguageParseInput,
+  recognitionResultMessage,
   splitPlaceInput,
   toRecognizedFormPatch,
 } from '../services/tripDraftRecognition'
@@ -216,11 +217,7 @@ export function PlannerPage() {
       applyRecognizedFields(response.data.parsed)
       setConfirmationItems(response.data.confirmationItems)
       setLastAnalyzedRequest(request.trim())
-      setAnalysisMessage(
-        response.data.confirmationItems.length > 0
-          ? `已识别并回填，仍有 ${response.data.confirmationItems.length} 项需要确认。`
-          : '识别完成，城市、日期、时间、预算和地点限制已填入表单。',
-      )
+      setAnalysisMessage(recognitionResultMessage(response.data))
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : '自然语言识别失败，请稍后重试。')
     } finally {
@@ -385,7 +382,7 @@ export function PlannerPage() {
             <div className="smart-textarea">
               <textarea id="trip-request" maxLength={300} value={request} onChange={(event) => handleRequestChange(event.target.value)} />
               <div className="smart-textarea__footer">
-                <span className="smart-textarea__hint"><Sparkles size={15} /> 百炼将识别城市、日期、时间、预算和地点限制</span>
+                <span className="smart-textarea__hint"><Sparkles size={15} /> 已配置 Key 时由百炼识别；否则使用本地规则</span>
                 <div className="smart-textarea__actions">
                   <span>{request.length}/300</span>
                   <button
