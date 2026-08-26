@@ -30,7 +30,7 @@ export type PlanTaskStatus = 'completed' | 'current' | 'upcoming' | 'removed'
 
 export type ValidationStatus = 'PASS' | 'WARNING' | 'NEEDS_CONFIRMATION' | 'FAIL'
 
-export type TripMode = 'SINGLE'
+export type TripMode = 'SINGLE' | 'GROUP'
 
 export type TripStatus =
   | 'DRAFT'
@@ -261,10 +261,29 @@ export interface TripDayInput {
   timeWindow: TimeWindow
 }
 
-export interface CreateSingleDayTrip {
+export type CreateDayTripParticipants =
+  | [Participant]
+  | [Participant, Participant]
+  | [Participant, Participant, Participant]
+
+export interface CreateDayTrip {
   schemaVersion: '1.0'
   tripId: string
   mode: TripMode
+  status: 'DRAFT'
+  cityContext: CityContext
+  startDate: string
+  endDate: string
+  currency: 'CNY'
+  totalBudgetCents: number
+  participants: CreateDayTripParticipants
+  days: [TripDayInput]
+}
+
+export interface CreateSingleDayTrip {
+  schemaVersion: '1.0'
+  tripId: string
+  mode: 'SINGLE'
   status: 'DRAFT'
   cityContext: CityContext
   startDate: string
@@ -276,6 +295,7 @@ export interface CreateSingleDayTrip {
 }
 
 export interface CandidatePlanningTrip extends Omit<CreateSingleDayTrip, 'status'> {
+  mode: 'SINGLE'
   status: 'CONSTRAINT_CONFIRMED' | 'PLANNING' | 'PLAN_REVIEW'
 }
 

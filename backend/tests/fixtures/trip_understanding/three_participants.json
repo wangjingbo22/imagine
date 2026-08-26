@@ -1,0 +1,90 @@
+{
+  "schemaVersion": "1.0",
+  "trip": {
+    "cityName": "Shanghai",
+    "travelDate": "2026-10-03",
+    "startTime": "08:30",
+    "endTime": "20:00",
+    "startLocationText": "Hongqiao Station",
+    "endLocationText": "The Bund",
+    "budgetCents": 90000
+  },
+  "participants": [
+    {
+      "memberKey": "member-1",
+      "nickname": "Alex",
+      "budgetCapCents": 40000,
+      "interests": ["architecture"],
+      "mustVisit": ["The Bund"],
+      "avoidPlaces": [],
+      "careDraft": null
+    },
+    {
+      "memberKey": "member-2",
+      "nickname": "Bao",
+      "budgetCapCents": 30000,
+      "interests": ["food"],
+      "mustVisit": [],
+      "avoidPlaces": ["crowded malls"],
+      "careDraft": {
+        "assistanceTypeHint": "LOW_STAMINA",
+        "childAge": null,
+        "walkLimits": {"maxContinuousMeters": 500, "maxDailyMeters": null},
+        "maxTransfers": 2,
+        "restIntervalMinutes": 90,
+        "napWindow": null,
+        "avoidStairs": null
+      }
+    },
+    {
+      "memberKey": "member-3",
+      "nickname": "Chen",
+      "budgetCapCents": 20000,
+      "interests": [],
+      "mustVisit": [],
+      "avoidPlaces": ["crowded malls"],
+      "careDraft": {
+        "assistanceTypeHint": "PARENT_CHILD",
+        "childAge": 6,
+        "walkLimits": {"maxContinuousMeters": null, "maxDailyMeters": null},
+        "maxTransfers": null,
+        "restIntervalMinutes": null,
+        "napWindow": null,
+        "avoidStairs": null
+      }
+    }
+  ],
+  "fieldEvidence": [
+    {"fieldPath": "trip.cityName", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "Shanghai"},
+    {"fieldPath": "trip.travelDate", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "2026-10-03"},
+    {"fieldPath": "trip.startTime", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "08:30"},
+    {"fieldPath": "trip.endTime", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "20:00"},
+    {"fieldPath": "trip.startLocationText", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "Hongqiao Station"},
+    {"fieldPath": "trip.endLocationText", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "The Bund"},
+    {"fieldPath": "trip.budgetCents", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "90000"},
+    {"fieldPath": "participants[0].nickname", "memberKey": "member-1", "sourceType": "USER_TEXT", "sourceText": "Alex"},
+    {"fieldPath": "participants[0].budgetCapCents", "memberKey": "member-1", "sourceType": "USER_TEXT", "sourceText": "40000"},
+    {"fieldPath": "participants[0].interests[0]", "memberKey": "member-1", "sourceType": "USER_TEXT", "sourceText": "architecture"},
+    {"fieldPath": "participants[0].mustVisit[0]", "memberKey": "member-1", "sourceType": "USER_TEXT", "sourceText": "The Bund"},
+    {"fieldPath": "participants[1].nickname", "memberKey": "member-2", "sourceType": "USER_TEXT", "sourceText": "Bao"},
+    {"fieldPath": "participants[1].budgetCapCents", "memberKey": "member-2", "sourceType": "USER_TEXT", "sourceText": "30000"},
+    {"fieldPath": "participants[1].interests[0]", "memberKey": "member-2", "sourceType": "USER_TEXT", "sourceText": "food"},
+    {"fieldPath": "participants[1].avoidPlaces[0]", "memberKey": "member-2", "sourceType": "USER_TEXT", "sourceText": "crowded malls"},
+    {"fieldPath": "participants[1].careDraft.assistanceTypeHint", "memberKey": "member-2", "sourceType": "USER_TEXT", "sourceText": "LOW_STAMINA"},
+    {"fieldPath": "participants[1].careDraft.walkLimits.maxContinuousMeters", "memberKey": "member-2", "sourceType": "USER_TEXT", "sourceText": "500"},
+    {"fieldPath": "participants[1].careDraft.maxTransfers", "memberKey": "member-2", "sourceType": "USER_TEXT", "sourceText": "2"},
+    {"fieldPath": "participants[1].careDraft.restIntervalMinutes", "memberKey": "member-2", "sourceType": "USER_TEXT", "sourceText": "90"},
+    {"fieldPath": "participants[2].nickname", "memberKey": "member-3", "sourceType": "USER_TEXT", "sourceText": "Chen"},
+    {"fieldPath": "participants[2].budgetCapCents", "memberKey": "member-3", "sourceType": "USER_TEXT", "sourceText": "20000"},
+    {"fieldPath": "participants[2].avoidPlaces[0]", "memberKey": "member-3", "sourceType": "USER_TEXT", "sourceText": "crowded malls"},
+    {"fieldPath": "participants[2].careDraft.assistanceTypeHint", "memberKey": "member-3", "sourceType": "USER_TEXT", "sourceText": "PARENT_CHILD"},
+    {"fieldPath": "participants[2].careDraft.childAge", "memberKey": "member-3", "sourceType": "USER_TEXT", "sourceText": "6"}
+  ],
+  "missingFields": [
+    {"fieldPath": "participants[2].careDraft.walkLimits.maxContinuousMeters", "memberKey": "member-3", "code": "MISSING", "questionKey": "MEMBER_CARE_DETAILS"}
+  ],
+  "ambiguities": [],
+  "confirmationQuestions": [
+    {"fieldPath": "participants[2].careDraft.walkLimits.maxContinuousMeters", "memberKey": "member-3", "questionKey": "MEMBER_CARE_DETAILS", "prompt": "What is Chen's maximum continuous walking distance?", "choices": []}
+  ]
+}

@@ -1,0 +1,671 @@
+{
+  "$defs": {
+    "Ambiguity": {
+      "additionalProperties": false,
+      "properties": {
+        "candidates": {
+          "items": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 2,
+          "title": "Candidates",
+          "type": "array"
+        },
+        "code": {
+          "const": "AMBIGUOUS",
+          "title": "Code",
+          "type": "string"
+        },
+        "fieldPath": {
+          "pattern": "(?:trip\\.(?:cityName|travelDate|startTime|endTime|startLocationText|endLocationText|budgetCents)|participants|participants\\[\\d+\\]\\.(?:nickname|budgetCapCents|interests\\[\\d+\\]|mustVisit\\[\\d+\\]|avoidPlaces\\[\\d+\\]|careDraft\\.(?:assistanceTypeHint|childAge|walkLimits\\.(?:maxContinuousMeters|maxDailyMeters)|maxTransfers|restIntervalMinutes|napWindow\\.(?:start|end)|avoidStairs)))",
+          "title": "Fieldpath",
+          "type": "string"
+        },
+        "memberKey": {
+          "anyOf": [
+            {
+              "pattern": "^member-[1-3]$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Memberkey"
+        },
+        "questionKey": {
+          "enum": [
+            "CITY_NAME",
+            "TRAVEL_DATE",
+            "START_TIME",
+            "END_TIME",
+            "START_LOCATION",
+            "END_LOCATION",
+            "TRIP_BUDGET",
+            "PARTY_SIZE",
+            "MEMBER_NICKNAME",
+            "MEMBER_BUDGET",
+            "MEMBER_INTERESTS",
+            "MEMBER_MUST_VISIT",
+            "MEMBER_AVOID_PLACES",
+            "MEMBER_CARE_PRESET",
+            "MEMBER_CARE_DETAILS"
+          ],
+          "title": "Questionkey",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fieldPath",
+        "memberKey",
+        "code",
+        "reason",
+        "candidates",
+        "questionKey"
+      ],
+      "title": "Ambiguity",
+      "type": "object"
+    },
+    "CareDraft": {
+      "additionalProperties": false,
+      "properties": {
+        "assistanceTypeHint": {
+          "anyOf": [
+            {
+              "enum": [
+                "ORDINARY",
+                "PARENT_CHILD",
+                "LOW_STAMINA",
+                "MOBILITY_ASSISTANCE_BETA"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Assistancetypehint"
+        },
+        "avoidStairs": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Avoidstairs"
+        },
+        "childAge": {
+          "anyOf": [
+            {
+              "maximum": 17,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Childage"
+        },
+        "maxTransfers": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Maxtransfers"
+        },
+        "napWindow": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CareNapWindow"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "restIntervalMinutes": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Restintervalminutes"
+        },
+        "walkLimits": {
+          "$ref": "#/$defs/CareWalkLimits"
+        }
+      },
+      "required": [
+        "assistanceTypeHint",
+        "childAge",
+        "walkLimits",
+        "maxTransfers",
+        "restIntervalMinutes",
+        "napWindow",
+        "avoidStairs"
+      ],
+      "title": "CareDraft",
+      "type": "object"
+    },
+    "CareNapWindow": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "anyOf": [
+            {
+              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "End"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Start"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "title": "CareNapWindow",
+      "type": "object"
+    },
+    "CareWalkLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "maxContinuousMeters": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Maxcontinuousmeters"
+        },
+        "maxDailyMeters": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Maxdailymeters"
+        }
+      },
+      "required": [
+        "maxContinuousMeters",
+        "maxDailyMeters"
+      ],
+      "title": "CareWalkLimits",
+      "type": "object"
+    },
+    "ConfirmationQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "choices": {
+          "items": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 0,
+          "title": "Choices",
+          "type": "array"
+        },
+        "fieldPath": {
+          "pattern": "(?:trip\\.(?:cityName|travelDate|startTime|endTime|startLocationText|endLocationText|budgetCents)|participants|participants\\[\\d+\\]\\.(?:nickname|budgetCapCents|interests\\[\\d+\\]|mustVisit\\[\\d+\\]|avoidPlaces\\[\\d+\\]|careDraft\\.(?:assistanceTypeHint|childAge|walkLimits\\.(?:maxContinuousMeters|maxDailyMeters)|maxTransfers|restIntervalMinutes|napWindow\\.(?:start|end)|avoidStairs)))",
+          "title": "Fieldpath",
+          "type": "string"
+        },
+        "memberKey": {
+          "anyOf": [
+            {
+              "pattern": "^member-[1-3]$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Memberkey"
+        },
+        "prompt": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        },
+        "questionKey": {
+          "enum": [
+            "CITY_NAME",
+            "TRAVEL_DATE",
+            "START_TIME",
+            "END_TIME",
+            "START_LOCATION",
+            "END_LOCATION",
+            "TRIP_BUDGET",
+            "PARTY_SIZE",
+            "MEMBER_NICKNAME",
+            "MEMBER_BUDGET",
+            "MEMBER_INTERESTS",
+            "MEMBER_MUST_VISIT",
+            "MEMBER_AVOID_PLACES",
+            "MEMBER_CARE_PRESET",
+            "MEMBER_CARE_DETAILS"
+          ],
+          "title": "Questionkey",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fieldPath",
+        "memberKey",
+        "questionKey",
+        "prompt",
+        "choices"
+      ],
+      "title": "ConfirmationQuestion",
+      "type": "object"
+    },
+    "FieldEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "fieldPath": {
+          "pattern": "(?:trip\\.(?:cityName|travelDate|startTime|endTime|startLocationText|endLocationText|budgetCents)|participants|participants\\[\\d+\\]\\.(?:nickname|budgetCapCents|interests\\[\\d+\\]|mustVisit\\[\\d+\\]|avoidPlaces\\[\\d+\\]|careDraft\\.(?:assistanceTypeHint|childAge|walkLimits\\.(?:maxContinuousMeters|maxDailyMeters)|maxTransfers|restIntervalMinutes|napWindow\\.(?:start|end)|avoidStairs)))",
+          "title": "Fieldpath",
+          "type": "string"
+        },
+        "memberKey": {
+          "anyOf": [
+            {
+              "pattern": "^member-[1-3]$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Memberkey"
+        },
+        "sourceText": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Sourcetext",
+          "type": "string"
+        },
+        "sourceType": {
+          "enum": [
+            "USER_TEXT",
+            "EXPLICIT_FIELD"
+          ],
+          "title": "Sourcetype",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fieldPath",
+        "memberKey",
+        "sourceType",
+        "sourceText"
+      ],
+      "title": "FieldEvidence",
+      "type": "object"
+    },
+    "MissingField": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "const": "MISSING",
+          "title": "Code",
+          "type": "string"
+        },
+        "fieldPath": {
+          "pattern": "(?:trip\\.(?:cityName|travelDate|startTime|endTime|startLocationText|endLocationText|budgetCents)|participants|participants\\[\\d+\\]\\.(?:nickname|budgetCapCents|interests\\[\\d+\\]|mustVisit\\[\\d+\\]|avoidPlaces\\[\\d+\\]|careDraft\\.(?:assistanceTypeHint|childAge|walkLimits\\.(?:maxContinuousMeters|maxDailyMeters)|maxTransfers|restIntervalMinutes|napWindow\\.(?:start|end)|avoidStairs)))",
+          "title": "Fieldpath",
+          "type": "string"
+        },
+        "memberKey": {
+          "anyOf": [
+            {
+              "pattern": "^member-[1-3]$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Memberkey"
+        },
+        "questionKey": {
+          "enum": [
+            "CITY_NAME",
+            "TRAVEL_DATE",
+            "START_TIME",
+            "END_TIME",
+            "START_LOCATION",
+            "END_LOCATION",
+            "TRIP_BUDGET",
+            "PARTY_SIZE",
+            "MEMBER_NICKNAME",
+            "MEMBER_BUDGET",
+            "MEMBER_INTERESTS",
+            "MEMBER_MUST_VISIT",
+            "MEMBER_AVOID_PLACES",
+            "MEMBER_CARE_PRESET",
+            "MEMBER_CARE_DETAILS"
+          ],
+          "title": "Questionkey",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fieldPath",
+        "memberKey",
+        "code",
+        "questionKey"
+      ],
+      "title": "MissingField",
+      "type": "object"
+    },
+    "ParticipantUnderstanding": {
+      "additionalProperties": false,
+      "properties": {
+        "avoidPlaces": {
+          "items": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "minItems": 0,
+          "title": "Avoidplaces",
+          "type": "array"
+        },
+        "budgetCapCents": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Budgetcapcents"
+        },
+        "careDraft": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CareDraft"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "interests": {
+          "items": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "minItems": 0,
+          "title": "Interests",
+          "type": "array"
+        },
+        "memberKey": {
+          "pattern": "^member-[1-3]$",
+          "title": "Memberkey",
+          "type": "string"
+        },
+        "mustVisit": {
+          "items": {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "minItems": 0,
+          "title": "Mustvisit",
+          "type": "array"
+        },
+        "nickname": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Nickname"
+        }
+      },
+      "required": [
+        "memberKey",
+        "nickname",
+        "budgetCapCents",
+        "interests",
+        "mustVisit",
+        "avoidPlaces",
+        "careDraft"
+      ],
+      "title": "ParticipantUnderstanding",
+      "type": "object"
+    },
+    "TripUnderstandingTrip": {
+      "additionalProperties": false,
+      "properties": {
+        "budgetCents": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Budgetcents"
+        },
+        "cityName": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cityname"
+        },
+        "endLocationText": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Endlocationtext"
+        },
+        "endTime": {
+          "anyOf": [
+            {
+              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Endtime"
+        },
+        "startLocationText": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Startlocationtext"
+        },
+        "startTime": {
+          "anyOf": [
+            {
+              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Starttime"
+        },
+        "travelDate": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Traveldate"
+        }
+      },
+      "required": [
+        "cityName",
+        "travelDate",
+        "startTime",
+        "endTime",
+        "startLocationText",
+        "endLocationText",
+        "budgetCents"
+      ],
+      "title": "TripUnderstandingTrip",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "ambiguities": {
+      "items": {
+        "$ref": "#/$defs/Ambiguity"
+      },
+      "maxItems": 50,
+      "minItems": 0,
+      "title": "Ambiguities",
+      "type": "array"
+    },
+    "confirmationQuestions": {
+      "items": {
+        "$ref": "#/$defs/ConfirmationQuestion"
+      },
+      "maxItems": 50,
+      "minItems": 0,
+      "title": "Confirmationquestions",
+      "type": "array"
+    },
+    "fieldEvidence": {
+      "items": {
+        "$ref": "#/$defs/FieldEvidence"
+      },
+      "maxItems": 100,
+      "minItems": 0,
+      "title": "Fieldevidence",
+      "type": "array"
+    },
+    "missingFields": {
+      "items": {
+        "$ref": "#/$defs/MissingField"
+      },
+      "maxItems": 50,
+      "minItems": 0,
+      "title": "Missingfields",
+      "type": "array"
+    },
+    "participants": {
+      "items": {
+        "$ref": "#/$defs/ParticipantUnderstanding"
+      },
+      "maxItems": 3,
+      "minItems": 1,
+      "title": "Participants",
+      "type": "array"
+    },
+    "schemaVersion": {
+      "const": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "trip": {
+      "$ref": "#/$defs/TripUnderstandingTrip"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "trip",
+    "participants",
+    "fieldEvidence",
+    "missingFields",
+    "ambiguities",
+    "confirmationQuestions"
+  ],
+  "title": "TripUnderstandingProposal",
+  "type": "object"
+}

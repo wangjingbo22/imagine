@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "1.0",
+  "trip": {
+    "cityName": "Shanghai",
+    "travelDate": "2026-10-03",
+    "startTime": "08:30",
+    "endTime": "20:00",
+    "startLocationText": "Hongqiao Station",
+    "endLocationText": "The Bund",
+    "budgetCents": 90000
+  },
+  "participants": [
+    {
+      "memberKey": "member-1",
+      "nickname": "Alex",
+      "budgetCapCents": 50000,
+      "interests": ["architecture"],
+      "mustVisit": ["The Bund"],
+      "avoidPlaces": [],
+      "careDraft": null
+    },
+    {
+      "memberKey": "member-2",
+      "nickname": "Bao",
+      "budgetCapCents": 40000,
+      "interests": ["food"],
+      "mustVisit": [],
+      "avoidPlaces": ["crowded malls"],
+      "careDraft": null
+    }
+  ],
+  "fieldEvidence": [
+    {"fieldPath": "trip.cityName", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "Shanghai"},
+    {"fieldPath": "trip.travelDate", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "2026-10-03"},
+    {"fieldPath": "trip.startTime", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "08:30"},
+    {"fieldPath": "trip.endTime", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "20:00"},
+    {"fieldPath": "trip.startLocationText", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "Hongqiao Station"},
+    {"fieldPath": "trip.endLocationText", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "The Bund"},
+    {"fieldPath": "trip.budgetCents", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "90000"},
+    {"fieldPath": "participants[0].nickname", "memberKey": "member-1", "sourceType": "USER_TEXT", "sourceText": "Alex"},
+    {"fieldPath": "participants[0].budgetCapCents", "memberKey": "member-1", "sourceType": "USER_TEXT", "sourceText": "50000"},
+    {"fieldPath": "participants[0].interests[0]", "memberKey": "member-1", "sourceType": "USER_TEXT", "sourceText": "architecture"},
+    {"fieldPath": "participants[0].mustVisit[0]", "memberKey": "member-1", "sourceType": "USER_TEXT", "sourceText": "The Bund"},
+    {"fieldPath": "participants[1].nickname", "memberKey": "member-2", "sourceType": "USER_TEXT", "sourceText": "Bao"},
+    {"fieldPath": "participants[1].budgetCapCents", "memberKey": "member-2", "sourceType": "USER_TEXT", "sourceText": "40000"},
+    {"fieldPath": "participants[1].interests[0]", "memberKey": "member-2", "sourceType": "USER_TEXT", "sourceText": "food"},
+    {"fieldPath": "participants[1].avoidPlaces[0]", "memberKey": "member-2", "sourceType": "USER_TEXT", "sourceText": "crowded malls"}
+  ],
+  "missingFields": [
+    {"fieldPath": "participants[1].careDraft.assistanceTypeHint", "memberKey": "member-2", "code": "MISSING", "questionKey": "MEMBER_CARE_PRESET"}
+  ],
+  "ambiguities": [],
+  "confirmationQuestions": [
+    {"fieldPath": "participants[1].careDraft.assistanceTypeHint", "memberKey": "member-2", "questionKey": "MEMBER_CARE_PRESET", "prompt": "Does Bao need a care preset?", "choices": []}
+  ]
+}

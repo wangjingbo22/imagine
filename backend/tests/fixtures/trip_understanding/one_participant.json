@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "1.0",
+  "trip": {
+    "cityName": "Beijing",
+    "travelDate": "2026-09-05",
+    "startTime": "09:00",
+    "endTime": "18:00",
+    "startLocationText": "Beijing Railway Station",
+    "endLocationText": "Forbidden City",
+    "budgetCents": 50000
+  },
+  "participants": [
+    {
+      "memberKey": "member-1",
+      "nickname": "Alex",
+      "budgetCapCents": 50000,
+      "interests": ["museum"],
+      "mustVisit": ["Forbidden City"],
+      "avoidPlaces": [],
+      "careDraft": null
+    }
+  ],
+  "fieldEvidence": [
+    {"fieldPath": "trip.cityName", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "Beijing"},
+    {"fieldPath": "trip.travelDate", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "2026-09-05"},
+    {"fieldPath": "trip.startTime", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "09:00"},
+    {"fieldPath": "trip.endTime", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "18:00"},
+    {"fieldPath": "trip.startLocationText", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "Beijing Railway Station"},
+    {"fieldPath": "trip.endLocationText", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "Forbidden City"},
+    {"fieldPath": "trip.budgetCents", "memberKey": null, "sourceType": "USER_TEXT", "sourceText": "50000"},
+    {"fieldPath": "participants[0].nickname", "memberKey": "member-1", "sourceType": "USER_TEXT", "sourceText": "Alex"},
+    {"fieldPath": "participants[0].budgetCapCents", "memberKey": "member-1", "sourceType": "USER_TEXT", "sourceText": "50000"},
+    {"fieldPath": "participants[0].interests[0]", "memberKey": "member-1", "sourceType": "USER_TEXT", "sourceText": "museum"},
+    {"fieldPath": "participants[0].mustVisit[0]", "memberKey": "member-1", "sourceType": "USER_TEXT", "sourceText": "Forbidden City"}
+  ],
+  "missingFields": [],
+  "ambiguities": [],
+  "confirmationQuestions": []
+}

@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "1.0",
+  "tripId": "00000000-0000-4000-8000-000000000010",
+  "mode": "GROUP",
+  "status": "DRAFT",
+  "cityContext": {
+    "countryCode": "CN",
+    "cityCode": "110000",
+    "cityName": "Beijing",
+    "center": {
+      "longitude": 116.407387,
+      "latitude": 39.904179
+    },
+    "providerConfig": {
+      "provider": "AMAP",
+      "coordinateSystem": "GCJ02"
+    }
+  },
+  "startDate": "2026-09-05",
+  "endDate": "2026-09-05",
+  "currency": "CNY",
+  "totalBudgetCents": 50000,
+  "participants": [
+    {
+      "participantId": "10000000-0000-4000-8000-000000000010",
+      "nickname": "Alex",
+      "budgetCapCents": 30000,
+      "preferences": [
+        {
+          "type": "INTEREST",
+          "value": "museum",
+          "weight": 4,
+          "isHard": false
+        }
+      ],
+      "assistanceProfile": null
+    },
+    {
+      "participantId": "10000000-0000-4000-8000-000000000011",
+      "nickname": "Bao",
+      "budgetCapCents": 20000,
+      "preferences": [
+        {
+          "type": "MUST_VISIT",
+          "value": "Forbidden City",
+          "weight": 5,
+          "isHard": true
+        }
+      ],
+      "assistanceProfile": {
+        "type": "LOW_STAMINA",
+        "childAge": null,
+        "walkLimits": {
+          "maxContinuousMeters": 500,
+          "maxDailyMeters": null
+        },
+        "maxTransfers": 2,
+        "restInterval": 90,
+        "napWindow": null,
+        "avoidStairs": false
+      }
+    }
+  ],
+  "days": [
+    {
+      "dayIndex": 0,
+      "date": "2026-09-05",
+      "dailyBudgetCents": 45000,
+      "startLocationText": "Beijing Railway Station",
+      "endLocationText": "Forbidden City",
+      "timeWindow": {
+        "start": "09:00:00",
+        "end": "20:00:00"
+      }
+    }
+  ]
+}

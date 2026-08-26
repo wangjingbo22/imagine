@@ -77,6 +77,7 @@ class ContractModel(BaseModel):
 
 class TripMode(str, Enum):
     SINGLE = "SINGLE"
+    GROUP = "GROUP"
 
 
 class TripStatus(str, Enum):
@@ -195,11 +196,36 @@ class Trip(ContractModel):
     end_date: date
     currency: Literal["CNY"]
     total_budget_cents: Annotated[int, Field(ge=0)]
-    participants: list[Participant] = Field(min_length=1)
+    participants: list[Participant] = Field(min_length=1, max_length=3)
     days: list[TripDayInput] = Field(min_length=1)
 
+    @model_validator(mode="after")
+    def validate_participant_count_by_mode(self) -> "Trip":
+        participant_count = len(self.participants)
+        if self.mode is TripMode.SINGLE and participant_count != 1:
+            raise PydanticCustomError(
+                "mode_participant_mismatch",
+                "SINGLE trips must contain exactly one participant",
+                {"public_path": "participants"},
+            )
+        if self.mode is TripMode.GROUP and not 2 <= participant_count <= 3:
+            raise PydanticCustomError(
+                "mode_participant_mismatch",
+                "GROUP trips must contain two or three participants",
+                {"public_path": "participants"},
+            )
+        return self
 
-class CreateSingleDayTrip(Trip):
+
+class CreateDayTrip(Trip):
+    """The unified one-day DRAFT entry for one to three participants."""
+
+    status: Literal["DRAFT"]
+    participants: list[Participant] = Field(min_length=1, max_length=3)
+    days: list[TripDayInput] = Field(min_length=1, max_length=1)
+
+
+class CreateSingleDayTrip(CreateDayTrip):
     mode: Literal["SINGLE"]
     status: Literal["DRAFT"]
     participants: list[Participant] = Field(min_length=1, max_length=1)
@@ -211,7 +237,7 @@ def _normalized_preference(value: str) -> str:
 
 
 def validate_single_day_policy(
-    trip: CreateSingleDayTrip | PlanReviewTripSnapshot,
+    trip: CreateDayTrip | PlanReviewTripSnapshot,
 ) -> list[ValidationIssue]:
     """Validate cross-field rules that JSON Schema cannot express alone."""
 
@@ -337,10 +363,25 @@ def validate_trip_json(raw: str | bytes) -> CreateSingleDayTrip:
     return trip
 
 
+def validate_create_day_trip_json(raw: str | bytes) -> CreateDayTrip:
+    """Parse and validate the unified one-day DRAFT Trip contract."""
+
+    try:
+        trip = CreateDayTrip.model_validate_json(raw, strict=True)
+    except ValidationError as exc:
+        raise TripSchemaError(issues_from_pydantic(exc.errors())) from exc
+
+    policy_issues = validate_single_day_policy(trip)
+    if policy_issues:
+        raise TripSchemaError(policy_issues)
+    return trip
+
+
 __all__ = [
     "AssistanceProfile",
     "AssistanceType",
     "CityContext",
+    "CreateDayTrip",
     "CreateSingleDayTrip",
     "GeoPoint",
     "NapWindow",
@@ -356,5 +397,6 @@ __all__ = [
     "TripStatus",
     "WalkLimits",
     "validate_single_day_policy",
+    "validate_create_day_trip_json",
     "validate_trip_json",
 ]
