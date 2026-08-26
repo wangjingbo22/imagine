@@ -13,6 +13,10 @@ from app.api.plan_routes import router as plan_router
 from app.api.planning_routes import router as planning_router
 from app.api.trip_draft_routes import router as trip_draft_router
 from app.api.workflow_routes import router as workflow_router
+from app.api.collaboration_routes import router as collaboration_router
+from app.api.recommendation_routes import router as recommendation_router
+from app.api.media_routes import router as media_router
+from app.application.collaboration_service import CollaborationService
 from app.application.amap_service import AmapLocationService
 from app.application.llm_gateway import (
     CandidateSelectionGateway,
@@ -34,6 +38,7 @@ from app.infrastructure.cache import SqliteProviderCache
 from app.infrastructure.openai_compatible_llm import (
     OpenAiCompatibleCandidateSelectionClient,
 )
+from app.infrastructure.collaboration_store import SqliteCollaborationRepository
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.infrastructure.trusted_planning_store import SqliteTrustedPlanningRepository
 from app.infrastructure.workflow_store import SqliteWorkflowRepository
@@ -272,7 +277,7 @@ def create_app(
         allow_origins=resolved_settings.cors_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "X-Organizer-Token"],
         expose_headers=[
             "X-Recognition-Source",
             "X-Recognition-Model",
@@ -286,12 +291,18 @@ def create_app(
         if managed_bailian_extractor is not None
         else "DETERMINISTIC_RULES"
     )
+    app.state.media_database_path = resolved_settings.plan_version_db_path
     app.state.trip_draft_service = TripDraftParserService(
         service,
         llm_extractor=managed_bailian_extractor,
     )
     app.state.candidate_selection_gateway = candidate_selection_gateway
     app.state.execution_event_draft_service = execution_event_draft_service
+    app.state.collaboration_service = CollaborationService(
+        SqliteCollaborationRepository(resolved_settings.plan_version_db_path),
+        app.state.trip_draft_service,
+        workflow_service,
+    )
     app.state.plan_version_service = plan_service
     app.state.workflow_service = workflow_service
     app.state.planning_boundary_service = planning_boundary_service
@@ -300,6 +311,9 @@ def create_app(
     app.include_router(plan_router)
     app.include_router(planning_router)
     app.include_router(trip_draft_router)
+    app.include_router(collaboration_router)
+    app.include_router(recommendation_router)
+    app.include_router(media_router)
     app.include_router(workflow_router)
 
     @app.get("/health", tags=["系统"], summary="健康检查")

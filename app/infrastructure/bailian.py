@@ -23,6 +23,11 @@ budgetCents, interests, mustVisit, avoidPlaces。
 5. cityName 输出常用城市名，不附带省、市后缀；地点名称保留用户原文含义。
 6. mustVisit 与 avoidPlaces 不得把同一地点同时放入两个数组。
 7. 只输出 JSON，不要 Markdown、解释或额外字段。
+8. 输入会按【】分段：cityName、travelDate、startTime、endTime 只能来自
+【行程基础】或【用户初始描述】；startLocationText、endLocationText、budgetCents
+只能来自【出发地、结束地与共享费用】或【用户初始描述】；interests、mustVisit、avoidPlaces
+只能来自【个人偏好】或【最终确认与不可妥协限制】。不要把段落标题、下一段文本或
+“偏好/喜欢吃”等文字拼接进地点。没有明确的起点或终点必须填 null。
 """
 
 
