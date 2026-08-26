@@ -31,6 +31,7 @@ import { tripApi, USE_PLAN_VERSION_API } from '../api/tripApi'
 import { AppShell } from '../components/AppShell'
 import { RouteOverview } from '../components/RouteOverview'
 import { TaskPhotoCard } from '../components/TaskPhotoCard'
+import { MemoryPhotoStrip } from '../components/MemoryPhotoStrip'
 import type {
   CandidatePlanRequest,
   CandidatePlanReview,
@@ -1657,6 +1658,7 @@ export function WorkspacePage() {
                 ))}
               </div>
             )}
+            <MemoryPhotoStrip tripId={tripId} tasks={activePlan.tasks.map((task) => ({ id: task.id, order: task.order, title: task.title }))} />
           </section>
         )}
       </main>
