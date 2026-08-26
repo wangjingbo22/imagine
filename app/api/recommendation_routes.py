@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Request
 
-from app.application.recommendation_service import TrustedRecommendationService
+from app.application.recommendation_service import MemberPreference, TrustedRecommendationService
 from app.domain.models import ApiResponse
 from app.domain.recommendation import FactRef
 
@@ -31,7 +31,16 @@ async def recommendations(trip_id: UUID, request: Request) -> ApiResponse:
     facts = [FactRef(factRefId=f"AMAP:{place.placeId}", place=place) for place in places.places]
     service = TrustedRecommendationService()
     candidates = service.issue_candidates(facts, interests=interests, must_visit=must_visit, avoid_places=avoid_places)
-    return ApiResponse(data=service.rank(candidates, None))
+    ranked = service.rank(candidates, None)
+    return ApiResponse(data=service.choose_single_plan(
+        ranked,
+        facts,
+        [MemberPreference(
+            participant_id=str(item.participant_id),
+            interests=tuple(item.parsed.interests),
+            must_visit=tuple(item.parsed.must_visit),
+        ) for item in state.participants if item.parsed is not None],
+    ))
 
 
 __all__ = ["router"]

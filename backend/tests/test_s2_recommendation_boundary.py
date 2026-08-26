@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from app.application.recommendation_service import TrustedRecommendationService
+from app.application.recommendation_service import MemberPreference, TrustedRecommendationService
 from app.domain.models import Place, PriceFact, Provenance, SourceStatus
 from app.domain.recommendation import CandidateRecommendation, FactRef, LlmRanking
 from app.schemas.trip import GeoPoint
@@ -48,3 +48,18 @@ def test_non_json_or_extra_llm_fields_do_not_get_repaired_or_retried() -> None:
     result = service.rank_from_llm_json(candidates, '{"recommendations":[{"placeId":"a","reason":"x","price":1}]}')
     assert result.used_deterministic_fallback is True
     assert service.rank_from_llm_json(candidates, "not-json").used_deterministic_fallback is True
+
+
+def test_single_plan_exposes_member_scores_and_unknown_provider_facts() -> None:
+    service = TrustedRecommendationService()
+    facts = [_fact("a", "故宫", price=None), _fact("b", "国博")]
+    bundle = service.rank(service.issue_candidates(facts, interests=[], must_visit=[], avoid_places=[]), None)
+    result = service.choose_single_plan(bundle, facts, [
+        MemberPreference(participant_id="member-a", interests=("博物馆",), must_visit=("故宫",)),
+        MemberPreference(participant_id="member-b", interests=("博物馆",), must_visit=("国博",)),
+    ])
+    assert result.trusted_plan is not None
+    assert {task.place_id for task in result.trusted_plan.tasks} == {"a", "b"}
+    assert result.trusted_plan.lowest_member_score == min(item.score for item in result.trusted_plan.member_scores)
+    assert "价格尚未由高德提供" in result.trusted_plan.unknown_facts[0]
+    assert result.trusted_plan.compromises

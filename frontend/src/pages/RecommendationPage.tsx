@@ -1,4 +1,4 @@
-import { ArrowRight, LoaderCircle, MapPin, RefreshCw, ShieldCheck } from 'lucide-react'
+import { ArrowRight, LoaderCircle, RefreshCw, ShieldCheck } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { request } from '../api/client'
@@ -8,7 +8,19 @@ import type { CreateSingleDayTrip, TripDraftInput } from '../domain/trip'
 import { loadAmapPlan } from '../services/amapPlan'
 
 type Recommendation = { placeId: string; reason: string }
-type Bundle = { candidates: Array<{ factRefId: string; placeId: string; name: string; category: string | null }>; recommendations: Recommendation[]; usedDeterministicFallback: boolean }
+type Candidate = { factRefId: string; placeId: string; name: string; category: string | null }
+type Bundle = {
+  candidates: Candidate[]; recommendations: Recommendation[]; usedDeterministicFallback: boolean
+  trustedPlan: null | {
+    tasks: Candidate[]
+    memberScores: Array<{ participantId: string; score: number; penaltyRuleIds: string[]; reasons: string[] }>
+    lowestMemberScore: number
+    carePoints: string[]
+    compromises: string[]
+    unknownFacts: string[]
+    confirmationMessage: string
+  }
+}
 
 export function RecommendationPage() {
   const { tripId = '' } = useParams()
@@ -17,6 +29,7 @@ export function RecommendationPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [building, setBuilding] = useState(false)
+  const [confirmed, setConfirmed] = useState(false)
 
   async function load() {
     const token = window.sessionStorage.getItem(`organizer-token:${tripId}`)
@@ -30,7 +43,7 @@ export function RecommendationPage() {
   }
 
   useEffect(() => { void load() }, [tripId])
-  const names = new Map(bundle?.candidates.map((item) => [item.placeId, item]) ?? [])
+  const trustedPlan = bundle?.trustedPlan
 
   async function buildRoute() {
     const token = window.sessionStorage.getItem(`organizer-token:${tripId}`)
@@ -63,6 +76,12 @@ export function RecommendationPage() {
     </header>
     {loading && <p>正在读取已核验地点…</p>}
     {error && <section className="draft-confirmation"><p className="form-error">{error}</p><button className="button button--soft" onClick={() => void load()}><RefreshCw size={16} />重试</button></section>}
-    {bundle && <section className="draft-confirmation"><div className="draft-confirmation__heading"><span><ShieldCheck size={18} /></span><div><strong>{bundle.usedDeterministicFallback ? '已使用确定性排序' : '已使用白名单排序'}</strong><p>每一项都可追溯到对应 FactRef。</p></div></div><ul>{bundle.recommendations.map((recommendation, index) => { const place = names.get(recommendation.placeId); return <li key={recommendation.placeId}><div><strong>#{index + 1} · {place?.category || '地点'}</strong><span><MapPin size={13} /> {place?.name || recommendation.placeId}</span><small>FactRef: {place?.factRefId}</small></div><small>{recommendation.reason}</small></li> })}</ul><div className="planner-actions"><span className="save-state">下一步将核验起终点、路线、价格与约束。</span><button className="button button--primary" disabled={building} onClick={() => void buildRoute()}>{building ? <LoaderCircle className="spin-icon" size={17} /> : '生成完整路线'} <ArrowRight size={17} /></button></div></section>}
+    {bundle && trustedPlan && <section className="trusted-plan"><div className="draft-confirmation__heading"><span><ShieldCheck size={18} /></span><div><strong>唯一方案 · {bundle.usedDeterministicFallback ? '确定性排序' : '白名单排序'}</strong><p>按所有成员中的最低分优先选择；每一项均可回溯至高德 FactRef。</p></div></div>
+      <section className="trusted-plan__tasks"><header><span>唯一行程骨架</span><strong>{trustedPlan.tasks.length} 个核验任务</strong></header><ol>{trustedPlan.tasks.map((place, index) => <li key={place.placeId}><span>{index + 1}</span><div><strong>{place.name}</strong><small>{place.category || '地点'} · FactRef: {place.factRefId}</small></div></li>)}</ol></section>
+      <section className="trusted-plan__scores"><header><div><span>公平评分</span><strong>最低成员分 {trustedPlan.lowestMemberScore}/100</strong></div><small>排序优先保障分数最低的成员。</small></header><div>{trustedPlan.memberScores.map((member, index) => <article key={member.participantId}><span>成员 {index + 1}</span><strong>{member.score}</strong><p>{member.reasons.join('；')}</p>{member.penaltyRuleIds.map((rule) => <small key={rule}>规则：{rule}</small>)}</article>)}</div></section>
+      <div className="trusted-plan__explain"><article><strong>照顾点</strong><ul>{trustedPlan.carePoints.map((point) => <li key={point}>{point}</li>)}</ul></article><article><strong>妥协说明</strong><ul>{trustedPlan.compromises.length ? trustedPlan.compromises.map((item) => <li key={item}>{item}</li>) : <li>单人行程，无需跨成员妥协。</li>}</ul></article><article className={trustedPlan.unknownFacts.length ? 'is-unknown' : ''}><strong>未知事实</strong><ul>{trustedPlan.unknownFacts.length ? trustedPlan.unknownFacts.map((item) => <li key={item}>{item}</li>) : <li>当前任务的必要地点事实已齐全。</li>}</ul></article></div>
+      <div className="planner-actions"><span className="save-state">{confirmed ? '方案已确认。下一步将核验起终点、路线、价格与约束。' : trustedPlan.confirmationMessage}</span>{!confirmed ? <button className="button button--primary" onClick={() => setConfirmed(true)}>确认唯一方案 <ShieldCheck size={17} /></button> : <button className="button button--primary" disabled={building} onClick={() => void buildRoute()}>{building ? <LoaderCircle className="spin-icon" size={17} /> : '生成完整路线'} <ArrowRight size={17} /></button>}</div>
+    </section>}
+    {bundle && !trustedPlan && <section className="draft-confirmation"><p className="form-error">服务端尚未生成唯一方案，请刷新后重试。</p></section>}
   </section></main></AppShell>
 }
