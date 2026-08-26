@@ -48,6 +48,8 @@ S2-T001 只冻结两个边界：
 
 ### 3.1 权威模型
 
+仓库的 Python 包是分层拼接的：根级 `app/__init__.py` 会把 `backend/app` 追加到 `app.__path__`，所以权威 Trip Schema 的真实文件是 `backend/app/schemas/trip.py`；但根级 `app/domain/__init__.py` 没有扩展 `app.domain.__path__`，运行时与测试导入 `app.domain.trip_draft` 时只会命中真实文件 `app/domain/trip_draft.py`。因此 T001 必须分别修改这两个真实位置，禁止按相同前缀臆造 `backend/app/domain/trip_draft.py`。
+
 | 区域 | 当前事实 | T001 影响 |
 |---|---|---|
 | `TripMode` | 只有 `SINGLE` | 增加 `GROUP` |
@@ -370,20 +372,20 @@ JSON Schema 负责结构约束，Pydantic model validator 负责以下语义约�
 
 ### 8.1 生产契约
 
-- `backend/app/schemas/trip.py`
-- `backend/app/domain/trip_draft.py`
-- `frontend/src/domain/trip.ts`（仅 DTO/联合类型，不改页面和行为）
-- `backend/schemas/trip.schema.json`（旧单人发布物，兼容基准，原则上不改）
+- `backend/app/schemas/trip.py`（既有，权威 Trip Schema 实现）
+- `app/domain/trip_draft.py`（既有，`app.domain.trip_draft` 的真实导入目标）
+- `frontend/src/domain/trip.ts`（既有；仅 DTO/联合类型，不改页面和行为）
+- `backend/schemas/trip.schema.json`（既有旧单人发布物，兼容基准，原则上不改）
 - `backend/schemas/create-day-trip.schema.json`（新增统一入口发布物）
-- `backend/schemas/trip-understanding.schema.json`（新增）
+- `backend/schemas/trip-understanding.schema.json`（新增理解提案发布物）
 
-`trip_draft.py` 中的新理解类型必须使用 strict `ContractModel` 语义；不得为了复用而把旧 `DraftContractModel` 全局改为 strict，避免改变旧解析兼容性。
+`app/domain/trip_draft.py` 中的新理解类型必须使用 strict `ContractModel` 语义；不得为了复用而把旧 `DraftContractModel` 全局改为 strict，避免改变旧解析兼容性。`backend/app/domain/` 当前不存在且不在 `app.domain` 的扩展导入路径中，不得创建同名影子模块。
 
 ### 8.2 测试、快照与 Fixture
 
-- `backend/tests/test_trip_schema.py`
+- `backend/tests/test_trip_schema.py`（既有）
 - `backend/tests/test_trip_understanding_schema.py`（新增）
-- `backend/tests/snapshots/create_single_day_trip.schema.json`（兼容基准，原则上不改）
+- `backend/tests/snapshots/create_single_day_trip.schema.json`（既有兼容基准，原则上不改）
 - `backend/tests/snapshots/create_day_trip.schema.json`（新增）
 - `backend/tests/snapshots/trip_understanding.schema.json`（新增）
 - `backend/tests/fixtures/trips/group_two_participants.json`（新增）
@@ -394,8 +396,8 @@ JSON Schema 负责结构约束，Pydantic model validator 负责以下语义约�
 
 ### 8.3 明确禁止修改
 
-- `backend/app/infrastructure/bailian.py`、`backend/app/main.py`、Provider/config/runtime 文件；
-- `backend/app/application/trip_draft_service.py` 和 TripDraft 路由（T002/T004）；
+- `app/infrastructure/bailian.py`、`app/main.py`、`app/core/config.py` 及其他 Provider/runtime 文件（均为既有文件）；
+- `app/application/trip_draft_service.py`、`app/api/trip_draft_routes.py`（均为既有文件，归 T002/T004）；
 - Constraint 编译器、冲突状态机、成员确认接口（T003）；
 - candidate planning、PlanReview、PlanVersion、ExecutionEvent、Diff、workflow/store/replan（T005）；
 - Provider/FactRef/推荐/公平裁决实现（T006/T007/T008/T009）；
