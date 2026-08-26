@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from app.api.arrival_evidence_routes import router as arrival_evidence_router
 from app.api.routes import router
 from app.api.execution_adjustment_routes import router as execution_adjustment_router
 from app.api.plan_routes import router as plan_router
@@ -16,6 +17,7 @@ from app.api.workflow_routes import router as workflow_router
 from app.api.collaboration_routes import router as collaboration_router
 from app.api.recommendation_routes import router as recommendation_router
 from app.api.media_routes import router as media_router
+from app.application.arrival_evidence_service import ArrivalEvidenceService
 from app.application.collaboration_service import CollaborationService
 from app.application.amap_service import AmapLocationService
 from app.application.llm_gateway import (
@@ -33,6 +35,9 @@ from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.domain.models import ErrorResponse
 from app.infrastructure.amap import AmapClient
+from app.infrastructure.arrival_evidence_store import (
+    SqliteArrivalEvidenceRepository,
+)
 from app.infrastructure.bailian import BailianTripDraftExtractor
 from app.infrastructure.bailian_execution_event import BailianExecutionEventExtractor
 from app.infrastructure.cache import SqliteProviderCache
@@ -139,6 +144,7 @@ def create_app(
     suffix_planner: SuffixPlanner | None = None,
     candidate_selection_gateway: CandidateSelectionGateway | None = None,
     execution_event_draft_service: ExecutionEventDraftService | None = None,
+    arrival_evidence_service: ArrivalEvidenceService | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     managed_client: AmapClient | None = None
@@ -304,6 +310,14 @@ def create_app(
     )
     app.state.candidate_selection_gateway = candidate_selection_gateway
     app.state.execution_event_draft_service = execution_event_draft_service
+    app.state.arrival_evidence_service = (
+        arrival_evidence_service
+        or ArrivalEvidenceService(
+            SqliteArrivalEvidenceRepository(
+                resolved_settings.plan_version_db_path
+            )
+        )
+    )
     app.state.collaboration_service = CollaborationService(
         SqliteCollaborationRepository(resolved_settings.plan_version_db_path),
         app.state.trip_draft_service,
@@ -313,6 +327,7 @@ def create_app(
     app.state.workflow_service = workflow_service
     app.state.planning_boundary_service = planning_boundary_service
     app.state.recommendation_service = recommendation_service
+    app.include_router(arrival_evidence_router)
     app.include_router(router)
     app.include_router(execution_adjustment_router)
     app.include_router(plan_router)

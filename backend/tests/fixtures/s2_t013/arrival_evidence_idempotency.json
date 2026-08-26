@@ -1,0 +1,39 @@
+{
+  "tripId": "11111111-1111-4111-8111-111111111111",
+  "firstRequest": {
+    "schemaVersion": "1.0",
+    "taskId": "task-longmen-grottoes",
+    "locationEvidence": {
+      "longitude": 112.473588,
+      "latitude": 34.555782,
+      "accuracy": 18.5,
+      "capturedAt": "2026-08-26T09:30:00+08:00",
+      "source": "WEB_GEOLOCATION"
+    },
+    "idempotencyKey": "arrival:task-longmen-grottoes:request-001"
+  },
+  "exactRetry": {
+    "schemaVersion": "1.0",
+    "taskId": "task-longmen-grottoes",
+    "locationEvidence": {
+      "longitude": 112.473588,
+      "latitude": 34.555782,
+      "accuracy": 18.5,
+      "capturedAt": "2026-08-26T09:30:00+08:00",
+      "source": "WEB_GEOLOCATION"
+    },
+    "idempotencyKey": "arrival:task-longmen-grottoes:request-001"
+  },
+  "conflictingRetry": {
+    "schemaVersion": "1.0",
+    "taskId": "task-longmen-grottoes",
+    "locationEvidence": {
+      "longitude": 112.474,
+      "latitude": 34.555782,
+      "accuracy": 18.5,
+      "capturedAt": "2026-08-26T09:30:00+08:00",
+      "source": "WEB_GEOLOCATION"
+    },
+    "idempotencyKey": "arrival:task-longmen-grottoes:request-001"
+  }
+}
