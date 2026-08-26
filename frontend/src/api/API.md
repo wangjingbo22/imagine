@@ -35,6 +35,14 @@ Trip Schema 本身**不包含**：
 
 已经登记的自然语言草稿、约束确认、城市 Provider、PlanVersion、Diff、执行事件和总结接口均调用本地 FastAPI。未登记 URL 和 DTO 前不得新增虚构接口或固定数据回退。
 
+自然语言草稿响应额外返回以下运行证据：
+
+- `recognitionSource`: `BAILIAN`、`DETERMINISTIC_RULES` 或 `DEGRADED_RULES`
+- `recognitionModel`: 在线模型名称；非模型路径为 `null`
+- `degradedReason`: 百炼失败后的非敏感错误码；未降级时为 `null`
+
+页面只能在 `recognitionSource=BAILIAN` 时显示“百炼识别完成”。模型输出仍是候选字段，不能绕过后续确认和服务端规划校验。
+
 ## 3. CreateSingleDayTrip
 
 前端类型：`src/domain/trip.ts` 中的 `CreateSingleDayTrip`。
@@ -289,7 +297,14 @@ src/api/tripContract.ts
 
 消费使用 `EXPENSE` 事件，金额为整数分；页面使用稳定 `idempotencyKey`，刷新后以服务端事件流复算的 `actualSpentCents` 和 `remainingBudgetCents` 为准。
 
-## 11. 尚未登记的远端接口
+## 11. 执行中迟到/疲劳草稿与临时约束
+
+- `POST /api/v1/execution-adjustments/parse`：输入 `rawText/taskId/currentTask`，只返回 `LATE | FATIGUE` 零写入草稿或固定确认问题。百炼超过 10 秒、输出非法或未配置时降级为固定表单。
+- `POST /api/v1/execution-adjustments/compile`：只接受 `confirmationStatus=CONFIRMED`，确定性返回临时 `EventConstraintSet` 和可见原因。
+
+这两个接口都不会写现有 `/trips/{tripId}/events`、长期关怀画像或 PlanVersion。T023 页面可以消费草稿和原因；真正生成 V2 必须等待 T021 使用服务端可信 CURRENT/任务事实重新编译。
+
+## 12. 尚未登记的远端接口
 
 以下能力目前没有远端 HTTP 契约：
 

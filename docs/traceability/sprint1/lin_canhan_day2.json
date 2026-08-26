@@ -12,6 +12,7 @@
   "integratedMainCommit": "3b9321c39e794a3e1bcc782cb947219bff197c3d",
   "latestMainMergeCommit": "9a7c290a3af2fe7a4afc9627090366fdc0150299",
   "integrationAdaptationCommit": "d43442c8ada3c741ed43b629aec5b20a291cae07",
+  "verifiedAgainstMainCommit": "3e60435fcfde0705149dbc5f340d60e1aa63103c",
   "tasks": [
     {
       "taskId": "S1-T011",
@@ -60,7 +61,7 @@
         "backend/tests/test_candidate_planner.py",
         "backend/tests/test_planning_replanning_integration.py",
         "backend/tests/test_planning_http_boundaries.py",
-        "tests/test_trip_draft_parser.py",
+        "backend/tests/test_trip_draft_llm_integration.py",
         "frontend/tests/assistanceConstraints.test.ts",
         "frontend/tests/candidateRequestBuilder.test.ts",
         "frontend/tests/planningFacts.test.ts",
@@ -177,8 +178,7 @@
         "backend/tests/test_s1_t022_summary_paths.py"
       ],
       "testSupportFiles": [
-        "tests/test_plan_versions.py",
-        "tests/test_plan_v2_diff.py",
+        "backend/tests/plan_support.py",
         "backend/tests/test_planning_http_boundaries.py"
       ],
       "fixtures": [
@@ -212,7 +212,7 @@
         "backend/tests/test_candidate_planner.py",
         "backend/tests/test_planning_replanning_integration.py",
         "backend/tests/test_planning_http_boundaries.py",
-        "tests/test_trip_draft_parser.py",
+        "backend/tests/test_trip_draft_llm_integration.py",
         "frontend/tests/assistanceConstraints.test.ts",
         "frontend/tests/candidateRequestBuilder.test.ts",
         "frontend/tests/planningFacts.test.ts",
@@ -284,7 +284,7 @@
         "frontend/src/services/candidateRequestBuilder.ts"
       ],
       "testFiles": [
-        "tests/test_trip_draft_parser.py",
+        "backend/tests/test_trip_draft_llm_integration.py",
         "backend/tests/test_planning_http_boundaries.py",
         "frontend/tests/candidateRequestBuilder.test.ts"
       ]
@@ -305,7 +305,7 @@
       ],
       "testFiles": [
         "backend/tests/test_planning_http_boundaries.py",
-        "tests/test_trip_draft_parser.py",
+        "backend/tests/test_trip_draft_llm_integration.py",
         "frontend/tests/assistanceConstraints.test.ts"
       ]
     },
@@ -324,7 +324,7 @@
         "backend/app/services/planning/replanning_adapter.py"
       ],
       "testFiles": [
-        "tests/test_t010_facility_evidence.py",
+        "backend/tests/test_planning_http_boundaries.py",
         "backend/tests/test_candidate_planner.py",
         "frontend/tests/routeRiskFacts.test.ts"
       ]
@@ -342,7 +342,7 @@
         "backend/app/services/replanning/selector.py"
       ],
       "testFiles": [
-        "tests/test_plan_versions.py",
+        "backend/tests/plan_support.py",
         "backend/tests/test_day2_duplicate_plan_registration.py",
         "backend/tests/test_planning_http_boundaries.py"
       ]
@@ -361,7 +361,7 @@
         "backend/app/services/replanning/selector.py"
       ],
       "testFiles": [
-        "tests/test_execution_expenses.py",
+        "backend/tests/test_s1_t017_event_replan.py",
         "backend/tests/test_planning_replanning_integration.py",
         "backend/tests/test_planning_http_boundaries.py"
       ]
@@ -396,12 +396,13 @@
   },
   "traceabilityTest": "backend/tests/test_day2_traceability.py",
   "localVerification": {
-    "status": "VERIFIED_AFTER_LATEST_MAIN_TRUSTED_RUNTIME_INTEGRATION",
+    "status": "VERIFIED_AFTER_S2_T008_T019_T020_INTEGRATION",
+    "verifiedAt": "2026-08-26",
     "backendCommand": "python -B -m pytest -p no:cacheprovider -q",
-    "backendResult": "261 passed in 4.54s",
-    "focusedCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_candidate_planner.py backend/tests/test_minimum_disruption_replanning.py backend/tests/test_planning_replanning_integration.py backend/tests/test_planning_http_boundaries.py backend/tests/test_s1_t022_summary_paths.py tests/test_trip_draft_parser.py tests/test_execution_expenses.py",
-    "focusedResult": "76 passed in 2.75s",
-    "frontendTest": "npm test: 16 passed",
+    "backendResult": "270 passed in 8.89s",
+    "focusedCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_candidate_planner.py backend/tests/test_minimum_disruption_replanning.py backend/tests/test_planning_replanning_integration.py backend/tests/test_planning_http_boundaries.py backend/tests/test_s1_t022_summary_paths.py backend/tests/test_trip_draft_llm_integration.py backend/tests/test_s1_t017_event_replan.py",
+    "focusedResult": "69 passed in 6.62s",
+    "frontendTest": "npm test: 32 passed",
     "frontendBuild": "npm run build passed",
     "frontendLint": "npm run lint passed"
   },

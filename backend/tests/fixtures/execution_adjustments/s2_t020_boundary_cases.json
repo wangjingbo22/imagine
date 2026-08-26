@@ -1,0 +1,99 @@
+[
+  {
+    "name": "late_twenty",
+    "event": {
+      "schemaVersion": "1.0",
+      "confirmationStatus": "CONFIRMED",
+      "eventType": "LATE",
+      "taskId": "task-2",
+      "lateMinutes": 20,
+      "fatigueLevel": null
+    },
+    "currentConstraints": {
+      "remainingTimeMinutes": 180
+    },
+    "expected": {
+      "remaining.timeBudgetMinutes": 160
+    }
+  },
+  {
+    "name": "late_exceeds_remaining",
+    "event": {
+      "schemaVersion": "1.0",
+      "confirmationStatus": "CONFIRMED",
+      "eventType": "LATE",
+      "taskId": "task-2",
+      "lateMinutes": 240,
+      "fatigueLevel": null
+    },
+    "currentConstraints": {
+      "remainingTimeMinutes": 15
+    },
+    "expected": {
+      "remaining.timeBudgetMinutes": 0
+    }
+  },
+  {
+    "name": "fatigue_mild",
+    "event": {
+      "schemaVersion": "1.0",
+      "confirmationStatus": "CONFIRMED",
+      "eventType": "FATIGUE",
+      "taskId": "task-2",
+      "lateMinutes": null,
+      "fatigueLevel": "MILD"
+    },
+    "currentConstraints": {
+      "remainingWalkBudgetMeters": 5000,
+      "maxSegmentWalkMeters": 1200,
+      "restIntervalMinutes": 90
+    },
+    "expected": {
+      "remaining.walkBudgetMeters": 3000,
+      "remaining.maxSegmentWalkMeters": 800,
+      "remaining.restIntervalMinutes": 60
+    }
+  },
+  {
+    "name": "fatigue_moderate",
+    "event": {
+      "schemaVersion": "1.0",
+      "confirmationStatus": "CONFIRMED",
+      "eventType": "FATIGUE",
+      "taskId": "task-2",
+      "lateMinutes": null,
+      "fatigueLevel": "MODERATE"
+    },
+    "currentConstraints": {
+      "remainingWalkBudgetMeters": 5000,
+      "maxSegmentWalkMeters": 1200,
+      "restIntervalMinutes": 90
+    },
+    "expected": {
+      "remaining.walkBudgetMeters": 1500,
+      "remaining.maxSegmentWalkMeters": 500,
+      "remaining.restIntervalMinutes": 45
+    }
+  },
+  {
+    "name": "fatigue_severe_never_relaxes_existing",
+    "event": {
+      "schemaVersion": "1.0",
+      "confirmationStatus": "CONFIRMED",
+      "eventType": "FATIGUE",
+      "taskId": "task-2",
+      "lateMinutes": null,
+      "fatigueLevel": "SEVERE"
+    },
+    "currentConstraints": {
+      "remainingWalkBudgetMeters": 100,
+      "maxSegmentWalkMeters": 150,
+      "restIntervalMinutes": 20
+    },
+    "expected": {
+      "remaining.walkBudgetMeters": 100,
+      "remaining.maxSegmentWalkMeters": 100,
+      "remaining.restIntervalMinutes": 20
+    }
+  }
+]

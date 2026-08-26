@@ -22,6 +22,16 @@ class Settings(BaseSettings):
     bailian_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     bailian_model: str = "qwen3.7-plus"
     bailian_request_timeout_seconds: float = Field(default=45.0, gt=0, le=60)
+    bailian_candidate_timeout_seconds: float = Field(
+        default=10.0,
+        ge=8,
+        le=12,
+    )
+    bailian_execution_event_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=10,
+    )
     plan_version_db_path: Path = Path("data/plan_versions.sqlite3")
     build_sha: str | None = Field(
         default=None,

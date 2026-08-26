@@ -1,6 +1,6 @@
 # 林粲涵 Sprint 1 Day 2 代码追溯
 
-本页的核心任务归属为 `S1-T011`、`S1-T018`、`S1-T022`，并记录它们与其他负责人模块的真实运行时联动。当前兼容基线是团队最新版 `origin/main` 提交 `3b9321c39e794a3e1bcc782cb947219bff197c3d`；最新版 main 的本地融合提交是 `9a7c290a3af2fe7a4afc9627090366fdc0150299`，核心融合代码提交是 `d43442c8ada3c741ed43b629aec5b20a291cae07`。逐文件机器可读证据见 `lin_canhan_day2.json`。
+本页的核心任务归属为 `S1-T011`、`S1-T018`、`S1-T022`，并记录它们与其他负责人模块的真实运行时联动。历史兼容基线是团队 `origin/main` 提交 `3b9321c39e794a3e1bcc782cb947219bff197c3d`；历史融合提交是 `9a7c290a3af2fe7a4afc9627090366fdc0150299`，核心融合代码提交是 `d43442c8ada3c741ed43b629aec5b20a291cae07`。本次验收已在更新后的远端 main `3e60435fcfde0705149dbc5f340d60e1aa63103c` 上复跑。逐文件机器可读证据见 `lin_canhan_day2.json`。
 
 ## PBI → AC → Task → 模块 → 测试
 
@@ -35,11 +35,11 @@
 
 ```powershell
 python -B -m pytest -p no:cacheprovider -q
-python -B -m pytest -p no:cacheprovider -q backend/tests/test_candidate_planner.py backend/tests/test_minimum_disruption_replanning.py backend/tests/test_planning_replanning_integration.py backend/tests/test_planning_http_boundaries.py backend/tests/test_s1_t022_summary_paths.py tests/test_trip_draft_parser.py tests/test_execution_expenses.py
+python -B -m pytest -p no:cacheprovider -q backend/tests/test_candidate_planner.py backend/tests/test_minimum_disruption_replanning.py backend/tests/test_planning_replanning_integration.py backend/tests/test_planning_http_boundaries.py backend/tests/test_s1_t022_summary_paths.py backend/tests/test_trip_draft_llm_integration.py backend/tests/test_s1_t017_event_replan.py
 cd frontend
 npm test
 npm run build
 npm run lint
 ```
 
-最新版 main 融合后的本地结果：后端全量 `261 passed`；Day2/runtime 聚焦回归 `76 passed`；前端测试 `16/16 passed`；前端 build 与 lint 均通过。PR、CI Build、QA 和 PO 属于外部证据，当前没有时保持为空，不以本地结果冒充。
+融合 S2-T007、S2-T008、S2-T019 与 S2-T020 后的本地验证结果：后端全量 `270 passed`；Sprint1 Day2/runtime 聚焦回归 `69 passed`；前端测试 `32/32 passed`；前端 build 与 lint 均通过。PR、CI Build、QA 和 PO 属于外部证据，当前没有时保持为空，不以本地结果冒充。

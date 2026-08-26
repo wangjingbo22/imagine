@@ -78,3 +78,20 @@ export function splitPlaceInput(value: string): string[] {
       .filter(Boolean),
   )]
 }
+
+export function recognitionResultMessage(
+  result: TripDraftParseResult,
+): string {
+  const pending = result.confirmationItems.length > 0
+    ? `，仍有 ${result.confirmationItems.length} 项需要确认`
+    : ''
+
+  if (result.recognitionSource === 'BAILIAN') {
+    const model = result.recognitionModel ? `（${result.recognitionModel}）` : ''
+    return `百炼${model}识别完成并已通过字段契约${pending}。`
+  }
+  if (result.recognitionSource === 'DEGRADED_RULES') {
+    return `百炼暂不可用，已降级为本地规则${pending}。`
+  }
+  return `当前未启用百炼，已使用本地规则${pending}。`
+}

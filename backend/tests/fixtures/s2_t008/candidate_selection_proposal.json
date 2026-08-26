@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0",
+  "selectedPlaceFactIds": [
+    "fact-place-national-museum",
+    "fact-place-science-museum",
+    "fact-place-library"
+  ],
+  "selectionRationale": "三处地点兼顾历史文化、亲子体验与室内休息需求，已知标签形成互补。",
+  "riskNotes": [
+    "国家博物馆无障碍入口状态待确认"
+  ]
+}

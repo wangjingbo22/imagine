@@ -3,10 +3,12 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.testdata/
 .coverage
 htmlcov/
 data/*.sqlite3
 data/*.sqlite3-*
+log_/
 
 # Test-only materials are maintained on the dedicated test branch.
 /scripts/

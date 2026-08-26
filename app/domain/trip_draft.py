@@ -94,6 +94,11 @@ class TripDraftExtractionError(RuntimeError):
 class TripDraftParseResult(DraftContractModel):
     trip_id: str
     status: Literal["DRAFT"] = "DRAFT"
+    recognition_source: Literal[
+        "BAILIAN", "DETERMINISTIC_RULES", "DEGRADED_RULES"
+    ]
+    recognition_model: str | None = None
+    degraded_reason: str | None = None
     parsed: ParsedTripFields
     confirmation_items: list[ConfirmationItem]
     can_plan: bool
@@ -105,7 +110,7 @@ __all__ = [
     "DraftAssistanceInput",
     "LlmTripDraftFields",
     "ParsedTripFields",
+    "TripDraftExtractionError",
     "TripDraftParseRequest",
     "TripDraftParseResult",
-    "TripDraftExtractionError",
 ]

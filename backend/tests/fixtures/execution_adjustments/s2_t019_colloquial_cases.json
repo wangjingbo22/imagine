@@ -1,0 +1,42 @@
+[
+  {
+    "name": "late_twenty_minutes",
+    "rawText": "晚了二十分钟",
+    "expected": {
+      "eventType": "LATE",
+      "lateMinutes": 20,
+      "fatigueLevel": null,
+      "questionKey": null
+    }
+  },
+  {
+    "name": "cannot_walk",
+    "rawText": "走不动了",
+    "expected": {
+      "eventType": "FATIGUE",
+      "lateMinutes": null,
+      "fatigueLevel": "SEVERE",
+      "questionKey": null
+    }
+  },
+  {
+    "name": "late_without_number",
+    "rawText": "我迟到了",
+    "expected": {
+      "eventType": "LATE",
+      "lateMinutes": null,
+      "fatigueLevel": null,
+      "questionKey": "LATE_MINUTES_REQUIRED"
+    }
+  },
+  {
+    "name": "ambiguous_event_type",
+    "rawText": "我晚了，而且现在走不动了",
+    "expected": {
+      "eventType": null,
+      "lateMinutes": null,
+      "fatigueLevel": null,
+      "questionKey": "EVENT_TYPE_REQUIRED"
+    }
+  }
+]

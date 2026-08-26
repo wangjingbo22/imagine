@@ -33,6 +33,8 @@ class FixtureCityResolver:
 
 
 class FixtureLlmExtractor:
+    model = "fixture-qwen"
+
     async def extract(self, *, text: str, reference_date) -> LlmTripDraftFields:
         assert text == "请按我的完整安排生成行程"
         assert reference_date.isoformat() == "2026-08-26"
@@ -65,6 +67,9 @@ async def test_llm_candidates_enter_trip_only_after_rule_validation() -> None:
     )
 
     assert result.can_plan is True
+    assert result.recognition_source == "BAILIAN"
+    assert result.recognition_model == "fixture-qwen"
+    assert result.degraded_reason is None
     assert result.confirmation_items == []
     assert result.trip is not None
     assert result.trip.city_context.city_code == "420100"
@@ -76,3 +81,40 @@ async def test_llm_candidates_enter_trip_only_after_rule_validation() -> None:
         "黄鹤楼",
         "拥挤商场",
     ]
+
+
+class FailingLlmExtractor:
+    model = "fixture-qwen"
+
+    async def extract(self, *, text: str, reference_date) -> LlmTripDraftFields:
+        from app.domain.trip_draft import TripDraftExtractionError
+
+        raise TripDraftExtractionError("BAILIAN_TIMEOUT")
+
+
+@pytest.mark.asyncio
+async def test_llm_failure_is_visible_when_rules_take_over() -> None:
+    service = TripDraftParserService(
+        FixtureCityResolver(),
+        llm_extractor=FailingLlmExtractor(),
+    )
+
+    result = await service.parse(
+        TripDraftParseRequest(
+            natural_language_request="武汉 2026-09-03 09:30 到 19:00，预算500元，喜欢建筑",
+            city_name="武汉",
+            travel_date="2026-09-03",
+            start_time="09:30",
+            end_time="19:00",
+            start_location_text="武汉站",
+            end_location_text="汉口站",
+            budget_cents=50_000,
+            interests=["建筑"],
+            reference_date="2026-08-26",
+        )
+    )
+
+    assert result.can_plan is True
+    assert result.recognition_source == "DEGRADED_RULES"
+    assert result.recognition_model is None
+    assert result.degraded_reason == "BAILIAN_TIMEOUT"
