@@ -23,6 +23,8 @@ export function MemberConversationPage() {
   const [invitation, setInvitation] = useState<Invitation | null>(null)
   const [description, setDescription] = useState('')
   const [answers, setAnswers] = useState<string[]>(Array(questions.length).fill(''))
+  const [tripFields, setTripFields] = useState({ city: '', date: '', startTime: '', endTime: '' })
+  const [routeFields, setRouteFields] = useState({ start: '', end: '', budget: '' })
   const [step, setStep] = useState(0)
   const [parse, setParse] = useState<Parse | null>(null)
   const [state, setState] = useState<State | null>(null)
@@ -34,6 +36,14 @@ export function MemberConversationPage() {
       .then((result) => {
         setInvitation(result.data)
         const shared = result.data.sharedTrip
+        setTripFields({
+          city: shared.cityName ?? '', date: shared.travelDate ?? '',
+          startTime: shared.startTime ?? '', endTime: shared.endTime ?? '',
+        })
+        setRouteFields({
+          start: shared.startLocationText ?? '', end: shared.endLocationText ?? '',
+          budget: shared.budgetCents === null ? '' : String(shared.budgetCents / 100),
+        })
         setDescription(`参加组织者创建的${shared.cityName ?? ''}行程。我会在共同安排基础上补充和修改自己的偏好。`)
         setAnswers([
           `城市：${shared.cityName ?? ''}；日期：${shared.travelDate ?? ''}；时间：${shared.startTime ?? ''}到${shared.endTime ?? ''}`,
@@ -49,6 +59,33 @@ export function MemberConversationPage() {
   }, [token])
 
   const ready = description.trim() && answers.every((answer) => answer.trim())
+  const currentStepReady = step === 0
+    ? Boolean(tripFields.city.trim() && tripFields.date.trim() && tripFields.startTime.trim() && tripFields.endTime.trim())
+    : step === 2
+      ? Boolean(routeFields.start.trim() && routeFields.end.trim() && routeFields.budget.trim())
+      : Boolean(answers[step].trim())
+
+  function updateAnswer(value: string) {
+    setAnswers((items) => items.map((item, index) => index === step ? value : item))
+  }
+
+  function updateTripField(field: keyof typeof tripFields, value: string) {
+    setTripFields((current) => {
+      const next = { ...current, [field]: value }
+      setAnswers((items) => items.map((item, index) => index === 0
+        ? `目的城市：${next.city}；出行日期：${next.date}；可用时间：${next.startTime}到${next.endTime}` : item))
+      return next
+    })
+  }
+
+  function updateRouteField(field: keyof typeof routeFields, value: string) {
+    setRouteFields((current) => {
+      const next = { ...current, [field]: value }
+      setAnswers((items) => items.map((item, index) => index === 2
+        ? `从${next.start}出发；结束地：${next.end}；共享预算：${next.budget}元` : item))
+      return next
+    })
+  }
   const body = () => ({
     naturalLanguageRequest: description,
     answers: questions.map(([questionId], index) => ({ questionId, answer: answers[index] })),
@@ -88,8 +125,8 @@ export function MemberConversationPage() {
       <label className="field-label" htmlFor="member-goal">先说说你对这趟旅行的期待</label>
       <textarea id="member-goal" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="例如：我更喜欢慢节奏，也不想走太久。" />
       <section className="draft-confirmation"><div className="draft-confirmation__heading"><span><Sparkles size={18} /></span><div><strong>问题 {step + 1} / 6</strong><p>{questions[step][1]}</p></div></div>
-        <textarea value={answers[step]} onChange={(event) => setAnswers((items) => items.map((item, index) => index === step ? event.target.value : item))} placeholder="请输入你的回答" />
-        <div className="planner-actions"><button className="button button--ghost" disabled={step === 0 || loading} onClick={() => setStep((value) => value - 1)}>上一个问题</button>{step < 5 ? <button className="button button--primary" disabled={!answers[step].trim() || loading} onClick={() => setStep((value) => value + 1)}>下一个问题 <ArrowRight size={18} /></button> : <button className="button button--primary" disabled={!ready || loading} onClick={submit}>整理并查看确认 <ArrowRight size={18} /></button>}</div>
+        {step === 0 ? <div className="question-field-cards question-field-cards--trip"><label><span><MapPin size={16} />目的城市</span><input value={tripFields.city} onChange={(event) => updateTripField('city', event.target.value)} placeholder="例如：杭州" /></label><label><span><CalendarDays size={16} />出行日期</span><input type="date" value={tripFields.date} onChange={(event) => updateTripField('date', event.target.value)} /></label><fieldset className="time-picker-card"><legend><Clock3 size={16} />可用时间</legend><div><label>开始<input type="time" value={tripFields.startTime} onChange={(event) => updateTripField('startTime', event.target.value)} /></label><span>—</span><label>结束<input type="time" value={tripFields.endTime} onChange={(event) => updateTripField('endTime', event.target.value)} /></label></div></fieldset></div> : step === 2 ? <div className="question-field-cards question-field-cards--route"><label><span><MapPin size={16} />出发地</span><input value={routeFields.start} onChange={(event) => updateRouteField('start', event.target.value)} placeholder="例如：杭州东站" /></label><label><span><MapPin size={16} />结束地</span><input value={routeFields.end} onChange={(event) => updateRouteField('end', event.target.value)} placeholder="例如：回到杭州东站" /></label><label><span><WalletCards size={16} />共享预算</span><input inputMode="decimal" value={routeFields.budget} onChange={(event) => updateRouteField('budget', event.target.value)} placeholder="例如：500" /></label></div> : <textarea value={answers[step]} onChange={(event) => updateAnswer(event.target.value)} placeholder="请输入你的回答" />}
+        <div className="planner-actions"><button className="button button--ghost" disabled={step === 0 || loading} onClick={() => setStep((value) => value - 1)}>上一个问题</button>{step < 5 ? <button className="button button--primary" disabled={!currentStepReady || loading} onClick={() => setStep((value) => value + 1)}>下一个问题 <ArrowRight size={18} /></button> : <button className="button button--primary" disabled={!ready || loading} onClick={submit}>整理并查看确认 <ArrowRight size={18} /></button>}</div>
       </section>
     </>}
     {parse && <section className="draft-confirmation"><div className="draft-confirmation__heading"><span><Check size={18} /></span><div><strong>资料确认卡</strong><p>{parse.parsed.cityName || '行程城市待确认'} · {parse.parsed.travelDate || '日期待确认'} · {parse.parsed.interests.join('、') || '偏好待确认'}</p></div></div>{parse.confirmationItems.map((item) => <p className="form-error" key={item.message}>{item.message}</p>)}<div className="planner-actions"><button className="button button--ghost" disabled={loading} onClick={() => setParse(null)}>返回修改</button><button className="button button--primary" disabled={loading || !parse.canPlan} onClick={confirm}>确认我的资料</button></div></section>}
