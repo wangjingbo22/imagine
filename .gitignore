@@ -7,3 +7,7 @@ __pycache__/
 htmlcov/
 data/*.sqlite3
 data/*.sqlite3-*
+
+# Test-only materials are maintained on the dedicated test branch.
+/scripts/
+/tests/
