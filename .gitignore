@@ -3,6 +3,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.testdata/
 .coverage
 htmlcov/
 data/*.sqlite3

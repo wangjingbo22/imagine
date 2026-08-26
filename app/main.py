@@ -8,11 +8,13 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.api.routes import router
+from app.api.execution_adjustment_routes import router as execution_adjustment_router
 from app.api.plan_routes import router as plan_router
 from app.api.planning_routes import router as planning_router
 from app.api.trip_draft_routes import router as trip_draft_router
 from app.api.workflow_routes import router as workflow_router
 from app.application.amap_service import AmapLocationService
+from app.application.execution_event_draft_service import ExecutionEventDraftService
 from app.application.planning_boundary_service import PlanningBoundaryService
 from app.application.plan_service import PlanVersionService
 from app.application.trip_draft_service import TripDraftParserService
@@ -22,6 +24,7 @@ from app.core.errors import AppError
 from app.domain.models import ErrorResponse
 from app.infrastructure.amap import AmapClient
 from app.infrastructure.bailian import BailianTripDraftExtractor
+from app.infrastructure.bailian_execution_event import BailianExecutionEventExtractor
 from app.infrastructure.cache import SqliteProviderCache
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.infrastructure.trusted_planning_store import SqliteTrustedPlanningRepository
@@ -119,10 +122,12 @@ def create_app(
     workflow_service: WorkflowService | None = None,
     planning_boundary_service: PlanningBoundaryService | None = None,
     suffix_planner: SuffixPlanner | None = None,
+    execution_event_draft_service: ExecutionEventDraftService | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     managed_client: AmapClient | None = None
     managed_bailian_extractor: BailianTripDraftExtractor | None = None
+    managed_bailian_execution_extractor: BailianExecutionEventExtractor | None = None
     if service is None:
         managed_client = AmapClient(
             api_key=resolved_settings.amap_web_service_key,
@@ -147,6 +152,24 @@ def create_app(
             base_url=resolved_settings.bailian_base_url,
             model=resolved_settings.bailian_model,
             timeout_seconds=resolved_settings.bailian_request_timeout_seconds,
+        )
+
+        if execution_event_draft_service is None:
+            managed_bailian_execution_extractor = BailianExecutionEventExtractor(
+                api_key=bailian_api_key,
+                base_url=resolved_settings.bailian_base_url,
+                model=resolved_settings.bailian_model,
+                timeout_seconds=(
+                    resolved_settings.bailian_execution_event_timeout_seconds
+                ),
+            )
+
+    if execution_event_draft_service is None:
+        execution_event_draft_service = ExecutionEventDraftService(
+            managed_bailian_execution_extractor,
+            deadline_seconds=(
+                resolved_settings.bailian_execution_event_timeout_seconds
+            ),
         )
 
     if workflow_service is None:
@@ -185,6 +208,8 @@ def create_app(
             await managed_client.close()
         if managed_bailian_extractor is not None:
             await managed_bailian_extractor.close()
+        if managed_bailian_execution_extractor is not None:
+            await managed_bailian_execution_extractor.close()
 
     app = FastAPI(
         title="行知旅伴——张琪 Sprint 1 接口",
@@ -205,6 +230,10 @@ def create_app(
                 "name": "服务端规划与重规划",
                 "description": "由 T011 生成可信 V1，并由 T011 + T018 校验和选择 V2。",
             },
+            {
+                "name": "执行中迟到与疲劳调整",
+                "description": "S2-T019 草稿解析和 S2-T020 确定性临时约束。",
+            },
         ],
     )
     app.add_middleware(
@@ -213,6 +242,11 @@ def create_app(
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type"],
+        expose_headers=[
+            "X-Recognition-Source",
+            "X-Recognition-Model",
+            "X-Degraded-Reason",
+        ],
     )
     app.state.location_service = service
     app.state.settings = resolved_settings
@@ -225,10 +259,12 @@ def create_app(
         service,
         llm_extractor=managed_bailian_extractor,
     )
+    app.state.execution_event_draft_service = execution_event_draft_service
     app.state.plan_version_service = plan_service
     app.state.workflow_service = workflow_service
     app.state.planning_boundary_service = planning_boundary_service
     app.include_router(router)
+    app.include_router(execution_adjustment_router)
     app.include_router(plan_router)
     app.include_router(planning_router)
     app.include_router(trip_draft_router)
@@ -240,6 +276,11 @@ def create_app(
             "status": "ok",
             "buildSha": resolved_settings.build_sha or "unavailable",
             "naturalLanguageParser": app.state.natural_language_parser,
+            "executionAdjustmentParser": (
+                "BAILIAN_CONFIGURED"
+                if managed_bailian_execution_extractor is not None
+                else "DETERMINISTIC_FORM"
+            ),
         }
 
     @app.get("/docs", include_in_schema=False)
