@@ -220,3 +220,28 @@ def test_legacy_collaboration_rows_are_marked_migration_required(tmp_path) -> No
     assert row["status"] == "MIGRATION_REQUIRED"
     with pytest.raises(CollaborationStoreError, match="TRIP_DRAFT_REVISION_UNAVAILABLE"):
         repository.get_stored(LEGACY_TRIP_ID)
+
+
+def test_schema_migration_rolls_back_when_registry_creation_fails(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "atomic-migration.sqlite3"
+
+    def fail_registry_creation(connection) -> None:
+        raise RuntimeError("injected migration failure")
+
+    monkeypatch.setattr(
+        "app.infrastructure.collaboration_store.ensure_trip_flow_schema",
+        fail_registry_creation,
+    )
+    with pytest.raises(RuntimeError, match="injected migration failure"):
+        SqliteCollaborationRepository(path)
+
+    connection = sqlite3.connect(path)
+    tables = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    connection.close()
+    assert "trip_flow_registry" not in tables
+    assert "collaboration_sessions" not in tables

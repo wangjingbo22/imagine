@@ -104,6 +104,8 @@ class SqliteCollaborationRepository:
 
     def _initialize(self) -> None:
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            ensure_trip_flow_schema(connection)
             connection.execute("""CREATE TABLE IF NOT EXISTS collaboration_sessions (
                 trip_id TEXT PRIMARY KEY,
                 organizer_participant_id TEXT NOT NULL,
@@ -233,7 +235,6 @@ class SqliteCollaborationRepository:
                 resolved_at TEXT NOT NULL,
                 PRIMARY KEY (trip_id, conflict_id)
             )""")
-            ensure_trip_flow_schema(connection)
             mark_legacy_collaboration_rows(connection)
             backfill_confirmed_single_flows(connection)
 
