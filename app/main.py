@@ -61,6 +61,7 @@ from app.infrastructure.openai_compatible_llm import (
 from app.infrastructure.collaboration_store import SqliteCollaborationRepository
 from app.infrastructure.memory_media_reader import SqliteMemoryMediaReader
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
+from app.infrastructure.provider_fact_registry import SqliteProviderFactRegistry
 from app.infrastructure.trusted_planning_store import SqliteTrustedPlanningRepository
 from app.infrastructure.workflow_store import SqliteWorkflowRepository
 from app.schemas.validation_error import TripSchemaError, issues_from_pydantic
@@ -156,6 +157,7 @@ def create_app(
     workflow_service: WorkflowService | None = None,
     planning_boundary_service: PlanningBoundaryService | None = None,
     recommendation_service: RecommendationOrchestrationService | None = None,
+    provider_fact_registry: SqliteProviderFactRegistry | None = None,
     suffix_planner: SuffixPlanner | None = None,
     candidate_selection_gateway: CandidateSelectionGateway | None = None,
     execution_event_draft_service: ExecutionEventDraftService | None = None,
@@ -404,6 +406,10 @@ def create_app(
         ),
     )
     app.state.planning_boundary_service = planning_boundary_service
+    app.state.provider_fact_registry = (
+        provider_fact_registry
+        or SqliteProviderFactRegistry(resolved_settings.plan_version_db_path)
+    )
     app.state.recommendation_service = recommendation_service
     app.include_router(arrival_decision_router)
     app.include_router(arrival_evidence_router)

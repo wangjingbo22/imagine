@@ -1,9 +1,10 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from app.application.recommendation_service import (
     MemberPreference,
+    ProviderFactRestoreError,
     RecommendationOrchestrationError,
     RecommendationOrchestrationService,
     TrustedRecommendationService,
@@ -11,7 +12,9 @@ from app.application.recommendation_service import (
 from app.core.errors import AppError
 from app.domain.models import ApiResponse
 from app.domain.recommendation import FactRef
+from app.infrastructure.provider_fact_registry import SqliteProviderFactRegistry
 from app.services.recommendation import (
+    ProviderFactSetSummary,
     RecommendationOrchestrationRequest,
     RecommendationOrchestrationResult,
 )
@@ -32,6 +35,49 @@ def get_recommendation_service(
             retryable=True,
         )
     return service
+
+
+def get_provider_fact_registry(request: Request) -> SqliteProviderFactRegistry:
+    registry = request.app.state.provider_fact_registry
+    if not isinstance(registry, SqliteProviderFactRegistry):
+        raise AppError(
+            code="PROVIDER_FACT_REGISTRY_UNAVAILABLE",
+            message="FactRef 注册表尚未配置",
+            http_status=503,
+            retryable=True,
+        )
+    return registry
+
+
+@router.get(
+    "/api/v1/trips/{trip_id}/provider-fact-sets/{fact_set_id}",
+    summary="核验服务端签发的 FactRef 摘要",
+    description=(
+        "只按 factSetId/digest 恢复服务端快照并返回来源摘要；不接受客户端"
+        "内嵌地点、路线、价格或 Provenance。"
+    ),
+)
+async def get_provider_fact_set_summary(
+    trip_id: UUID,
+    fact_set_id: str,
+    provider_fact_digest: str = Query(alias="providerFactDigest"),
+    registry: SqliteProviderFactRegistry = Depends(get_provider_fact_registry),
+) -> ApiResponse[ProviderFactSetSummary]:
+    try:
+        snapshot = registry.restore_snapshot(trip_id, fact_set_id)
+    except ProviderFactRestoreError as error:
+        raise AppError(
+            code=error.code,
+            message=error.message,
+            http_status=409,
+        ) from error
+    if snapshot.provider_fact_digest != provider_fact_digest:
+        raise AppError(
+            code="PROVIDER_FACT_DIGEST_MISMATCH",
+            message="请求摘要与服务端签发的 FactRef 摘要不一致",
+            http_status=409,
+        )
+    return ApiResponse[ProviderFactSetSummary](data=snapshot.summary())
 
 
 @router.post(

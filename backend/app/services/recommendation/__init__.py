@@ -8,6 +8,13 @@ from .contracts import (
     RecommendationOrchestrationRequest,
     RecommendationOrchestrationResult,
 )
+from .fact_registry_contracts import (
+    ProviderFactIssueDraft,
+    ProviderFactReferenceSummary,
+    ProviderFactSetSummary,
+    ProviderFactSnapshot,
+    TrustedFactKind,
+)
 
 __all__ = [
     "BuiltRouteCandidate",
@@ -16,6 +23,11 @@ __all__ = [
     "ProviderCandidateSelectionProposal",
     "ProviderCandidateSelectionRequest",
     "ProviderFactBundle",
+    "ProviderFactIssueDraft",
+    "ProviderFactReferenceSummary",
+    "ProviderFactSetSummary",
+    "ProviderFactSnapshot",
     "RecommendationOrchestrationRequest",
     "RecommendationOrchestrationResult",
+    "TrustedFactKind",
 ]
