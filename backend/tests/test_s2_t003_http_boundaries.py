@@ -123,3 +123,53 @@ async def test_redeem_retry_returns_metadata_without_replaying_session_secret(tm
     assert replay_data["participantSessionToken"] is None
     assert replay_data["sessionTokenAvailable"] is False
     assert replay_data["sessionId"] == first_data["sessionId"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_authentication_failures_are_json_contract_errors(tmp_path) -> None:
+    revision = load_revision()
+    repository = SqliteCollaborationRepository(tmp_path / "collaboration.sqlite3")
+    app = create_app(
+        settings=Settings(
+            amap_web_service_key="test-amap",
+            amap_cache_db_path=tmp_path / "amap.sqlite3",
+            plan_version_db_path=tmp_path / "plan.sqlite3",
+        ),
+        collaboration_repository=repository,
+        trip_draft_revision_port=FakeTripDraftRevisionPort(revision),
+    )
+    payload = {
+        "schemaVersion": "1.0",
+        "baseRevision": 1,
+        "expectedVersion": 1,
+        "relaxationId": "rx_0000000000000000",
+    }
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        member_response = await client.post(
+            f"/api/v2/member-session/confirmation-items/ci_0000000000000000/resolve",
+            headers={
+                "X-Participant-Session": "forged-member-session",
+                "Idempotency-Key": "resolve-auth-member-01",
+            },
+            json=payload,
+        )
+        organizer_response = await client.post(
+            f"/api/v2/trips/{revision.trip_id}/confirmation-items/"
+            "ci_0000000000000000/resolve",
+            headers={
+                "X-Organizer-Token": "forged-organizer-token",
+                "Idempotency-Key": "resolve-auth-organizer-01",
+            },
+            json=payload,
+        )
+
+    assert member_response.status_code == 401
+    assert member_response.headers["content-type"].startswith("application/json")
+    assert member_response.json()["code"] == "PARTICIPANT_SESSION_REQUIRED"
+    assert organizer_response.status_code == 403
+    assert organizer_response.headers["content-type"].startswith("application/json")
+    assert organizer_response.json()["code"] == "ORGANIZER_PERMISSION_REQUIRED"

@@ -647,7 +647,10 @@ class CollaborationService:
         organizer_token: str | None,
         idempotency_key: str,
     ) -> CollaborationAggregate:
-        actor = self.repository.authenticate_organizer(organizer_token)
+        try:
+            actor = self.repository.authenticate_organizer(organizer_token)
+        except CollaborationStoreError as error:
+            raise self._store_error(error) from error
         if actor.trip_id != trip_id:
             raise AppError("ORGANIZER_PERMISSION_REQUIRED", "组织者权限不足", 403, False)
         self._resolve(
