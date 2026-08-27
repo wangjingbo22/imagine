@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   buildNaturalLanguageParseInput,
+  recognitionResultMessage,
   splitPlaceInput,
   toRecognizedFormPatch,
 } from '../src/services/tripDraftRecognition.ts'
@@ -54,4 +55,45 @@ test('multiple recognized places remain separate contract values', () => {
     '白马寺',
     '洛阳博物馆',
   ])
+})
+
+test('recognition status distinguishes Bailian from deterministic fallback', () => {
+  const base = {
+    tripId: '11111111-1111-4111-8111-111111111111',
+    status: 'DRAFT' as const,
+    parsed: {
+      cityName: null,
+      travelDate: null,
+      startTime: null,
+      endTime: null,
+      startLocationText: null,
+      endLocationText: null,
+      budgetCents: null,
+      interests: [],
+      mustVisit: [],
+      avoidPlaces: [],
+    },
+    confirmationItems: [],
+    canPlan: false,
+    trip: null,
+  }
+
+  assert.match(recognitionResultMessage({
+    ...base,
+    recognitionSource: 'BAILIAN',
+    recognitionModel: 'qwen-test',
+    degradedReason: null,
+  }), /百炼（qwen-test）识别完成/)
+  assert.match(recognitionResultMessage({
+    ...base,
+    recognitionSource: 'DEGRADED_RULES',
+    recognitionModel: null,
+    degradedReason: 'BAILIAN_TIMEOUT',
+  }), /已降级为本地规则/)
+  assert.match(recognitionResultMessage({
+    ...base,
+    recognitionSource: 'DETERMINISTIC_RULES',
+    recognitionModel: null,
+    degradedReason: null,
+  }), /当前未启用百炼/)
 })

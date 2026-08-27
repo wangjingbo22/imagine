@@ -1,0 +1,10 @@
+{
+  "scenarios": [
+    {"id": "no_photo_no_v2", "withPhoto": false, "withV2": false},
+    {"id": "photo_no_v2", "withPhoto": true, "withV2": false},
+    {"id": "no_photo_with_v2", "withPhoto": false, "withV2": true},
+    {"id": "photo_with_v2", "withPhoto": true, "withV2": true}
+  ],
+  "deletedPhotoDataUrl": "data:image/jpeg;base64,DELETED-PHOTO",
+  "activePhotoDataUrl": "data:image/jpeg;base64,ACTIVE-PHOTO"
+}

@@ -61,16 +61,19 @@ class CandidatePlanRequest(ContractModel):
 
     @model_validator(mode="after")
     def validate_single_day_shape(self) -> "CandidatePlanRequest":
-        if self.trip.mode is not TripMode.SINGLE:
-            raise ValueError("T011 only supports SINGLE trips")
+        participant_count = len(self.trip.participants)
+        if self.trip.mode is TripMode.SINGLE and participant_count != 1:
+            raise ValueError("SINGLE trips must contain exactly one participant")
+        if self.trip.mode is TripMode.GROUP and not 2 <= participant_count <= 3:
+            raise ValueError("GROUP trips must contain two or three participants")
         if self.trip.status not in {
             TripStatus.CONSTRAINT_CONFIRMED,
             TripStatus.PLANNING,
             TripStatus.PLAN_REVIEW,
         }:
             raise ValueError("trip status must be ready for planning")
-        if len(self.trip.participants) != 1 or len(self.trip.days) != 1:
-            raise ValueError("T011 requires exactly one participant and one day")
+        if not 1 <= len(self.trip.participants) <= 3 or len(self.trip.days) != 1:
+            raise ValueError("planning requires 1 to 3 participants and one day")
 
         day = self.trip.days[0]
         if self.trip.start_date != self.trip.end_date or day.date != self.trip.start_date:

@@ -15,8 +15,9 @@
 ## 2. 项目基础信息
 
 - 项目名称：行知旅伴——面向国内城市的预算约束与关怀出行 AI Agent
-- 技术栈：React + FastAPI + LangGraph（2026-08-24 由张琪确认）
-- 架构模式：前后端分离 + Agent Flow
+- 运行中技术栈：React + FastAPI + Pydantic + SQLite；百炼 Qwen 仅用于自然语言候选字段提取
+- 规划技术方向：LangGraph（2026-08-24 由张琪确认），但 Sprint 1 当前尚未接入 LangGraph runtime
+- 架构模式：前后端分离 + 受确定性契约约束的 Agent Flow 原型
 - 部署形态：公网响应式 Web；本地开发与录屏作为回退
 
 ### 2.1 PBI-02-A 模块边界
@@ -26,6 +27,13 @@
 - 领域层：维护 CityContext、Place、Route、PriceFact、Provenance 等稳定类型。
 - 基础设施层：封装高德 Web 服务和 SQLite 缓存。
 - 本模块不负责行程规划、预算决策、PlanVersion 状态机或 LangGraph 核心编排。
+
+### 2.1.1 百炼自然语言提取边界
+
+- 基础设施层通过 `app/infrastructure/bailian.py` 调用百炼 OpenAI 兼容接口。
+- `app/main.py:create_app` 仅在配置 `BAILIAN_API_KEY` 时装配在线模型；健康检查公开当前解析模式但绝不公开 Key。
+- 模型输出是未信任候选字段，必须经过 `TripDraftParserService`、Pydantic 与人工确认。
+- 当前没有 LangGraph 运行时；不得把字段提取描述为“LLM 自动生成最终路线”。
 
 ### 2.2 PBI-04-B Plan V1 模块边界
 

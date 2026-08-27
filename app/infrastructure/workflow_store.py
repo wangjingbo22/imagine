@@ -10,6 +10,8 @@ from uuid import UUID, uuid4
 from app.infrastructure.plan_store import PlanStoreError
 from app.schemas.execution import (
     ActualBudgetSummary,
+    ArrivalEvidenceSnapshot,
+    CreateArrivalExecutionEvent,
     CreateExecutionEvent,
     ExecutionEvent,
     ExecutionEventType,
@@ -80,6 +82,7 @@ class SqliteWorkflowRepository:
                     plan_version_id TEXT NOT NULL,
                     event_type TEXT NOT NULL,
                     amount_cents INTEGER,
+                    arrival_evidence_json TEXT,
                     idempotency_key TEXT NOT NULL,
                     occurred_at TEXT NOT NULL,
                     created_at TEXT NOT NULL,
@@ -96,6 +99,11 @@ class SqliteWorkflowRepository:
             if "created_at" not in event_columns:
                 connection.execute(
                     "ALTER TABLE execution_events ADD COLUMN created_at TEXT"
+                )
+            if "arrival_evidence_json" not in event_columns:
+                connection.execute(
+                    "ALTER TABLE execution_events "
+                    "ADD COLUMN arrival_evidence_json TEXT"
                 )
             connection.execute(
                 """
@@ -136,6 +144,14 @@ class SqliteWorkflowRepository:
             plan_version_id=UUID(row["plan_version_id"]),
             event_type=ExecutionEventType(row["event_type"]),
             amount_cents=row["amount_cents"],
+            arrival_evidence=(
+                ArrivalEvidenceSnapshot.model_validate_json(
+                    row["arrival_evidence_json"],
+                    strict=True,
+                )
+                if row["arrival_evidence_json"]
+                else None
+            ),
             idempotency_key=row["idempotency_key"],
             occurred_at=datetime.fromisoformat(row["occurred_at"]),
         )
@@ -370,7 +386,7 @@ class SqliteWorkflowRepository:
     def create_event(
         self,
         trip_id: UUID,
-        request: CreateExecutionEvent,
+        request: CreateExecutionEvent | CreateArrivalExecutionEvent,
     ) -> ExecutionEvent:
         trip_text = str(trip_id)
         occurred_at = request.occurred_at.astimezone(UTC).isoformat()
@@ -391,6 +407,8 @@ class SqliteWorkflowRepository:
                     and event.plan_version_id == request.plan_version_id
                     and event.event_type is request.event_type
                     and event.amount_cents == request.amount_cents
+                    and event.arrival_evidence
+                    == getattr(request, "arrival_evidence", None)
                 )
                 if not same_payload:
                     connection.execute("ROLLBACK")
@@ -468,8 +486,9 @@ class SqliteWorkflowRepository:
                 """
                 INSERT INTO execution_events (
                     event_id, trip_id, task_id, plan_version_id, event_type,
-                    amount_cents, idempotency_key, occurred_at, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    amount_cents, arrival_evidence_json, idempotency_key,
+                    occurred_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(event_id),
@@ -478,6 +497,11 @@ class SqliteWorkflowRepository:
                     str(request.plan_version_id),
                     request.event_type.value,
                     request.amount_cents,
+                    (
+                        request.arrival_evidence.model_dump_json(by_alias=True)
+                        if isinstance(request, CreateArrivalExecutionEvent)
+                        else None
+                    ),
                     request.idempotency_key,
                     occurred_at,
                     updated_at,

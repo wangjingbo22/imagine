@@ -29,6 +29,14 @@ def get_planning_boundary(request: Request) -> PlanningBoundaryService:
     return service
 
 
+def require_s2_planning_ready(trip_id: UUID, request: Request) -> None:
+    """S1 legacy trips pass through; S2 collaboration trips require organizer proof."""
+    request.app.state.collaboration_service.assert_planning_ready(
+        trip_id,
+        request.headers.get("X-Organizer-Token"),
+    )
+
+
 @router.get(
     "/trips/{trip_id}/planning-facts",
     summary="恢复当前服务端签发的规划事实",
@@ -57,6 +65,7 @@ async def generate_plan_v1(
     request: Request,
     service: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
+    require_s2_planning_ready(trip_id, request)
     try:
         candidate_request = CandidatePlanRequest.model_validate_json(
             await request.body(),
@@ -119,6 +128,7 @@ async def generate_plan_v2(
     request: Request,
     service: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
+    require_s2_planning_ready(trip_id, request)
     try:
         replan_request = ReplanGenerationRequest.model_validate_json(
             await request.body(),
@@ -142,6 +152,7 @@ async def generate_plan_v2_from_events(
     request: Request,
     service: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
+    require_s2_planning_ready(trip_id, request)
     try:
         replan_request = EventDrivenReplanRequest.model_validate_json(
             await request.body(),

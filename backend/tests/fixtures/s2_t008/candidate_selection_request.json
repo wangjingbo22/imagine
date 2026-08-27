@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "1.0",
+  "traceId": "80000000-0000-4000-8000-000000000008",
+  "confirmedTripSummary": {
+    "cityCode": "110000",
+    "participantCount": 3,
+    "interestTags": ["历史文化", "亲子", "室内休息"],
+    "mustVisitLabels": ["国家博物馆"],
+    "avoidLabels": ["高强度爬坡"],
+    "careNeedLabels": ["低体力", "儿童同行"]
+  },
+  "candidateFacts": [
+    {
+      "placeFactId": "fact-place-national-museum",
+      "factDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "displayName": "中国国家博物馆",
+      "categoryTags": ["历史文化", "室内"],
+      "knownAttributes": ["用户必去", "适合雨天"],
+      "riskFlags": ["无障碍入口状态待确认"]
+    },
+    {
+      "placeFactId": "fact-place-science-museum",
+      "factDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "displayName": "中国科学技术馆",
+      "categoryTags": ["亲子", "室内"],
+      "knownAttributes": ["互动展览"],
+      "riskFlags": []
+    },
+    {
+      "placeFactId": "fact-place-library",
+      "factDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "displayName": "首都图书馆",
+      "categoryTags": ["文化", "室内休息"],
+      "knownAttributes": ["安静"],
+      "riskFlags": []
+    },
+    {
+      "placeFactId": "fact-place-aquarium",
+      "factDigest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "displayName": "北京海洋馆",
+      "categoryTags": ["亲子", "室内"],
+      "knownAttributes": ["儿童友好"],
+      "riskFlags": ["母婴室状态待确认"]
+    },
+    {
+      "placeFactId": "fact-place-olympic-forest",
+      "factDigest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "displayName": "奥林匹克森林公园",
+      "categoryTags": ["自然风景", "户外"],
+      "knownAttributes": ["开阔"],
+      "riskFlags": ["连续步行强度待核实"]
+    },
+    {
+      "placeFactId": "fact-place-shijia-hutong",
+      "factDigest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+      "displayName": "史家胡同博物馆",
+      "categoryTags": ["历史文化", "室内"],
+      "knownAttributes": ["小型展馆"],
+      "riskFlags": []
+    }
+  ],
+  "allowedTaskCount": [3, 4]
+}

@@ -17,6 +17,7 @@ from app.services.planning import (
     CandidatePlanRejected,
     CandidatePlanRequest,
     candidate_to_proposed_plan_version,
+    candidate_to_proposed_plan_version_v2,
     generate_candidate_plan,
     generate_proposed_plan_version,
 )
@@ -41,6 +42,119 @@ def _request(payload: dict[str, object] | None = None) -> CandidatePlanRequest:
         json.dumps(raw, ensure_ascii=False, separators=(",", ":")),
         strict=True,
     )
+
+
+def _payload_for_trip_shape(mode: str, participant_count: int) -> dict[str, object]:
+    payload = deepcopy(_payload())
+    trip = payload["request"]["trip"]
+    participants = trip["participants"]
+    while len(participants) < participant_count:
+        clone = deepcopy(participants[-1])
+        clone["participantId"] = (
+            f"10000000-0000-4000-8000-{len(participants) + 100:012d}"
+        )
+        clone["nickname"] = f"Member {len(participants) + 1}"
+        participants.append(clone)
+    trip["mode"] = mode
+    trip["participants"] = participants[:participant_count]
+    return payload
+
+
+def _group_request(participant_count: int = 2) -> CandidatePlanRequest:
+    return _request(_payload_for_trip_shape("GROUP", participant_count))
+
+
+@pytest.mark.parametrize(
+    ("mode", "participant_count"),
+    [("SINGLE", 1), ("GROUP", 2), ("GROUP", 3)],
+    ids=["single-one", "group-two", "group-three"],
+)
+def test_candidate_plan_request_accepts_the_mode_participant_matrix(
+    mode: str,
+    participant_count: int,
+) -> None:
+    request = _request(_payload_for_trip_shape(mode, participant_count))
+
+    assert request.trip.mode.value == mode
+    assert len(request.trip.participants) == participant_count
+
+
+@pytest.mark.parametrize(
+    ("mode", "participant_count"),
+    [
+        ("SINGLE", 0),
+        ("SINGLE", 2),
+        ("SINGLE", 3),
+        ("GROUP", 0),
+        ("GROUP", 1),
+        ("GROUP", 4),
+    ],
+    ids=[
+        "single-zero",
+        "single-two",
+        "single-three",
+        "group-zero",
+        "group-one",
+        "group-four",
+    ],
+)
+def test_candidate_plan_request_rejects_invalid_mode_participant_matrix(
+    mode: str,
+    participant_count: int,
+) -> None:
+    with pytest.raises(ValidationError):
+        _request(_payload_for_trip_shape(mode, participant_count))
+
+
+def test_candidate_planner_revalidates_model_copy_shape_bypass() -> None:
+    valid_request = _request()
+    invalid_trip = valid_request.trip.model_copy(
+        update={
+            "participants": [
+                *valid_request.trip.participants,
+                valid_request.trip.participants[0],
+            ]
+        }
+    )
+    invalid_request = valid_request.model_copy(update={"trip": invalid_trip})
+
+    with pytest.raises(CandidatePlanInputError) as captured:
+        generate_candidate_plan(invalid_request)
+
+    assert captured.value.code == "CANDIDATE_PLAN_INPUT_INVALID"
+
+
+@pytest.mark.parametrize("participant_count", [2, 3])
+def test_group_candidate_plan_is_deterministic_for_two_or_three_members(
+    participant_count: int,
+) -> None:
+    request = _group_request(participant_count)
+
+    first = generate_candidate_plan(request)
+    second = generate_candidate_plan(request)
+
+    assert first == second
+    assert len(request.trip.participants) == participant_count
+
+
+def test_group_candidate_cannot_be_bridged_to_plan_version() -> None:
+    request = _group_request()
+    candidate = generate_candidate_plan(request)
+
+    with pytest.raises(CandidatePlanInputError) as captured:
+        candidate_to_proposed_plan_version(candidate, request)
+
+    assert captured.value.code == "GROUP_PLAN_VERSION_UNSUPPORTED"
+
+
+def test_group_candidate_cannot_enter_the_v2_plan_version_bridge() -> None:
+    request = _group_request()
+    candidate = generate_candidate_plan(request)
+
+    with pytest.raises(CandidatePlanInputError) as captured:
+        candidate_to_proposed_plan_version_v2(candidate, request, None)  # type: ignore[arg-type]
+
+    assert captured.value.code == "GROUP_PLAN_VERSION_UNSUPPORTED"
 
 
 def test_golden_same_city_facts_produce_the_reviewed_candidate() -> None:

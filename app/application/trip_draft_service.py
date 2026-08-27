@@ -69,7 +69,12 @@ class TripDraftParserService:
         text = normalize("NFKC", request.natural_language_request).strip()
         reference = request.reference_date or date.today()
         items: list[ConfirmationItem] = []
-        llm = await self._extract_llm_candidates(text, reference)
+        (
+            llm,
+            recognition_source,
+            recognition_model,
+            degraded_reason,
+        ) = await self._extract_llm_candidates(text, reference)
 
         city_name = (
             _non_blank(request.city_name)
@@ -186,6 +191,9 @@ class TripDraftParserService:
         if items:
             return TripDraftParseResult(
                 trip_id=trip_id,
+                recognition_source=recognition_source,
+                recognition_model=recognition_model,
+                degraded_reason=degraded_reason,
                 parsed=parsed,
                 confirmation_items=_stable_items(items),
                 can_plan=False,
@@ -279,6 +287,9 @@ class TripDraftParserService:
             raise TripSchemaError(policy_issues)
         return TripDraftParseResult(
             trip_id=trip_id,
+            recognition_source=recognition_source,
+            recognition_model=recognition_model,
+            degraded_reason=degraded_reason,
             parsed=parsed,
             confirmation_items=[],
             can_plan=True,
@@ -289,17 +300,28 @@ class TripDraftParserService:
         self,
         text: str,
         reference: date,
-    ) -> LlmTripDraftFields:
+    ) -> tuple[
+        LlmTripDraftFields,
+        str,
+        str | None,
+        str | None,
+    ]:
         if self._llm_extractor is None:
-            return LlmTripDraftFields()
+            return LlmTripDraftFields(), "DETERMINISTIC_RULES", None, None
         try:
-            return await self._llm_extractor.extract(
-                text=text,
-                reference_date=reference,
+            extracted = await self._llm_extractor.extract(
+                text=text, reference_date=reference
+            )
+            model = getattr(self._llm_extractor, "model", None)
+            return (
+                extracted,
+                "BAILIAN",
+                model if isinstance(model, str) and model else None,
+                None,
             )
         except TripDraftExtractionError as error:
             logger.warning("百炼字段提取已回退到确定性规则: %s", error.code)
-            return LlmTripDraftFields()
+            return LlmTripDraftFields(), "DEGRADED_RULES", None, error.code
 
     @staticmethod
     def require_planning_ready(result: TripDraftParseResult) -> CreateSingleDayTrip:
@@ -341,7 +363,19 @@ def _key(value: str) -> str:
 
 def _extract_city(text: str) -> str | None:
     matches = [city for city in _CITY_NAMES if city in text]
-    return matches[0] if len(matches) == 1 else None
+    if len(matches) == 1:
+        return matches[0]
+    # The fixed city list is only a conservative fallback.  Keep supporting
+    # ordinary prefecture-level names such as "驻马店" when a user explicitly
+    # says they are going there; the provider will still validate it later.
+    landmark = re.search(r"(?:想去|去|到)\s*([\u4e00-\u9fff]{2,6}?)(?:市)?(?:博物馆|火车站)", text)
+    if landmark:
+        return landmark.group(1)
+    generic = re.search(
+        r"(?:想去|去|到)\s*([\u4e00-\u9fff]{2,8}?)(?:市|，|,|。|\s|玩|旅游|一日游)",
+        text,
+    )
+    return generic.group(1) if generic else None
 
 
 def _explicit_date(value: str | None) -> date | None:

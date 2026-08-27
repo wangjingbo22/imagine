@@ -16,7 +16,7 @@ from app.infrastructure.workflow_store import SqliteWorkflowRepository
 from app.main import create_app
 from app.schemas.trip import CreateSingleDayTrip
 from app.services.replanning import SuffixPlanningInput
-from tests.test_plan_versions import UnusedLocationService
+from backend.tests.plan_support import UnusedLocationService
 
 
 PLANNING_FIXTURE = (

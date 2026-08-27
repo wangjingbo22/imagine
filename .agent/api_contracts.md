@@ -265,3 +265,38 @@ Schema 校验失败沿用人工确认结构：
 - `GET /api/v1/trips/{tripId}/summary`
 
 总结由服务端从 CURRENT PlanVersion 和 ExecutionEvent 复算，返回计划/实际金额、差额、完成/跳过任务、当前版本、版本历史和事件。
+
+## 13. PBI-11-B 执行中迟到/疲劳草稿与临时约束（Schema 1.0）
+
+### 13.1 事件草稿
+
+- `POST /api/v1/execution-adjustments/parse`
+- 请求固定为 `schemaVersion/rawText/taskId/currentTask`，且 `currentTask.taskId` 必须与顶层 `taskId` 相同。
+- 响应体固定为 `schemaVersion/eventType/taskId/lateMinutes/fatigueLevel/clarificationQuestions`；禁止模型输出 Constraint、Profile、PlanVersion 或状态。
+- `eventType` 只允许 `LATE | FATIGUE | null`；`lateMinutes` 为 1—240；`fatigueLevel` 为 `MILD | MODERATE | SEVERE`。
+- 不明确时由程序生成固定 `questionKey`；百炼输出非法、不可用或超过 10 秒时只调用一次并降级到固定表单。
+- 该接口零写入，不进入现有 START/COMPLETE/SKIP/EXPENSE 事件流。
+
+### 13.2 已确认事件转换
+
+- `POST /api/v1/execution-adjustments/compile`
+- 只接受 `confirmationStatus: CONFIRMED`。
+- `LATE` 只收紧 `remaining.timeBudgetMinutes`；`FATIGUE` 只收紧剩余总步行、单段步行和休息间隔。
+- 输出为瞬时 `EventConstraintSet`，供 S2-T021 在服务端从可信 CURRENT/任务事实重新编译并消费。
+- `EventConstraintSet` 绝不能追加到 T007 `confirmedConstraints`，不得修改长期 AssistanceProfile 或任何 PlanVersion 状态。
+- 同一严格输入和同一 `policyVersion` 必须得到相同约束、原因和 SHA-256 摘要；摘要仅用于幂等比较，不是签名。
+
+### 13.3 S2-T021 服务端后缀重规划
+
+- `POST /api/v1/trips/{tripId}/replans/from-adjustment`
+- 请求只能包含 `schemaVersion`、已确认 `adjustment`、唯一 `lockedTaskIds[]` 与 `explainDifferences`；禁止客户端提交候选、FactRef 内容、当前计划、编译后约束或校验结果。
+- 服务端要求父版本是匹配 `ISSUED` 记录的唯一 `CURRENT V1`，恢复其可信 `CandidatePlanRequest` 与执行事件，并重新编译 S2-T020 瞬时约束。
+- 已完成、已跳过、已开始、当前和显式锁定任务所覆盖的连续前缀必须逐对象保持不变；只允许调整剩余后缀。
+- 候选必须重新覆盖并通过 `BUDGET | TIME | ROUTE | CARE` 全部 HARD 以及本次瞬时 HARD。无解返回 `REPLAN_NO_FEASIBLE_CANDIDATE`、受影响规则与可放宽项，且不得登记 V2 或签发记录。
+- S2-T020 瞬时约束只写入本次校验与签发证据，不并入长期 S1-T007 约束。
+
+### 13.4 S2-T022 Diff、解释与决策
+
+- 成功预览返回 `candidatePlan`、`diff`、`eventConstraints`、`derivedContext`、`frozenTaskIds`、候选评估和完整校验报告；候选保持 `PROPOSED`，`currentPlanChanged` 固定为 `false`。
+- `POST /api/v1/trips/{tripId}/replans/{planId}/decision` 只接受 `ACCEPT | REJECT`。两种决策都要求候选具有服务端 `ISSUED V2` 记录，并复用既有 PlanVersion 原子事务。
+- 百炼只读取服务端生成的脱敏 Diff 投影并返回一段展示文案；它不得修改任务、金额、状态或版本。未配置、超时或非法输出只令 `explanation.status=UNAVAILABLE`，结构化候选与 Diff 必须完整返回。

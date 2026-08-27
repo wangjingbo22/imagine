@@ -79,7 +79,16 @@ def _participant(
 
 
 def _trip(*participants: Participant) -> Trip:
-    return _base_request().trip.model_copy(update={"participants": list(participants)})
+    payload = _base_request().trip.model_dump(mode="json", by_alias=True)
+    payload["mode"] = "GROUP" if 2 <= len(participants) <= 3 else "SINGLE"
+    payload["participants"] = [
+        participant.model_dump(mode="json", by_alias=True)
+        for participant in participants
+    ]
+    return Trip.model_validate_json(
+        json.dumps(payload, ensure_ascii=False),
+        strict=True,
+    )
 
 
 def _candidate(
@@ -144,6 +153,24 @@ def test_maximum_minimum_score_precedes_average_score() -> None:
     assert decision.selected_evaluation.minimum_score == 84
     assert decision.selected_evaluation.average_score == 84
     assert [item.score for item in decision.selected_evaluation.participant_scores] == [84, 84]
+
+
+def test_three_member_group_emits_one_score_per_member() -> None:
+    trip = _trip(
+        _participant("成员甲", [("博物馆", 5)]),
+        _participant("成员乙", [("美食", 5)]),
+        _participant("成员丙", [("公园", 5)]),
+    )
+
+    decision = DeterministicFairRecommendationService().select_unique(
+        trip=trip,
+        candidates=[_candidate("candidate-three-members", ("博物馆", "美食", "公园"))],
+    )
+
+    assert trip.mode.value == "GROUP"
+    assert [
+        item.participant_id for item in decision.selected_evaluation.participant_scores
+    ] == [participant.participant_id for participant in trip.participants]
 
 
 def test_average_score_precedes_cost_when_minimum_ties() -> None:
