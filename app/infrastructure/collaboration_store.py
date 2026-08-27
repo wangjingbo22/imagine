@@ -337,18 +337,38 @@ class SqliteCollaborationRepository:
         revision: TripDraftRevisionView,
         idempotency_key: str,
     ) -> OrganizerBootstrapResult:
-        del idempotency_key
         organizer_id = revision.member_bindings.get("member-1")
         if organizer_id is None:
             raise CollaborationStoreError("BINDING_INVALID")
         participant_keys = [item.member_key for item in revision.understanding.participants]
         if participant_keys != [f"member-{index}" for index in range(1, len(participant_keys) + 1)]:
             raise CollaborationStoreError("BINDING_INVALID")
-        organizer_secret = self._new_secret()
+        request_digest = canonical_sha256({
+            "tripId": str(revision.trip_id),
+            "draftId": str(revision.draft_id),
+            "revision": revision.revision,
+            "sourceDigest": revision.source_digest,
+            "bindings": {
+                key: str(revision.member_bindings[key])
+                for key in sorted(revision.member_bindings)
+            },
+        })
         now = self._clock()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                prior = connection.execute(
+                    "SELECT request_digest, result_json FROM collaboration_idempotency "
+                    "WHERE actor_scope='SYSTEM' AND actor_id='BOOTSTRAP' "
+                    "AND operation='BOOTSTRAP_COLLABORATION' AND idempotency_key=?",
+                    (idempotency_key,),
+                ).fetchone()
+                if prior is not None:
+                    if prior["request_digest"] != request_digest:
+                        raise CollaborationStoreError("IDEMPOTENCY_KEY_REUSED")
+                    result = OrganizerBootstrapResult.model_validate_json(prior["result_json"])
+                    connection.execute("COMMIT")
+                    return result
                 existing = connection.execute(
                     "SELECT 1 FROM collaboration_sessions WHERE trip_id = ?",
                     (str(revision.trip_id),),
@@ -356,6 +376,7 @@ class SqliteCollaborationRepository:
                 if existing is not None:
                     raise CollaborationStoreError("COLLABORATION_ALREADY_EXISTS")
                 self._assert_mutation_allowed_connection(connection, revision.trip_id, now)
+                organizer_secret = self._new_secret()
                 connection.execute(
                     """INSERT INTO collaboration_sessions
                     (trip_id, organizer_participant_id, status, expected_participants,
@@ -395,6 +416,26 @@ class SqliteCollaborationRepository:
                         ),
                     )
                 register_trip_flow(connection, revision.trip_id, TripFlowKind.COLLABORATION_V2)
+                result = {
+                    "tripId": str(revision.trip_id),
+                    "organizerParticipantId": str(organizer_id),
+                    "organizerToken": None,
+                    "organizerTokenAvailable": False,
+                    "collaborationVersion": 1,
+                }
+                connection.execute(
+                    """INSERT INTO collaboration_idempotency
+                    (actor_scope, actor_id, operation, idempotency_key, request_digest,
+                     resource_id, result_json, completed_at)
+                    VALUES ('SYSTEM', 'BOOTSTRAP', 'BOOTSTRAP_COLLABORATION', ?, ?, ?, ?, ?)""",
+                    (
+                        idempotency_key,
+                        request_digest,
+                        str(revision.trip_id),
+                        json.dumps(result, sort_keys=True, separators=(",", ":")),
+                        now.isoformat(),
+                    ),
+                )
                 connection.execute("COMMIT")
             except Exception:
                 if connection.in_transaction:
@@ -440,17 +481,32 @@ class SqliteCollaborationRepository:
         idempotency_key: str,
         expires_in_hours: int = 72,
     ) -> InvitationCreated:
-        del idempotency_key
         actor = self._organizer_actor(organizer_token)
         if actor.trip_id != trip_id:
             raise CollaborationStoreError("ORGANIZER_PERMISSION_REQUIRED")
+        request_digest = canonical_sha256({
+            "tripId": str(trip_id),
+            "participantId": str(participant_id),
+            "expectedVersion": expected_version,
+            "expiresInHours": expires_in_hours,
+        })
         now = self._clock()
-        token = self._new_secret()
-        invitation_id = uuid4()
         expires_at = now + timedelta(hours=expires_in_hours)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                prior = connection.execute(
+                    "SELECT request_digest, result_json FROM collaboration_idempotency "
+                    "WHERE actor_scope='ORGANIZER' AND actor_id=? "
+                    "AND operation='CREATE_INVITATION' AND idempotency_key=?",
+                    (str(actor.participant_id), idempotency_key),
+                ).fetchone()
+                if prior is not None:
+                    if prior["request_digest"] != request_digest:
+                        raise CollaborationStoreError("IDEMPOTENCY_KEY_REUSED")
+                    result = InvitationCreated.model_validate_json(prior["result_json"])
+                    connection.execute("COMMIT")
+                    return result
                 session = connection.execute(
                     "SELECT * FROM collaboration_sessions WHERE trip_id = ?",
                     (str(trip_id),),
@@ -462,6 +518,8 @@ class SqliteCollaborationRepository:
                 if session["version"] != expected_version:
                     raise CollaborationStoreError("COLLABORATION_VERSION_STALE")
                 self._assert_mutation_allowed_connection(connection, trip_id, now)
+                token = self._new_secret()
+                invitation_id = uuid4()
                 participant = connection.execute(
                     "SELECT member_key, status FROM collaboration_participants "
                     "WHERE trip_id = ? AND participant_id = ?",
@@ -496,6 +554,29 @@ class SqliteCollaborationRepository:
                     "UPDATE collaboration_sessions SET version = ?, status = 'INVITING', updated_at = ? WHERE trip_id = ?",
                     (next_version, now.isoformat(), str(trip_id)),
                 )
+                result = {
+                    "invitationId": str(invitation_id),
+                    "tripId": str(trip_id),
+                    "participantId": str(participant_id),
+                    "invitationUrl": None,
+                    "expiresAt": expires_at.isoformat(),
+                    "linkAvailable": False,
+                    "collaborationVersion": next_version,
+                }
+                connection.execute(
+                    """INSERT INTO collaboration_idempotency
+                    (actor_scope, actor_id, operation, idempotency_key, request_digest,
+                     resource_id, result_json, completed_at)
+                    VALUES ('ORGANIZER', ?, 'CREATE_INVITATION', ?, ?, ?, ?, ?)""",
+                    (
+                        str(actor.participant_id),
+                        idempotency_key,
+                        request_digest,
+                        str(invitation_id),
+                        json.dumps(result, sort_keys=True, separators=(",", ":")),
+                        now.isoformat(),
+                    ),
+                )
                 connection.execute("COMMIT")
             except Exception:
                 if connection.in_transaction:
@@ -511,12 +592,30 @@ class SqliteCollaborationRepository:
             collaborationVersion=next_version,
         )
 
-    def inspect_invitation(self, raw_token: str) -> tuple[UUID, UUID]:
+    def inspect_invitation(
+        self,
+        raw_token: str,
+        idempotency_key: str | None = None,
+    ) -> tuple[UUID, UUID]:
+        token_hash = self._token_hash(raw_token)
         with self._connect() as connection:
+            if idempotency_key is not None:
+                request_digest = canonical_sha256({"tokenHash": token_hash})
+                prior = connection.execute(
+                    "SELECT request_digest, result_json FROM collaboration_idempotency "
+                    "WHERE actor_scope='INVITATION' AND actor_id='REDEEM' "
+                    "AND operation='REDEEM_INVITATION' AND idempotency_key=?",
+                    (idempotency_key,),
+                ).fetchone()
+                if prior is not None:
+                    if prior["request_digest"] != request_digest:
+                        raise CollaborationStoreError("IDEMPOTENCY_KEY_REUSED")
+                    result = json.loads(prior["result_json"])
+                    return UUID(result["tripId"]), UUID(result["participantId"])
             row = connection.execute(
                 "SELECT trip_id, participant_id, status, expires_at, revoked_at "
                 "FROM participant_invitations WHERE token_hash = ?",
-                (self._token_hash(raw_token),),
+                (token_hash,),
             ).fetchone()
         if row is None or row["status"] == "REVOKED" or row["revoked_at"]:
             raise CollaborationStoreError("INVITATION_UNAVAILABLE")
@@ -541,9 +640,9 @@ class SqliteCollaborationRepository:
             try:
                 prior = connection.execute(
                     "SELECT request_digest, result_json FROM collaboration_idempotency "
-                    "WHERE actor_scope='INVITATION' AND actor_id=? AND operation='REDEEM_INVITATION' "
+                    "WHERE actor_scope='INVITATION' AND actor_id='REDEEM' AND operation='REDEEM_INVITATION' "
                     "AND idempotency_key=?",
-                    (token_hash, idempotency_key),
+                    (idempotency_key,),
                 ).fetchone()
                 if prior is not None:
                     if prior["request_digest"] != request_digest:
@@ -604,9 +703,8 @@ class SqliteCollaborationRepository:
                     """INSERT INTO collaboration_idempotency
                     (actor_scope, actor_id, operation, idempotency_key, request_digest,
                      resource_id, result_json, completed_at)
-                    VALUES ('INVITATION', ?, 'REDEEM_INVITATION', ?, ?, ?, ?, ?)""",
+                    VALUES ('INVITATION', 'REDEEM', 'REDEEM_INVITATION', ?, ?, ?, ?, ?)""",
                     (
-                        token_hash,
                         idempotency_key,
                         request_digest,
                         str(session_id),

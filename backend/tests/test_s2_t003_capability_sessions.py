@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -122,3 +123,83 @@ def test_revoke_invitation_revokes_linked_session_and_invalidates_confirmation(t
     state = harness.service.organizer_state(harness.revision.trip_id, harness.organizer_token)
     member = next(item for item in state.participants if item.member_key == "member-2")
     assert member.confirmation_status is ParticipantConfirmationStatus.NEEDS_RECONFIRMATION
+
+
+def test_bootstrap_idempotency_returns_metadata_without_replaying_secret(tmp_path) -> None:
+    repository = SqliteCollaborationRepository(tmp_path / "collaboration.sqlite3")
+    revision = load_revision()
+
+    first = repository.bootstrap_collaboration(revision, "bootstrap-idempotent-1")
+    replay = repository.bootstrap_collaboration(revision, "bootstrap-idempotent-1")
+
+    assert first.organizer_token is not None
+    assert replay.organizer_token is None
+    assert replay.organizer_token_available is False
+    assert replay.trip_id == first.trip_id
+    assert replay.organizer_participant_id == first.organizer_participant_id
+    with pytest.raises(CollaborationStoreError, match="IDEMPOTENCY_KEY_REUSED"):
+        repository.bootstrap_collaboration(
+            replace(revision, source_digest="b" * 64),
+            "bootstrap-idempotent-1",
+        )
+
+
+def test_invitation_idempotency_returns_same_metadata_without_replaying_link(tmp_path) -> None:
+    repository = SqliteCollaborationRepository(tmp_path / "collaboration.sqlite3")
+    revision = load_revision()
+    bootstrap = repository.bootstrap_collaboration(revision, "bootstrap-idempotent-2")
+    assert bootstrap.organizer_token is not None
+
+    first = repository.create_invitation(
+        trip_id=revision.trip_id,
+        participant_id=revision.member_bindings["member-2"],
+        organizer_token=bootstrap.organizer_token,
+        expected_version=1,
+        idempotency_key="invite-idempotent-1",
+    )
+    replay = repository.create_invitation(
+        trip_id=revision.trip_id,
+        participant_id=revision.member_bindings["member-2"],
+        organizer_token=bootstrap.organizer_token,
+        expected_version=1,
+        idempotency_key="invite-idempotent-1",
+    )
+
+    assert first.invitation_url is not None
+    assert replay.invitation_url is None
+    assert replay.link_available is False
+    assert replay.invitation_id == first.invitation_id
+    with pytest.raises(CollaborationStoreError, match="IDEMPOTENCY_KEY_REUSED"):
+        repository.create_invitation(
+            trip_id=revision.trip_id,
+            participant_id=revision.member_bindings["member-1"],
+            organizer_token=bootstrap.organizer_token,
+            expected_version=1,
+            idempotency_key="invite-idempotent-1",
+        )
+
+
+def test_redeem_idempotency_returns_same_metadata_without_replaying_session_secret(tmp_path) -> None:
+    repository = SqliteCollaborationRepository(tmp_path / "collaboration.sqlite3")
+    revision = load_revision()
+    bootstrap = repository.bootstrap_collaboration(revision, "bootstrap-idempotent-3")
+    assert bootstrap.organizer_token is not None
+    invitation = repository.create_invitation(
+        trip_id=revision.trip_id,
+        participant_id=revision.member_bindings["member-2"],
+        organizer_token=bootstrap.organizer_token,
+        expected_version=1,
+        idempotency_key="invite-idempotent-2",
+    )
+    assert invitation.invitation_url is not None
+    raw_token = invitation.invitation_url.split("=", 1)[1]
+
+    first = repository.redeem_invitation(raw_token, "redeem-idempotent-1")
+    replay = repository.redeem_invitation(raw_token, "redeem-idempotent-1")
+
+    assert first.participant_session_token is not None
+    assert replay.participant_session_token is None
+    assert replay.session_token_available is False
+    assert replay.session_id == first.session_id
+    with pytest.raises(CollaborationStoreError, match="IDEMPOTENCY_KEY_REUSED"):
+        repository.redeem_invitation("different-token-value", "redeem-idempotent-1")

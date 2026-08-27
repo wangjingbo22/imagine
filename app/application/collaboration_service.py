@@ -151,7 +151,7 @@ class CollaborationService:
         idempotency_key: str,
     ) -> InvitationRedeemed:
         try:
-            trip_id, _ = self.repository.inspect_invitation(token)
+            trip_id, _ = self.repository.inspect_invitation(token, idempotency_key)
             self._current(trip_id)
             return self.repository.redeem_invitation(token, idempotency_key)
         except TripDraftRevisionUnavailable:

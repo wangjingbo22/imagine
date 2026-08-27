@@ -8,7 +8,7 @@ from app.application.collaboration_ports import UnavailableTripDraftRevisionPort
 from app.core.config import Settings
 from app.infrastructure.collaboration_store import SqliteCollaborationRepository
 from app.main import create_app
-from backend.tests.s2_t003_support import load_revision
+from backend.tests.s2_t003_support import FakeTripDraftRevisionPort, load_revision
 
 
 def test_collaboration_route_table_contains_only_scoped_frozen_paths() -> None:
@@ -70,3 +70,56 @@ async def test_revoke_http_converges_when_t002_is_unavailable(tmp_path) -> None:
 
     assert response.status_code == 200
     assert response.json()["data"]["accessStatus"] == "REVOKED"
+
+
+@pytest.mark.asyncio
+async def test_redeem_retry_returns_metadata_without_replaying_session_secret(tmp_path) -> None:
+    revision = load_revision()
+    repository = SqliteCollaborationRepository(tmp_path / "collaboration.sqlite3")
+    bootstrap = repository.bootstrap_collaboration(revision, "bootstrap-redeem-0001")
+    assert bootstrap.organizer_token is not None
+    invitation = repository.create_invitation(
+        trip_id=revision.trip_id,
+        participant_id=revision.member_bindings["member-2"],
+        organizer_token=bootstrap.organizer_token,
+        expected_version=1,
+        idempotency_key="invite-redeem-0001",
+    )
+    assert invitation.invitation_url is not None
+    app = create_app(
+        settings=Settings(
+            amap_web_service_key="test-amap",
+            amap_cache_db_path=tmp_path / "amap.sqlite3",
+            plan_version_db_path=tmp_path / "plan.sqlite3",
+        ),
+        collaboration_repository=repository,
+        trip_draft_revision_port=FakeTripDraftRevisionPort(revision),
+    )
+    payload = {
+        "schemaVersion": "1.0",
+        "token": invitation.invitation_url.split("=", 1)[1],
+    }
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        first = await client.post(
+            "/api/v2/participant-invitations/redeem",
+            headers={"Idempotency-Key": "redeem-http-0001"},
+            json=payload,
+        )
+        replay = await client.post(
+            "/api/v2/participant-invitations/redeem",
+            headers={"Idempotency-Key": "redeem-http-0001"},
+            json=payload,
+        )
+
+    assert first.status_code == 200
+    assert replay.status_code == 200
+    first_data = first.json()["data"]
+    replay_data = replay.json()["data"]
+    assert first_data["participantSessionToken"]
+    assert replay_data["participantSessionToken"] is None
+    assert replay_data["sessionTokenAvailable"] is False
+    assert replay_data["sessionId"] == first_data["sessionId"]
