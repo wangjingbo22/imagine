@@ -193,6 +193,100 @@ def test_migration_backfills_strict_confirmed_singles_only(tmp_path) -> None:
     assert registry.get(UUID("30000000-0000-4000-8000-000000000003")) is None
 
 
+def test_migration_records_invalid_and_group_rows_without_raw_json(tmp_path) -> None:
+    path = tmp_path / "migration-errors.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """CREATE TABLE confirmed_trip_inputs (
+            trip_id TEXT PRIMARY KEY,
+            trip_json TEXT NOT NULL,
+            semantic_json TEXT NOT NULL,
+            confirmed_at TEXT NOT NULL
+        )"""
+    )
+    connection.executemany(
+        """INSERT INTO confirmed_trip_inputs
+        (trip_id, trip_json, semantic_json, confirmed_at)
+        VALUES (?, ?, '{}', '2026-08-27T00:00:00+00:00')""",
+        [
+            (
+                "30000000-0000-4000-8000-000000000004",
+                '{"mode":"SINGLE","secret":"malformed-source"',
+            ),
+            (
+                "30000000-0000-4000-8000-000000000005",
+                '{"mode":"GROUP","secret":"group-source"}',
+            ),
+        ],
+    )
+    connection.commit()
+    connection.close()
+
+    SqliteCollaborationRepository(path)
+    registry = SqliteTripFlowRegistry(path)
+
+    assert registry.get(UUID("30000000-0000-4000-8000-000000000004")) is None
+    assert registry.get(UUID("30000000-0000-4000-8000-000000000005")) is None
+    with sqlite3.connect(path) as connection:
+        columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(trip_flow_migration_errors)"
+            )
+        }
+        rows = connection.execute(
+            "SELECT error_code, trip_id FROM trip_flow_migration_errors"
+        ).fetchall()
+    assert "trip_json" not in columns
+    assert {row[0] for row in rows} == {"INVALID_JSON", "GROUP_UNSUPPORTED"}
+    assert all("malformed-source" not in repr(row) for row in rows)
+    assert all("group-source" not in repr(row) for row in rows)
+
+
+def test_migration_error_record_failure_rolls_back_schema_atomically(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "migration-error-atomicity.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """CREATE TABLE confirmed_trip_inputs (
+            trip_id TEXT PRIMARY KEY,
+            trip_json TEXT NOT NULL,
+            semantic_json TEXT NOT NULL,
+            confirmed_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
+        """INSERT INTO confirmed_trip_inputs
+        (trip_id, trip_json, semantic_json, confirmed_at)
+        VALUES ('30000000-0000-4000-8000-000000000006', '{', '{}',
+                '2026-08-27T00:00:00+00:00')"""
+    )
+    connection.commit()
+    connection.close()
+
+    def fail_record(*args, **kwargs):
+        raise RuntimeError("injected migration error write failure")
+
+    monkeypatch.setattr(
+        "app.infrastructure.trip_flow_store.record_migration_error",
+        fail_record,
+    )
+    with pytest.raises(RuntimeError, match="injected migration error write failure"):
+        SqliteCollaborationRepository(path)
+
+    with sqlite3.connect(path) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+    assert "trip_flow_registry" not in tables
+    assert "trip_flow_migration_errors" not in tables
+
+
 def test_legacy_collaboration_rows_are_marked_migration_required(tmp_path) -> None:
     path = tmp_path / "legacy-collaboration.sqlite3"
     create_baseline_collaboration_schema(path)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import json
 from datetime import UTC, datetime
@@ -20,6 +21,44 @@ def ensure_trip_flow_schema(connection: sqlite3.Connection) -> None:
         flow_kind TEXT NOT NULL CHECK(flow_kind IN ('LEGACY_SINGLE','COLLABORATION_V2')),
         created_at TEXT NOT NULL
     )""")
+    connection.execute("""CREATE TABLE IF NOT EXISTS trip_flow_migration_errors (
+        error_id TEXT PRIMARY KEY,
+        source_table TEXT NOT NULL,
+        trip_id TEXT,
+        source_row_hash TEXT NOT NULL UNIQUE,
+        error_code TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""")
+
+
+def record_migration_error(
+    connection: sqlite3.Connection,
+    *,
+    source_table: str,
+    source_trip_id: object,
+    error_code: str,
+) -> None:
+    source_row_id = "" if source_trip_id is None else str(source_trip_id)
+    try:
+        trip_id = str(UUID(source_row_id))
+    except (ValueError, TypeError, AttributeError):
+        trip_id = None
+    source_row_hash = hashlib.sha256(
+        f"{source_table}\x00{source_row_id}\x00{error_code}".encode("utf-8")
+    ).hexdigest()
+    connection.execute(
+        """INSERT OR IGNORE INTO trip_flow_migration_errors
+        (error_id, source_table, trip_id, source_row_hash, error_code, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)""",
+        (
+            source_row_hash,
+            source_table,
+            trip_id,
+            source_row_hash,
+            error_code,
+            datetime.now(UTC).isoformat(),
+        ),
+    )
 
 
 def register_trip_flow(
@@ -56,13 +95,70 @@ def backfill_confirmed_single_flows(connection: sqlite3.Connection) -> None:
         "SELECT trip_id, trip_json FROM confirmed_trip_inputs"
     ).fetchall()
     for row in rows:
+        source_trip_id = row[0]
+        try:
+            payload = json.loads(row[1])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            record_migration_error(
+                connection,
+                source_table="confirmed_trip_inputs",
+                source_trip_id=source_trip_id,
+                error_code="INVALID_JSON",
+            )
+            continue
+        if not isinstance(payload, dict):
+            record_migration_error(
+                connection,
+                source_table="confirmed_trip_inputs",
+                source_trip_id=source_trip_id,
+                error_code="INVALID_PAYLOAD",
+            )
+            continue
+        if payload.get("mode") == "GROUP":
+            record_migration_error(
+                connection,
+                source_table="confirmed_trip_inputs",
+                source_trip_id=source_trip_id,
+                error_code="GROUP_UNSUPPORTED",
+            )
+            continue
         try:
             trip = CreateSingleDayTrip.model_validate_json(row[1], strict=True)
         except (TypeError, ValueError, json.JSONDecodeError):
+            record_migration_error(
+                connection,
+                source_table="confirmed_trip_inputs",
+                source_trip_id=source_trip_id,
+                error_code="LEGACY_SINGLE_INVALID",
+            )
             continue
         if trip.mode != "SINGLE" or len(trip.participants) != 1:
+            record_migration_error(
+                connection,
+                source_table="confirmed_trip_inputs",
+                source_trip_id=source_trip_id,
+                error_code="LEGACY_FLOW_UNSUPPORTED",
+            )
             continue
-        register_trip_flow(connection, trip.trip_id, TripFlowKind.LEGACY_SINGLE)
+        try:
+            source_uuid = UUID(str(source_trip_id))
+        except (ValueError, TypeError, AttributeError):
+            record_migration_error(
+                connection,
+                source_table="confirmed_trip_inputs",
+                source_trip_id=source_trip_id,
+                error_code="TRIP_ID_INVALID",
+            )
+            continue
+        if trip.trip_id != source_uuid:
+            record_migration_error(
+                connection,
+                source_table="confirmed_trip_inputs",
+                source_trip_id=source_trip_id,
+                error_code="TRIP_ID_MISMATCH",
+            )
+            continue
+        register_trip_flow(connection, source_uuid, TripFlowKind.LEGACY_SINGLE)
 
 
 def mark_legacy_collaboration_rows(connection: sqlite3.Connection) -> None:
@@ -160,5 +256,6 @@ __all__ = [
     "backfill_confirmed_single_flows",
     "ensure_trip_flow_schema",
     "mark_legacy_collaboration_rows",
+    "record_migration_error",
     "register_trip_flow",
 ]
