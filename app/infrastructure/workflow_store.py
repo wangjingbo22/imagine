@@ -8,6 +8,8 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from app.infrastructure.plan_store import PlanStoreError
+from app.domain.collaboration import TripFlowKind
+from app.infrastructure.trip_flow_store import ensure_trip_flow_schema, register_trip_flow
 from app.schemas.execution import (
     ActualBudgetSummary,
     ArrivalEvidenceSnapshot,
@@ -52,6 +54,7 @@ class SqliteWorkflowRepository:
     def _initialize(self) -> None:
         with closing(self._connect()) as connection:
             connection.execute("PRAGMA journal_mode = WAL")
+            ensure_trip_flow_schema(connection)
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS constraint_profiles (
@@ -215,6 +218,7 @@ class SqliteWorkflowRepository:
                         "CONFIRMED_TRIP_CONFLICT",
                         "同一 tripId 已确认过不同的 Trip 内容，不允许覆盖",
                     )
+                register_trip_flow(connection, trip.trip_id, TripFlowKind.LEGACY_SINGLE)
                 connection.execute("COMMIT")
             except Exception:
                 if connection.in_transaction:

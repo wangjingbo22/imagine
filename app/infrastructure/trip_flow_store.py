@@ -40,6 +40,7 @@ def register_trip_flow(
 class SqliteTripFlowRegistry:
     def __init__(self, database_path: Path) -> None:
         self._path = database_path
+        self._confirmed_single_ids: set[UUID] = set()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
             ensure_trip_flow_schema(connection)
@@ -69,6 +70,37 @@ class SqliteTripFlowRegistry:
                 if connection.in_transaction:
                     connection.execute("ROLLBACK")
                 raise
+
+    def register_confirmed_single(self, trip: object) -> None:
+        trip_id = trip.trip_id
+        self.register(trip_id, TripFlowKind.LEGACY_SINGLE)
+        self._confirmed_single_ids.add(trip_id)
+
+    def force_registry_only(self, trip_id: UUID, kind: TripFlowKind) -> None:
+        self.register(trip_id, kind)
+
+    def is_strict_confirmed_single(self, trip_id: UUID) -> bool:
+        if self.get(trip_id) is not TripFlowKind.LEGACY_SINGLE:
+            return False
+        if trip_id in self._confirmed_single_ids:
+            return True
+        with self._connect() as connection:
+            try:
+                row = connection.execute(
+                    "SELECT trip_json FROM confirmed_trip_inputs WHERE trip_id=?",
+                    (str(trip_id),),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                return False
+        if row is None:
+            return False
+        try:
+            import json
+
+            payload = json.loads(row["trip_json"])
+            return payload.get("mode") == "SINGLE" and len(payload.get("participants", [])) == 1
+        except (TypeError, ValueError, KeyError):
+            return False
 
 
 __all__ = [

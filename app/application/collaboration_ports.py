@@ -2,10 +2,17 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from datetime import datetime, timedelta
+from enum import StrEnum
+from typing import ContextManager, Protocol, runtime_checkable
 from uuid import UUID
 
-from app.domain.collaboration import ConversationSubmission, JsonValue, RelaxationAction
+from app.domain.collaboration import (
+    ConversationSubmission,
+    JsonValue,
+    RelaxationAction,
+    TripFlowKind,
+)
 from app.domain.trip_draft import TripUnderstandingProposal
 
 
@@ -63,6 +70,37 @@ class UnavailableTripDraftRevisionPort:
         self._raise()
         raise AssertionError("unreachable")
 
+
+class PlanningOperation(StrEnum):
+    PROVIDER_FACTS = "PROVIDER_FACTS"
+    RECOMMENDATION = "RECOMMENDATION"
+    GENERATE_V1 = "GENERATE_V1"
+    CONFIRM_REVIEW = "CONFIRM_REVIEW"
+    GENERATE_V2 = "GENERATE_V2"
+    PLAN_DECISION = "PLAN_DECISION"
+
+
+@dataclass(frozen=True, slots=True)
+class PlanningAccess:
+    trip_id: UUID
+    organizer_capability: str | None
+    operation_id: str
+    operation: PlanningOperation
+
+
+@dataclass(frozen=True, slots=True)
+class ReadinessPermit:
+    trip_id: UUID
+    readiness_digest: str
+    operation_id: str
+    operation: PlanningOperation
+    flow_kind: TripFlowKind
+    expires_at: datetime
+
+
+class CollaborationReadinessGuard(Protocol):
+    def operation(self, access: PlanningAccess) -> ContextManager[ReadinessPermit]: ...
+
     async def submit_participant_conversation(
         self,
         *,
@@ -89,6 +127,10 @@ class UnavailableTripDraftRevisionPort:
 
 __all__ = [
     "CanonicalRevisionPatch",
+    "CollaborationReadinessGuard",
+    "PlanningAccess",
+    "PlanningOperation",
+    "ReadinessPermit",
     "TripDraftRevisionPort",
     "TripDraftRevisionUnavailable",
     "TripDraftRevisionView",

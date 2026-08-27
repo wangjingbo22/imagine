@@ -12,6 +12,7 @@ from typing import Callable
 from uuid import UUID, uuid4
 
 from app.application.collaboration_ports import TripDraftRevisionView
+from app.application.collaboration_ports import PlanningAccess, ReadinessPermit
 from app.domain.collaboration import (
     InvitationCreated,
     InvitationRedeemed,
@@ -53,6 +54,15 @@ class StoredCollaboration:
     version: int
     policy_version: str
     confirmations: Mapping[UUID, ConfirmationRecord]
+
+
+@dataclass(frozen=True, slots=True)
+class LeaseRecord:
+    operation_id: str
+    trip_id: UUID
+    readiness_digest: str
+    operation: str
+    expires_at: datetime
 
 
 def _ensure_column(
@@ -220,6 +230,91 @@ class SqliteCollaborationRepository:
             ensure_trip_flow_schema(connection)
 
     @staticmethod
+    def _assert_mutation_allowed_connection(
+        connection: sqlite3.Connection,
+        trip_id: UUID,
+        now: datetime,
+    ) -> None:
+        active = connection.execute(
+            "SELECT 1 FROM collaboration_operation_leases "
+            "WHERE trip_id=? AND completed_at IS NULL AND expires_at>?",
+            (str(trip_id), now.isoformat()),
+        ).fetchone()
+        if active is not None:
+            raise CollaborationStoreError("COLLABORATION_OPERATION_IN_PROGRESS")
+
+    def assert_mutation_allowed(self, trip_id: UUID) -> None:
+        with self._connect() as connection:
+            self._assert_mutation_allowed_connection(connection, trip_id, self._clock())
+
+    def acquire_lease(
+        self,
+        *,
+        access: PlanningAccess,
+        readiness_digest: str,
+        ttl: timedelta,
+    ) -> ReadinessPermit:
+        now = self._clock()
+        expires_at = now + ttl
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._assert_mutation_allowed_connection(connection, access.trip_id, now)
+                connection.execute(
+                    """INSERT INTO collaboration_operation_leases
+                    (operation_id, trip_id, readiness_digest, operation, expires_at, completed_at)
+                    VALUES (?, ?, ?, ?, ?, NULL)""",
+                    (
+                        access.operation_id,
+                        str(access.trip_id),
+                        readiness_digest,
+                        access.operation.value,
+                        expires_at.isoformat(),
+                    ),
+                )
+                connection.execute("COMMIT")
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+        return ReadinessPermit(
+            trip_id=access.trip_id,
+            readiness_digest=readiness_digest,
+            operation_id=access.operation_id,
+            operation=access.operation,
+            flow_kind=TripFlowKind.COLLABORATION_V2,
+            expires_at=expires_at,
+        )
+
+    def complete_lease(self, operation_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE collaboration_operation_leases SET completed_at=? "
+                "WHERE operation_id=? AND completed_at IS NULL",
+                (self._clock().isoformat(), operation_id),
+            )
+
+    def active_lease(self, trip_id: UUID) -> LeaseRecord | None:
+        now = self._clock().isoformat()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT operation_id, trip_id, readiness_digest, operation, expires_at "
+                "FROM collaboration_operation_leases "
+                "WHERE trip_id=? AND completed_at IS NULL AND expires_at>? "
+                "ORDER BY expires_at DESC LIMIT 1",
+                (str(trip_id), now),
+            ).fetchone()
+        if row is None:
+            return None
+        return LeaseRecord(
+            operation_id=row["operation_id"],
+            trip_id=UUID(row["trip_id"]),
+            readiness_digest=row["readiness_digest"],
+            operation=row["operation"],
+            expires_at=datetime.fromisoformat(row["expires_at"]),
+        )
+
+    @staticmethod
     def _new_secret() -> str:
         return secrets.token_urlsafe(32)
 
@@ -258,6 +353,7 @@ class SqliteCollaborationRepository:
                 ).fetchone()
                 if existing is not None:
                     raise CollaborationStoreError("COLLABORATION_ALREADY_EXISTS")
+                self._assert_mutation_allowed_connection(connection, revision.trip_id, now)
                 connection.execute(
                     """INSERT INTO collaboration_sessions
                     (trip_id, organizer_participant_id, status, expected_participants,
@@ -362,6 +458,7 @@ class SqliteCollaborationRepository:
                     raise CollaborationStoreError("ORGANIZER_SELF_INVITE_FORBIDDEN")
                 if session["version"] != expected_version:
                     raise CollaborationStoreError("COLLABORATION_VERSION_STALE")
+                self._assert_mutation_allowed_connection(connection, trip_id, now)
                 participant = connection.execute(
                     "SELECT member_key, status FROM collaboration_participants "
                     "WHERE trip_id = ? AND participant_id = ?",
@@ -470,6 +567,7 @@ class SqliteCollaborationRepository:
                     raise CollaborationStoreError("INVITATION_UNAVAILABLE")
                 if datetime.fromisoformat(row["expires_at"]) <= now:
                     raise CollaborationStoreError("INVITATION_EXPIRED")
+                self._assert_mutation_allowed_connection(connection, UUID(row["trip_id"]), now)
                 session_id = uuid4()
                 session_secret = self._new_secret()
                 session_expiry = now + min(timedelta(days=7), timedelta(days=30))
@@ -741,6 +839,7 @@ class SqliteCollaborationRepository:
                     raise CollaborationStoreError("COLLABORATION_NOT_FOUND")
                 if session["version"] != expected_version:
                     raise CollaborationStoreError("COLLABORATION_VERSION_STALE")
+                self._assert_mutation_allowed_connection(connection, trip_id, now)
                 participant = connection.execute(
                     "SELECT 1 FROM collaboration_participants WHERE trip_id=? AND participant_id=?",
                     (str(trip_id), str(participant_id)),
@@ -899,6 +998,7 @@ class SqliteCollaborationRepository:
         after_revision: int,
     ) -> None:
         with self._connect() as connection:
+            self._assert_mutation_allowed_connection(connection, trip_id, self._clock())
             connection.execute(
                 """INSERT INTO collaboration_resolution_audit
                 (audit_id, trip_id, item_id, relaxation_id, actor_id,

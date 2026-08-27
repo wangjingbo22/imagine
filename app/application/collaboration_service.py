@@ -101,6 +101,26 @@ class CollaborationService:
         except CollaborationStoreError as error:
             raise self._store_error(error) from error
 
+    def assert_planning_ready(
+        self,
+        trip_id: UUID,
+        organizer_token: str | None,
+    ) -> None:
+        """Keep the pre-guard route shim fail-closed for S2 rows.
+
+        Planning routes are migrated to the operation guard in Task 15.  Until
+        then, preserve the explicit legacy behavior of the existing routes,
+        while making every collaboration-backed trip use the same authoritative
+        readiness calculation as the new guard.
+        """
+        try:
+            self.repository.get_stored(trip_id)
+        except CollaborationStoreError as error:
+            if str(error) == "COLLABORATION_NOT_FOUND":
+                return
+            raise self._store_error(error) from error
+        self.require_ready(trip_id, organizer_token)
+
     def create_invitation(
         self,
         *,
