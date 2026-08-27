@@ -116,6 +116,7 @@
         },
         "CollaborationStatus": {
           "enum": [
+            "MIGRATION_REQUIRED",
             "DRAFT_CONVERSATION",
             "INVITING",
             "COLLECTING_MEMBERS",
