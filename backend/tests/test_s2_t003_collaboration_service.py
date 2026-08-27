@@ -12,6 +12,7 @@ from app.domain.collaboration import (
     IssueCode,
     ParticipantConfirmationStatus,
     ParticipantConversationRequest,
+    ParticipantMutationRequest,
     ResolveConfirmationItemRequest,
 )
 from app.domain.collaboration_digest import member_digest, shared_digest
@@ -333,6 +334,53 @@ def test_expired_member_session_uses_required_error_code(tmp_path) -> None:
         harness.service.member_view(redeemed.participant_session_token)
 
     assert captured.value.code == "PARTICIPANT_SESSION_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_all_member_apis_hide_invalid_session_reason(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    request = ParticipantMutationRequest(
+        schemaVersion="1.0",
+        baseRevision=1,
+        expectedVersion=4,
+    )
+    resolve_request = ResolveConfirmationItemRequest(
+        schemaVersion="1.0",
+        baseRevision=1,
+        expectedVersion=4,
+        relaxationId="rx_0000000000000000",
+    )
+
+    async def invoke(operation: str) -> None:
+        if operation == "view":
+            harness.service.member_view("forged-member-session")
+        elif operation == "redeem":
+            harness.service.redeem_member(session_token="forged-member-session")
+        elif operation == "submit":
+            await harness.service.submit_member(
+                session_token="forged-member-session",
+                request=_member_request(version=4),
+                idempotency_key="member-invalid-0001",
+            )
+        elif operation == "confirm":
+            harness.service.confirm_member(
+                session_token="forged-member-session",
+                request=request,
+                idempotency_key="member-invalid-0002",
+            )
+        else:
+            harness.service.resolve_member_issue(
+                session_token="forged-member-session",
+                item_id="ci_0000000000000000",
+                request=resolve_request,
+                idempotency_key="member-invalid-0003",
+            )
+
+    for operation in ("view", "redeem", "submit", "confirm", "resolve"):
+        with pytest.raises(AppError) as captured:
+            await invoke(operation)
+        assert captured.value.code == "PARTICIPANT_SESSION_REQUIRED"
+        assert captured.value.http_status == 401
 
 
 def test_member_cannot_use_organizer_relaxation(tmp_path) -> None:

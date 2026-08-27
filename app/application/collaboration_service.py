@@ -68,16 +68,15 @@ class CollaborationService:
     @staticmethod
     def _store_error(error: CollaborationStoreError) -> AppError:
         code = str(error)
-        if code == "PARTICIPANT_SESSION_EXPIRED":
-            code = "PARTICIPANT_SESSION_REQUIRED"
-        if code in {"ORGANIZER_PERMISSION_REQUIRED", "ORGANIZER_SELF_INVITE_FORBIDDEN"}:
-            status = 403
-        elif code in {
-            "PARTICIPANT_SESSION_REQUIRED",
+        if code in {
             "PARTICIPANT_SESSION_INVALID",
             "PARTICIPANT_SESSION_REVOKED",
             "PARTICIPANT_SESSION_EXPIRED",
         }:
+            code = "PARTICIPANT_SESSION_REQUIRED"
+        if code in {"ORGANIZER_PERMISSION_REQUIRED", "ORGANIZER_SELF_INVITE_FORBIDDEN"}:
+            status = 403
+        elif code == "PARTICIPANT_SESSION_REQUIRED":
             status = 401
         elif code in {"INVITATION_UNAVAILABLE", "INVITATION_ALREADY_REDEEMED", "INVITATION_EXPIRED"}:
             status = 410
@@ -623,16 +622,21 @@ class CollaborationService:
         request: ResolveConfirmationItemRequest,
         idempotency_key: str,
     ) -> MemberSessionView:
-        actor = self.repository.authenticate_participant(session_token)
-        self._resolve(
-            trip_id=actor.trip_id,
-            item_id=item_id,
-            request=request,
-            actor=actor,
-            idempotency_key=idempotency_key,
-            organizer=False,
-        )
-        return self.member_view(session_token)
+        try:
+            actor = self.repository.authenticate_participant(session_token)
+            self._resolve(
+                trip_id=actor.trip_id,
+                item_id=item_id,
+                request=request,
+                actor=actor,
+                idempotency_key=idempotency_key,
+                organizer=False,
+            )
+            return self.member_view(session_token)
+        except AppError:
+            raise
+        except CollaborationStoreError as error:
+            raise self._store_error(error) from error
 
     def resolve_organizer_issue(
         self,
