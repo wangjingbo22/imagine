@@ -133,6 +133,8 @@ async def reject_plan_v2(
     plan_id: UUID,
     request: Request,
     service: PlanVersionService = Depends(get_plan_service),
+    planning: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
     require_s2_organizer(trip_id, request)
+    planning.require_v2_acceptance(trip_id, plan_id)
     return ApiResponse(data=service.reject_v2(trip_id, plan_id))

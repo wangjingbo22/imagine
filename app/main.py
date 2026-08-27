@@ -11,6 +11,7 @@ from app.api.arrival_decision_routes import router as arrival_decision_router
 from app.api.arrival_evidence_routes import router as arrival_evidence_router
 from app.api.routes import router
 from app.api.execution_adjustment_routes import router as execution_adjustment_router
+from app.api.execution_replan_routes import router as execution_replan_router
 from app.api.plan_routes import router as plan_router
 from app.api.planning_routes import router as planning_router
 from app.api.trip_draft_routes import router as trip_draft_router
@@ -28,6 +29,10 @@ from app.application.llm_gateway import (
     UnavailableLlmGateway,
 )
 from app.application.execution_event_draft_service import ExecutionEventDraftService
+from app.application.execution_replan_service import (
+    ExecutionReplanService,
+    ReplanExplanationGateway,
+)
 from app.application.planning_boundary_service import PlanningBoundaryService
 from app.application.plan_service import PlanVersionService
 from app.application.recommendation_service import RecommendationOrchestrationService
@@ -42,6 +47,9 @@ from app.infrastructure.arrival_evidence_store import (
 )
 from app.infrastructure.bailian import BailianTripDraftExtractor
 from app.infrastructure.bailian_execution_event import BailianExecutionEventExtractor
+from app.infrastructure.bailian_replan_explanation import (
+    BailianReplanExplanationClient,
+)
 from app.infrastructure.cache import SqliteProviderCache
 from app.infrastructure.openai_compatible_llm import (
     OpenAiCompatibleCandidateSelectionClient,
@@ -146,6 +154,8 @@ def create_app(
     suffix_planner: SuffixPlanner | None = None,
     candidate_selection_gateway: CandidateSelectionGateway | None = None,
     execution_event_draft_service: ExecutionEventDraftService | None = None,
+    execution_replan_service: ExecutionReplanService | None = None,
+    replan_explanation_gateway: ReplanExplanationGateway | None = None,
     arrival_evidence_service: ArrivalEvidenceService | None = None,
     arrival_decision_service: ArrivalDecisionService | None = None,
 ) -> FastAPI:
@@ -156,6 +166,7 @@ def create_app(
         OpenAiCompatibleCandidateSelectionClient | None
     ) = None
     managed_bailian_execution_extractor: BailianExecutionEventExtractor | None = None
+    managed_bailian_replan_explainer: BailianReplanExplanationClient | None = None
     if service is None:
         managed_client = AmapClient(
             api_key=resolved_settings.amap_web_service_key,
@@ -246,6 +257,32 @@ def create_app(
             suffix_planner=suffix_planner,
         )
 
+    if (
+        execution_replan_service is None
+        and replan_explanation_gateway is None
+        and bailian_api_key
+    ):
+        managed_bailian_replan_explainer = BailianReplanExplanationClient(
+            api_key=bailian_api_key,
+            base_url=resolved_settings.bailian_base_url,
+            model=resolved_settings.bailian_model,
+            timeout_seconds=(
+                resolved_settings.bailian_replan_explanation_timeout_seconds
+            ),
+        )
+        replan_explanation_gateway = managed_bailian_replan_explainer
+
+    if (
+        execution_replan_service is None
+        and isinstance(planning_boundary_service, PlanningBoundaryService)
+        and isinstance(plan_service, PlanVersionService)
+    ):
+        execution_replan_service = ExecutionReplanService(
+            planning_service=planning_boundary_service,
+            plan_service=plan_service,
+            explanation_gateway=replan_explanation_gateway,
+        )
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
@@ -257,6 +294,8 @@ def create_app(
             await managed_candidate_selection_client.close()
         if managed_bailian_execution_extractor is not None:
             await managed_bailian_execution_extractor.close()
+        if managed_bailian_replan_explainer is not None:
+            await managed_bailian_replan_explainer.close()
 
     app = FastAPI(
         title="行知旅伴——张琪 Sprint 1 接口",
@@ -313,6 +352,22 @@ def create_app(
     )
     app.state.candidate_selection_gateway = candidate_selection_gateway
     app.state.execution_event_draft_service = execution_event_draft_service
+    app.state.execution_replan_service = execution_replan_service
+    app.state.replan_difference_explainer = (
+        "BAILIAN_CONFIGURED"
+        if managed_bailian_replan_explainer is not None
+        else (
+            "INJECTED"
+            if (
+                replan_explanation_gateway is not None
+                or (
+                    isinstance(execution_replan_service, ExecutionReplanService)
+                    and execution_replan_service.explanation_gateway is not None
+                )
+            )
+            else "NOT_CONFIGURED"
+        )
+    )
     app.state.arrival_evidence_service = (
         arrival_evidence_service
         or ArrivalEvidenceService(
@@ -338,6 +393,7 @@ def create_app(
     app.include_router(arrival_evidence_router)
     app.include_router(router)
     app.include_router(execution_adjustment_router)
+    app.include_router(execution_replan_router)
     app.include_router(plan_router)
     app.include_router(planning_router)
     app.include_router(trip_draft_router)
@@ -357,6 +413,7 @@ def create_app(
                 if managed_bailian_execution_extractor is not None
                 else "DETERMINISTIC_FORM"
             ),
+            "replanDifferenceExplainer": app.state.replan_difference_explainer,
         }
 
     @app.get("/docs", include_in_schema=False)

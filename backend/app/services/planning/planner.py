@@ -692,6 +692,7 @@ def candidate_to_proposed_plan_version_v2(
     current_plan: PlanVersion,
     *,
     reason: PlanVersionReason = PlanVersionReason.USER_FEEDBACK,
+    identity_digest: str | None = None,
 ) -> ProposedPlanVersion:
     """Create a deterministic V2 tied to one immutable CURRENT V1 snapshot."""
 
@@ -714,6 +715,14 @@ def candidate_to_proposed_plan_version_v2(
             field="reason",
             message="Plan V2 reason cannot be INITIAL_PLAN",
         )
+    if identity_digest is not None and re.fullmatch(
+        r"[0-9a-f]{64}", identity_digest
+    ) is None:
+        raise CandidatePlanInputError(
+            code="CANDIDATE_V2_IDENTITY_DIGEST_INVALID",
+            field="identityDigest",
+            message="identityDigest must be a lowercase SHA-256 hex digest",
+        )
 
     valid_candidate, valid_request = _validated_complete_candidate(
         candidate,
@@ -730,7 +739,12 @@ def candidate_to_proposed_plan_version_v2(
         valid_candidate,
         valid_request,
         trip_snapshot=current.trip_snapshot,
-        plan_id=_plan_uuid_v2(valid_request, current, reason),
+        plan_id=_plan_uuid_v2(
+            valid_request,
+            current,
+            reason,
+            identity_digest=identity_digest,
+        ),
         version=2,
         parent_id=current.plan_id,
         reason=reason,
@@ -751,6 +765,7 @@ def generate_proposed_plan_version_v2(
     current_plan: PlanVersion,
     *,
     reason: PlanVersionReason = PlanVersionReason.USER_FEEDBACK,
+    identity_digest: str | None = None,
 ) -> ProposedPlanVersion:
     candidate = generate_candidate_plan(request)
     return candidate_to_proposed_plan_version_v2(
@@ -758,6 +773,7 @@ def generate_proposed_plan_version_v2(
         request,
         current_plan,
         reason=reason,
+        identity_digest=identity_digest,
     )
 
 
@@ -1001,9 +1017,15 @@ def _plan_uuid_v2(
     request: CandidatePlanRequest,
     current: PlanVersion,
     reason: PlanVersionReason,
+    *,
+    identity_digest: str | None = None,
 ) -> UUID:
+    identity = bytes.fromhex(identity_digest) if identity_digest is not None else b""
     digest = sha256(
-        _request_digest(request) + current.plan_id.bytes + reason.value.encode("utf-8")
+        _request_digest(request)
+        + current.plan_id.bytes
+        + reason.value.encode("utf-8")
+        + identity
     ).digest()
     return _uuid4_from_digest(digest)
 

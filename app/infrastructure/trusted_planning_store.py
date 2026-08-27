@@ -305,6 +305,7 @@ class SqliteTrustedPlanningRepository:
                         existing["boundary_kind"],
                         existing["proposal_digest"],
                         existing["candidate_facts_json"],
+                        existing["validation_json"],
                     )
                     expected = (
                         values["trip_id"],
@@ -312,11 +313,12 @@ class SqliteTrustedPlanningRepository:
                         values["boundary_kind"],
                         values["proposal_digest"],
                         values["candidate_facts_json"],
+                        values["validation_json"],
                     )
                     if comparable != expected:
                         raise TrustedPlanningStoreError(
                             "PLANNING_TRUST_RECORD_CONFLICT",
-                            "同一 planId 已绑定到不同的服务端事实或提案摘要",
+                            "同一 planId 已绑定到不同的服务端事实、提案或验证证据",
                         )
                     connection.execute("COMMIT")
                     return
@@ -376,13 +378,18 @@ class SqliteTrustedPlanningRepository:
                     if validation is not None
                     else row["validation_json"]
                 )
+                if validation_json != row["validation_json"]:
+                    raise TrustedPlanningStoreError(
+                        "PLANNING_VALIDATION_EVIDENCE_CONFLICT",
+                        "签发时的验证证据与已暂存的不可变证据不一致",
+                    )
                 connection.execute(
                     """
                     UPDATE trusted_plan_issuances
-                    SET issuance_state = 'ISSUED', issued_at = ?, validation_json = ?
+                    SET issuance_state = 'ISSUED', issued_at = ?
                     WHERE plan_id = ?
                     """,
-                    (datetime.now(UTC).isoformat(), validation_json, plan_id),
+                    (datetime.now(UTC).isoformat(), plan_id),
                 )
                 connection.execute("COMMIT")
             except Exception:
@@ -450,6 +457,44 @@ class SqliteTrustedPlanningRepository:
                 "PLANNING_PROPOSAL_DIGEST_MISMATCH",
                 "PlanVersion 快照与服务端签发时的提案摘要不一致",
             )
+
+    def get_issued_validation(
+        self,
+        *,
+        trip_id: UUID,
+        plan: PlanVersion,
+        boundary_kind: BoundaryKind,
+    ) -> dict[str, Any]:
+        """Return immutable validation evidence after full issuance checks."""
+
+        self.require_issued(
+            trip_id=trip_id,
+            plan=plan,
+            boundary_kind=boundary_kind,
+        )
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT validation_json FROM trusted_plan_issuances WHERE plan_id = ?",
+                (str(plan.plan_id),),
+            ).fetchone()
+        if row is None:
+            raise TrustedPlanningStoreError(
+                "PLANNING_TRUST_RECORD_NOT_FOUND",
+                "签发验证证据不存在",
+            )
+        try:
+            value = json.loads(row["validation_json"])
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise TrustedPlanningStoreError(
+                "PLANNING_VALIDATION_EVIDENCE_INVALID",
+                "签发验证证据不是有效 JSON",
+            ) from exc
+        if not isinstance(value, dict):
+            raise TrustedPlanningStoreError(
+                "PLANNING_VALIDATION_EVIDENCE_INVALID",
+                "签发验证证据必须是对象",
+            )
+        return value
 
 
 __all__ = [
