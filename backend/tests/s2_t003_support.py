@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -11,6 +12,14 @@ from app.domain.trip_draft import TripUnderstandingProposal
 
 
 UNDERSTANDING_FIXTURES = Path(__file__).parent / "fixtures" / "trip_understanding"
+
+
+@dataclass(slots=True)
+class FrozenClock:
+    now: datetime
+
+    def __call__(self) -> datetime:
+        return self.now
 
 
 @dataclass(frozen=True, slots=True)

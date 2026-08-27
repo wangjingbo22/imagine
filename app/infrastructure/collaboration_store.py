@@ -1,15 +1,38 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
-from datetime import UTC, datetime
+import json
+import secrets
+from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+from uuid import UUID, uuid4
 
+from app.application.collaboration_ports import TripDraftRevisionView
+from app.domain.collaboration import (
+    InvitationCreated,
+    InvitationRedeemed,
+    OrganizerBootstrapResult,
+    TripFlowKind,
+)
+from app.domain.collaboration_digest import canonical_sha256
 from app.infrastructure.trip_flow_store import ensure_trip_flow_schema
+from app.infrastructure.trip_flow_store import register_trip_flow
 
 
 class CollaborationStoreError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class CollaborationActor:
+    session_id: UUID | None
+    trip_id: UUID
+    participant_id: UUID
+    role: str
+    expires_at: datetime
 
 
 def _ensure_column(
@@ -175,6 +198,342 @@ class SqliteCollaborationRepository:
                 PRIMARY KEY (trip_id, conflict_id)
             )""")
             ensure_trip_flow_schema(connection)
+
+    @staticmethod
+    def _new_secret() -> str:
+        return secrets.token_urlsafe(32)
+
+    @staticmethod
+    def _token_hash(secret: str) -> str:
+        return hashlib.sha256(secret.encode("ascii")).hexdigest()
+
+    @classmethod
+    def _matches(cls, stored_hash: str, secret: str) -> bool:
+        try:
+            candidate = cls._token_hash(secret)
+        except UnicodeEncodeError:
+            return False
+        return secrets.compare_digest(stored_hash, candidate)
+
+    def bootstrap_collaboration(
+        self,
+        revision: TripDraftRevisionView,
+        idempotency_key: str,
+    ) -> OrganizerBootstrapResult:
+        del idempotency_key
+        organizer_id = revision.member_bindings.get("member-1")
+        if organizer_id is None:
+            raise CollaborationStoreError("BINDING_INVALID")
+        participant_keys = [item.member_key for item in revision.understanding.participants]
+        if participant_keys != [f"member-{index}" for index in range(1, len(participant_keys) + 1)]:
+            raise CollaborationStoreError("BINDING_INVALID")
+        organizer_secret = self._new_secret()
+        now = self._clock()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                existing = connection.execute(
+                    "SELECT 1 FROM collaboration_sessions WHERE trip_id = ?",
+                    (str(revision.trip_id),),
+                ).fetchone()
+                if existing is not None:
+                    raise CollaborationStoreError("COLLABORATION_ALREADY_EXISTS")
+                connection.execute(
+                    """INSERT INTO collaboration_sessions
+                    (trip_id, organizer_participant_id, status, expected_participants,
+                     organizer_token_hash, created_at, draft_id, current_revision,
+                     version, policy_version, readiness_digest, updated_at)
+                    VALUES (?, ?, 'DRAFT_CONVERSATION', ?, ?, ?, ?, ?, 1,
+                            'S2-T003.1', NULL, ?)""",
+                    (
+                        str(revision.trip_id),
+                        str(organizer_id),
+                        len(participant_keys),
+                        self._token_hash(organizer_secret),
+                        now.isoformat(),
+                        str(revision.draft_id),
+                        revision.revision,
+                        now.isoformat(),
+                    ),
+                )
+                for participant in revision.understanding.participants:
+                    participant_id = revision.member_bindings[participant.member_key]
+                    role = "ORGANIZER" if participant.member_key == "member-1" else "MEMBER"
+                    connection.execute(
+                        """INSERT INTO collaboration_participants
+                        (trip_id, participant_id, display_name, status, is_organizer,
+                         parsed_json, member_key, role, confirmed_revision,
+                         confirmed_shared_digest, confirmed_member_digest, updated_at)
+                        VALUES (?, ?, ?, 'DRAFT', ?, NULL, ?, ?, NULL, NULL, NULL, ?)""",
+                        (
+                            str(revision.trip_id),
+                            str(participant_id),
+                            participant.nickname,
+                            int(participant.member_key == "member-1"),
+                            participant.member_key,
+                            role,
+                            now.isoformat(),
+                        ),
+                    )
+                register_trip_flow(connection, revision.trip_id, TripFlowKind.COLLABORATION_V2)
+                connection.execute("COMMIT")
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+        return OrganizerBootstrapResult(
+            tripId=revision.trip_id,
+            organizerParticipantId=organizer_id,
+            organizerToken=organizer_secret,
+            organizerTokenAvailable=True,
+            collaborationVersion=1,
+        )
+
+    def _organizer_actor(self, token: str | None) -> CollaborationActor:
+        if not token:
+            raise CollaborationStoreError("ORGANIZER_PERMISSION_REQUIRED")
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT trip_id, organizer_participant_id, organizer_token_hash "
+                "FROM collaboration_sessions"
+            ).fetchall()
+        for row in rows:
+            if self._matches(row["organizer_token_hash"] or "", token):
+                return CollaborationActor(
+                    session_id=None,
+                    trip_id=UUID(row["trip_id"]),
+                    participant_id=UUID(row["organizer_participant_id"]),
+                    role="ORGANIZER",
+                    expires_at=self._clock() + timedelta(days=30),
+                )
+        raise CollaborationStoreError("ORGANIZER_PERMISSION_REQUIRED")
+
+    def authenticate_organizer(self, token: str | None) -> CollaborationActor:
+        return self._organizer_actor(token)
+
+    def create_invitation(
+        self,
+        *,
+        trip_id: UUID,
+        participant_id: UUID,
+        organizer_token: str | None,
+        expected_version: int,
+        idempotency_key: str,
+        expires_in_hours: int = 72,
+    ) -> InvitationCreated:
+        del idempotency_key
+        actor = self._organizer_actor(organizer_token)
+        if actor.trip_id != trip_id:
+            raise CollaborationStoreError("ORGANIZER_PERMISSION_REQUIRED")
+        now = self._clock()
+        token = self._new_secret()
+        invitation_id = uuid4()
+        expires_at = now + timedelta(hours=expires_in_hours)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                session = connection.execute(
+                    "SELECT * FROM collaboration_sessions WHERE trip_id = ?",
+                    (str(trip_id),),
+                ).fetchone()
+                if session is None:
+                    raise CollaborationStoreError("COLLABORATION_NOT_FOUND")
+                if session["organizer_participant_id"] == str(participant_id):
+                    raise CollaborationStoreError("ORGANIZER_SELF_INVITE_FORBIDDEN")
+                if session["version"] != expected_version:
+                    raise CollaborationStoreError("COLLABORATION_VERSION_STALE")
+                participant = connection.execute(
+                    "SELECT member_key, status FROM collaboration_participants "
+                    "WHERE trip_id = ? AND participant_id = ?",
+                    (str(trip_id), str(participant_id)),
+                ).fetchone()
+                if participant is None or participant["member_key"] is None:
+                    raise CollaborationStoreError("PARTICIPANT_NOT_BOUND")
+                active = connection.execute(
+                    "SELECT 1 FROM participant_invitations "
+                    "WHERE trip_id = ? AND participant_id = ? AND status = 'ACTIVE'",
+                    (str(trip_id), str(participant_id)),
+                ).fetchone()
+                if active is not None:
+                    raise CollaborationStoreError("INVITATION_ALREADY_ACTIVE")
+                next_version = expected_version + 1
+                connection.execute(
+                    """INSERT INTO participant_invitations
+                    (token_hash, trip_id, participant_id, expires_at, revoked_at,
+                     accepted_at, invitation_id, status, created_at, redeemed_at,
+                     redeemed_session_id, version)
+                    VALUES (?, ?, ?, ?, NULL, NULL, ?, 'ACTIVE', ?, NULL, NULL, 1)""",
+                    (
+                        self._token_hash(token),
+                        str(trip_id),
+                        str(participant_id),
+                        expires_at.isoformat(),
+                        str(invitation_id),
+                        now.isoformat(),
+                    ),
+                )
+                connection.execute(
+                    "UPDATE collaboration_sessions SET version = ?, status = 'INVITING', updated_at = ? WHERE trip_id = ?",
+                    (next_version, now.isoformat(), str(trip_id)),
+                )
+                connection.execute("COMMIT")
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+        return InvitationCreated(
+            invitationId=invitation_id,
+            tripId=trip_id,
+            participantId=participant_id,
+            invitationUrl=f"/join#token={token}",
+            expiresAt=expires_at,
+            linkAvailable=True,
+            collaborationVersion=next_version,
+        )
+
+    def inspect_invitation(self, raw_token: str) -> tuple[UUID, UUID]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT trip_id, participant_id, status, expires_at, revoked_at "
+                "FROM participant_invitations WHERE token_hash = ?",
+                (self._token_hash(raw_token),),
+            ).fetchone()
+        if row is None or row["status"] == "REVOKED" or row["revoked_at"]:
+            raise CollaborationStoreError("INVITATION_UNAVAILABLE")
+        if row["status"] == "REDEEMED":
+            raise CollaborationStoreError("INVITATION_ALREADY_REDEEMED")
+        if row["status"] != "ACTIVE":
+            raise CollaborationStoreError("INVITATION_UNAVAILABLE")
+        if datetime.fromisoformat(row["expires_at"]) <= self._clock():
+            raise CollaborationStoreError("INVITATION_EXPIRED")
+        return UUID(row["trip_id"]), UUID(row["participant_id"])
+
+    def redeem_invitation(
+        self,
+        raw_token: str,
+        idempotency_key: str,
+    ) -> InvitationRedeemed:
+        token_hash = self._token_hash(raw_token)
+        request_digest = canonical_sha256({"tokenHash": token_hash})
+        now = self._clock()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                prior = connection.execute(
+                    "SELECT request_digest, result_json FROM collaboration_idempotency "
+                    "WHERE actor_scope='INVITATION' AND actor_id=? AND operation='REDEEM_INVITATION' "
+                    "AND idempotency_key=?",
+                    (token_hash, idempotency_key),
+                ).fetchone()
+                if prior is not None:
+                    if prior["request_digest"] != request_digest:
+                        raise CollaborationStoreError("IDEMPOTENCY_KEY_REUSED")
+                    result = json.loads(prior["result_json"])
+                    connection.execute("COMMIT")
+                    return InvitationRedeemed(
+                        sessionId=result["sessionId"],
+                        participantSessionToken=None,
+                        tripId=result["tripId"],
+                        participantId=result["participantId"],
+                        expiresAt=result["expiresAt"],
+                        sessionTokenAvailable=False,
+                    )
+                row = connection.execute(
+                    "SELECT * FROM participant_invitations WHERE token_hash = ?",
+                    (token_hash,),
+                ).fetchone()
+                if row is None or row["status"] == "REVOKED" or row["revoked_at"]:
+                    raise CollaborationStoreError("INVITATION_UNAVAILABLE")
+                if row["status"] == "REDEEMED":
+                    raise CollaborationStoreError("INVITATION_ALREADY_REDEEMED")
+                if row["status"] != "ACTIVE":
+                    raise CollaborationStoreError("INVITATION_UNAVAILABLE")
+                if datetime.fromisoformat(row["expires_at"]) <= now:
+                    raise CollaborationStoreError("INVITATION_EXPIRED")
+                session_id = uuid4()
+                session_secret = self._new_secret()
+                session_expiry = now + min(timedelta(days=7), timedelta(days=30))
+                updated = connection.execute(
+                    "UPDATE participant_invitations SET status='REDEEMED', accepted_at=?, "
+                    "redeemed_at=?, redeemed_session_id=?, version=version+1 "
+                    "WHERE invitation_id=? AND status='ACTIVE'",
+                    (now.isoformat(), now.isoformat(), str(session_id), row["invitation_id"]),
+                ).rowcount
+                if updated != 1:
+                    raise CollaborationStoreError("INVITATION_ALREADY_REDEEMED")
+                connection.execute(
+                    "INSERT INTO collaboration_actor_sessions VALUES (?, ?, ?, 'MEMBER', ?, ?, NULL, ?, ?)",
+                    (
+                        str(session_id),
+                        row["trip_id"],
+                        row["participant_id"],
+                        self._token_hash(session_secret),
+                        session_expiry.isoformat(),
+                        now.isoformat(),
+                        now.isoformat(),
+                    ),
+                )
+                result = {
+                    "sessionId": str(session_id),
+                    "tripId": row["trip_id"],
+                    "participantId": row["participant_id"],
+                    "expiresAt": session_expiry.isoformat(),
+                }
+                connection.execute(
+                    """INSERT INTO collaboration_idempotency
+                    (actor_scope, actor_id, operation, idempotency_key, request_digest,
+                     resource_id, result_json, completed_at)
+                    VALUES ('INVITATION', ?, 'REDEEM_INVITATION', ?, ?, ?, ?, ?)""",
+                    (
+                        token_hash,
+                        idempotency_key,
+                        request_digest,
+                        str(session_id),
+                        json.dumps(result, sort_keys=True, separators=(",", ":")),
+                        now.isoformat(),
+                    ),
+                )
+                connection.execute("COMMIT")
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+        return InvitationRedeemed(
+            sessionId=session_id,
+            participantSessionToken=session_secret,
+            tripId=UUID(row["trip_id"]),
+            participantId=UUID(row["participant_id"]),
+            expiresAt=session_expiry,
+            sessionTokenAvailable=True,
+        )
+
+    def authenticate_participant(self, token: str | None) -> CollaborationActor:
+        if not token:
+            raise CollaborationStoreError("PARTICIPANT_SESSION_REQUIRED")
+        token_hash = self._token_hash(token)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM collaboration_actor_sessions WHERE token_hash = ?",
+                (token_hash,),
+            ).fetchone()
+            if row is None or not self._matches(row["token_hash"], token):
+                raise CollaborationStoreError("PARTICIPANT_SESSION_INVALID")
+            if row["revoked_at"]:
+                raise CollaborationStoreError("PARTICIPANT_SESSION_REVOKED")
+            expires_at = datetime.fromisoformat(row["expires_at"])
+            if expires_at <= self._clock():
+                raise CollaborationStoreError("PARTICIPANT_SESSION_EXPIRED")
+            connection.execute(
+                "UPDATE collaboration_actor_sessions SET last_seen_at=? WHERE session_id=?",
+                (self._clock().isoformat(), row["session_id"]),
+            )
+        return CollaborationActor(
+            session_id=UUID(row["session_id"]),
+            trip_id=UUID(row["trip_id"]),
+            participant_id=UUID(row["participant_id"]),
+            role=row["role"],
+            expires_at=expires_at,
+        )
 
 
 __all__ = ["CollaborationStoreError", "SqliteCollaborationRepository"]
