@@ -206,8 +206,13 @@ class CollaborationService:
     ) -> ParticipantProgress:
         confirmation = stored.confirmations.get(participant_id)
         current_member = member_digest(revision, member_key)
+        access_status = self._access_status(
+            stored=stored,
+            participant_id=participant_id,
+        )
         confirmed = bool(
             confirmation
+            and access_status is not ParticipantAccessStatus.REVOKED
             and confirmation.confirmed_revision == revision.revision
             and confirmation.confirmed_source_digest == revision.source_digest
             and confirmation.confirmed_shared_digest == shared_digest(revision)
@@ -226,7 +231,7 @@ class CollaborationService:
             participantId=participant_id,
             memberKey=member_key,
             role="ORGANIZER" if participant_id == stored.organizer_participant_id else "MEMBER",
-            accessStatus=self._access_status(stored=stored, participant_id=participant_id),
+            accessStatus=access_status,
             confirmationStatus=confirmation_status,
             confirmedRevision=(confirmation.confirmed_revision if confirmed else None),
         )
@@ -580,10 +585,9 @@ class CollaborationService:
         organizer_token: str | None,
         expected_version: int,
         idempotency_key: str,
-    ) -> CollaborationAggregate:
-        self._current(trip_id)
+    ) -> dict[str, object]:
         try:
-            self.repository.revoke_invitation(
+            return self.repository.revoke_invitation(
                 trip_id=trip_id,
                 participant_id=participant_id,
                 invitation_id=invitation_id,
@@ -591,7 +595,6 @@ class CollaborationService:
                 expected_version=expected_version,
                 idempotency_key=idempotency_key,
             )
-            return self.organizer_state(trip_id, organizer_token)
         except CollaborationStoreError as error:
             raise self._store_error(error) from error
 

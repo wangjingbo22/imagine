@@ -683,6 +683,110 @@ class SqliteCollaborationRepository:
             return ParticipantAccessStatus.INVITED
         return ParticipantAccessStatus.EXPIRED
 
+    def revoke_invitation(
+        self,
+        *,
+        trip_id: UUID,
+        participant_id: UUID,
+        invitation_id: UUID,
+        organizer_token: str | None,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> dict[str, object]:
+        actor = self._organizer_actor(organizer_token)
+        if actor.trip_id != trip_id:
+            raise CollaborationStoreError("ORGANIZER_PERMISSION_REQUIRED")
+        request_digest = canonical_sha256({
+            "tripId": str(trip_id),
+            "participantId": str(participant_id),
+            "invitationId": str(invitation_id),
+            "expectedVersion": expected_version,
+        })
+        now = self._clock()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                prior = connection.execute(
+                    "SELECT request_digest, result_json FROM collaboration_idempotency "
+                    "WHERE actor_scope='ORGANIZER' AND actor_id=? "
+                    "AND operation='REVOKE_INVITATION' AND idempotency_key=?",
+                    (str(actor.participant_id), idempotency_key),
+                ).fetchone()
+                if prior is not None:
+                    if prior["request_digest"] != request_digest:
+                        raise CollaborationStoreError("IDEMPOTENCY_KEY_REUSED")
+                    result = json.loads(prior["result_json"])
+                    connection.execute("COMMIT")
+                    return result
+                session = connection.execute(
+                    "SELECT version FROM collaboration_sessions WHERE trip_id=?",
+                    (str(trip_id),),
+                ).fetchone()
+                if session is None:
+                    raise CollaborationStoreError("COLLABORATION_NOT_FOUND")
+                if session["version"] != expected_version:
+                    raise CollaborationStoreError("COLLABORATION_VERSION_STALE")
+                self._assert_mutation_allowed_connection(connection, trip_id, now)
+                invitation = connection.execute(
+                    "SELECT status, revoked_at, redeemed_session_id "
+                    "FROM participant_invitations "
+                    "WHERE invitation_id=? AND trip_id=? AND participant_id=?",
+                    (str(invitation_id), str(trip_id), str(participant_id)),
+                ).fetchone()
+                if invitation is None:
+                    raise CollaborationStoreError("INVITATION_UNAVAILABLE")
+                if invitation["status"] != "REVOKED" or not invitation["revoked_at"]:
+                    updated = connection.execute(
+                        "UPDATE participant_invitations SET status='REVOKED', "
+                        "revoked_at=?, version=version+1 "
+                        "WHERE invitation_id=? AND status<>'REVOKED'",
+                        (now.isoformat(), str(invitation_id)),
+                    ).rowcount
+                    if updated != 1:
+                        raise CollaborationStoreError("INVITATION_UNAVAILABLE")
+                if invitation["redeemed_session_id"]:
+                    connection.execute(
+                        "UPDATE collaboration_actor_sessions SET revoked_at=COALESCE(revoked_at, ?) "
+                        "WHERE session_id=?",
+                        (now.isoformat(), invitation["redeemed_session_id"]),
+                    )
+                next_version = expected_version + 1
+                updated = connection.execute(
+                    "UPDATE collaboration_sessions SET version=?, updated_at=? "
+                    "WHERE trip_id=? AND version=?",
+                    (next_version, now.isoformat(), str(trip_id), expected_version),
+                ).rowcount
+                if updated != 1:
+                    raise CollaborationStoreError("COLLABORATION_VERSION_STALE")
+                result = {
+                    "invitationId": str(invitation_id),
+                    "tripId": str(trip_id),
+                    "participantId": str(participant_id),
+                    "accessStatus": ParticipantAccessStatus.REVOKED.value,
+                    "confirmationStatus": "NEEDS_RECONFIRMATION",
+                    "collaborationVersion": next_version,
+                }
+                connection.execute(
+                    """INSERT INTO collaboration_idempotency
+                    (actor_scope, actor_id, operation, idempotency_key, request_digest,
+                     resource_id, result_json, completed_at)
+                    VALUES ('ORGANIZER', ?, 'REVOKE_INVITATION', ?, ?, ?, ?, ?)""",
+                    (
+                        str(actor.participant_id),
+                        idempotency_key,
+                        request_digest,
+                        str(invitation_id),
+                        json.dumps(result, sort_keys=True, separators=(",", ":")),
+                        now.isoformat(),
+                    ),
+                )
+                connection.execute("COMMIT")
+                return result
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+
     def get_stored(self, trip_id: UUID) -> StoredCollaboration:
         with self._connect() as connection:
             session = connection.execute(

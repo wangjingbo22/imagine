@@ -7,6 +7,8 @@ from app.infrastructure.collaboration_store import (
     CollaborationStoreError,
     SqliteCollaborationRepository,
 )
+from app.domain.collaboration import ParticipantConfirmationStatus
+from backend.tests.test_s2_t003_collaboration_service import _ready_harness
 from backend.tests.s2_t003_support import FrozenClock, load_revision
 
 
@@ -86,3 +88,37 @@ def test_same_invite_concurrent_redemption_has_one_winner(tmp_path) -> None:
         results = list(executor.map(redeem, ("2222222222222222", "3333333333333333")))
     assert results.count("SUCCESS") == 1
     assert results.count("INVITATION_ALREADY_REDEEMED") == 1
+
+
+def test_revoke_invitation_revokes_linked_session_and_invalidates_confirmation(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    invitation = harness.repository.create_invitation(
+        trip_id=harness.revision.trip_id,
+        participant_id=harness.revision.member_bindings["member-2"],
+        organizer_token=harness.organizer_token,
+        expected_version=3,
+        idempotency_key="revoke-invite-0001",
+    )
+    assert invitation.invitation_url is not None
+    redeemed = harness.repository.redeem_invitation(
+        invitation.invitation_url.split("=", 1)[1],
+        "revoke-redeem-0001",
+    )
+    assert redeemed.participant_session_token is not None
+
+    result = harness.repository.revoke_invitation(
+        trip_id=harness.revision.trip_id,
+        participant_id=harness.revision.member_bindings["member-2"],
+        invitation_id=invitation.invitation_id,
+        organizer_token=harness.organizer_token,
+        expected_version=4,
+        idempotency_key="revoke-action-0001",
+    )
+
+    assert result["accessStatus"] == "REVOKED"
+    assert result["confirmationStatus"] == "NEEDS_RECONFIRMATION"
+    with pytest.raises(CollaborationStoreError, match="PARTICIPANT_SESSION_REVOKED"):
+        harness.repository.authenticate_participant(redeemed.participant_session_token)
+    state = harness.service.organizer_state(harness.revision.trip_id, harness.organizer_token)
+    member = next(item for item in state.participants if item.member_key == "member-2")
+    assert member.confirmation_status is ParticipantConfirmationStatus.NEEDS_RECONFIRMATION

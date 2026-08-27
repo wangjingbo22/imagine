@@ -195,7 +195,7 @@ async def revoke_invitation(
     trip_id: UUID,
     participant_id: UUID,
     invitation_id: UUID,
-    expected_version: int = Query(ge=1),
+    expected_version: int = Query(ge=1, alias="expectedVersion"),
     request: Request = None,  # type: ignore[assignment]
     current: CollaborationService = Depends(service),
 ) -> ApiResponse:

@@ -144,6 +144,34 @@ async def test_unavailable_t002_changes_no_rows_or_downstream_calls(tmp_path) ->
     assert _dump(harness.repository) == before
 
 
+def test_unavailable_t002_still_allows_invitation_revocation(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    invitation = harness.repository.create_invitation(
+        trip_id=harness.revision.trip_id,
+        participant_id=harness.revision.member_bindings["member-2"],
+        organizer_token=harness.organizer_token,
+        expected_version=3,
+        idempotency_key="revoke-invite-0002",
+    )
+    unavailable = CollaborationService(
+        repository=harness.repository,
+        revisions=UnavailableTripDraftRevisionPort(),
+        evaluator=DeterministicHardConflictEvaluator(),
+    )
+
+    result = unavailable.revoke_invitation(
+        trip_id=harness.revision.trip_id,
+        participant_id=harness.revision.member_bindings["member-2"],
+        invitation_id=invitation.invitation_id,
+        organizer_token=harness.organizer_token,
+        expected_version=4,
+        idempotency_key="revoke-action-0002",
+    )
+
+    assert result["accessStatus"] == "REVOKED"
+    assert result["confirmationStatus"] == "NEEDS_RECONFIRMATION"
+
+
 def test_member_only_change_invalidates_only_that_confirmation(tmp_path) -> None:
     harness = _ready_harness(tmp_path)
     changed = revision_with_member_budget(harness.revision, "member-2", 31_000)
