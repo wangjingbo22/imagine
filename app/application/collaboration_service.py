@@ -29,7 +29,12 @@ from app.domain.collaboration import (
     ParticipantProgress,
     ResolveConfirmationItemRequest,
 )
-from app.domain.collaboration_digest import member_digest, readiness_digest, shared_digest
+from app.domain.collaboration_digest import (
+    canonical_sha256,
+    member_digest,
+    readiness_digest,
+    shared_digest,
+)
 from app.domain.hard_conflicts import DeterministicHardConflictEvaluator
 from app.infrastructure.collaboration_store import (
     CollaborationActor,
@@ -482,9 +487,75 @@ class CollaborationService:
         actor: CollaborationActor,
         idempotency_key: str,
         organizer: bool,
-    ) -> CollaborationAggregate | MemberSessionView:
+    ) -> CollaborationAggregate | MemberSessionView | None:
+        actor_scope = "ORGANIZER" if organizer else "PARTICIPANT"
+        actor_id = str(actor.participant_id)
+        request_digest = canonical_sha256({
+            "tripId": str(trip_id),
+            "itemId": item_id,
+            "relaxationId": request.relaxation_id,
+            "baseRevision": request.base_revision,
+            "expectedVersion": request.expected_version,
+            "actorScope": actor_scope,
+            "actorId": actor_id,
+        })
+        existing = self.repository.get_idempotency_record(
+            actor_scope=actor_scope,
+            actor_id=actor_id,
+            operation="RESOLVE_CONFIRMATION",
+            idempotency_key=idempotency_key,
+        )
+        if existing is not None:
+            if existing[0] != request_digest:
+                raise AppError("IDEMPOTENCY_KEY_REUSED", "相同幂等键对应不同请求", 409, False)
+            if existing[1] is not None:
+                return None
+            stored = self.repository.get_stored(trip_id)
+            advance = self.repository.get_idempotency_record(
+                actor_scope=actor_scope,
+                actor_id=actor_id,
+                operation="ADVANCE_REVISION",
+                idempotency_key=idempotency_key,
+            )
+            if (
+                advance is not None
+                and stored.current_revision == request.base_revision + 1
+            ):
+                try:
+                    self.repository.record_resolution_audit(
+                        trip_id=trip_id,
+                        item_id=item_id,
+                        relaxation_id=request.relaxation_id,
+                        actor_id=actor_id,
+                        before_revision=request.base_revision,
+                        after_revision=stored.current_revision,
+                    )
+                    self.repository.complete_idempotent_operation(
+                        actor_scope=actor_scope,
+                        actor_id=actor_id,
+                        operation="RESOLVE_CONFIRMATION",
+                        idempotency_key=idempotency_key,
+                        result={"afterRevision": stored.current_revision},
+                    )
+                except CollaborationStoreError as error:
+                    raise self._store_error(error) from error
+                return None
+        else:
+            stored = self.repository.get_stored(trip_id)
+            if stored.version != request.expected_version:
+                raise AppError("COLLABORATION_VERSION_STALE", "协作版本已经变化", 409, False)
+            self.repository.begin_idempotent_operation(
+                actor_scope=actor_scope,
+                actor_id=actor_id,
+                operation="RESOLVE_CONFIRMATION",
+                idempotency_key=idempotency_key,
+                request_digest=request_digest,
+            )
+        stored = self.repository.get_stored(trip_id)
+        if stored.version != request.expected_version:
+            raise AppError("COLLABORATION_VERSION_STALE", "协作版本已经变化", 409, False)
         revision = self._current(trip_id)
-        aggregate = self._derive(revision, self.repository.get_stored(trip_id))
+        aggregate = self._derive(revision, stored)
         issue = next((item for item in aggregate.confirmation_items if item.item_id == item_id), None)
         if issue is None:
             raise AppError("CONFIRMATION_ITEM_NOT_FOUND", "确认项不存在", 404, False)
@@ -526,6 +597,13 @@ class CollaborationService:
                 actor_id=str(actor.participant_id),
                 before_revision=revision.revision,
                 after_revision=revised.revision,
+            )
+            self.repository.complete_idempotent_operation(
+                actor_scope=actor_scope,
+                actor_id=actor_id,
+                operation="RESOLVE_CONFIRMATION",
+                idempotency_key=idempotency_key,
+                result={"afterRevision": revised.revision},
             )
         except TripDraftRevisionUnavailable as error:
             raise self._revision_error(error) from error

@@ -7,11 +7,19 @@ import pytest
 from app.application.collaboration_ports import UnavailableTripDraftRevisionPort
 from app.application.collaboration_service import CollaborationService
 from app.core.errors import AppError
-from app.domain.collaboration import ParticipantConfirmationStatus, ParticipantConversationRequest
+from app.domain.collaboration import (
+    IssueCode,
+    ParticipantConfirmationStatus,
+    ParticipantConversationRequest,
+    ResolveConfirmationItemRequest,
+)
 from app.domain.collaboration_digest import member_digest, shared_digest
 from app.domain.hard_conflicts import DeterministicHardConflictEvaluator
 from app.domain.trip_draft import CareDraft, CareWalkLimits
-from app.infrastructure.collaboration_store import SqliteCollaborationRepository
+from app.infrastructure.collaboration_store import (
+    CollaborationStoreError,
+    SqliteCollaborationRepository,
+)
 from backend.tests.s2_t003_support import (
     FakeRevision,
     FakeTripDraftRevisionPort,
@@ -197,3 +205,101 @@ def test_shared_change_invalidates_every_confirmation(tmp_path) -> None:
     assert {item.confirmation_status for item in state.participants} == {
         ParticipantConfirmationStatus.NEEDS_RECONFIRMATION
     }
+
+
+def test_stale_expected_version_rejects_before_t002(tmp_path, monkeypatch) -> None:
+    harness = _ready_harness(tmp_path)
+    calls = 0
+    original_get_current = harness.revisions.get_current
+
+    def get_current(trip_id):
+        nonlocal calls
+        calls += 1
+        return original_get_current(trip_id)
+
+    monkeypatch.setattr(harness.revisions, "get_current", get_current)
+    request = ResolveConfirmationItemRequest(
+        schemaVersion="1.0",
+        baseRevision=1,
+        expectedVersion=2,
+        relaxationId="rx_0000000000000000",
+    )
+
+    with pytest.raises(AppError) as captured:
+        harness.service.resolve_organizer_issue(
+            trip_id=harness.revision.trip_id,
+            item_id="ci_0000000000000000",
+            request=request,
+            organizer_token=harness.organizer_token,
+            idempotency_key="resolve-stale-0001",
+        )
+
+    assert captured.value.code == "COLLABORATION_VERSION_STALE"
+    assert calls == 0
+
+
+class _AdvancingRevisionPort(FakeTripDraftRevisionPort):
+    def apply_relaxation(self, **kwargs):
+        self.relaxation_calls += 1
+        self.current = replace(
+            self.current,
+            revision=self.current.revision + 1,
+            source_digest="b" * 64,
+        )
+        return self.current
+
+
+def test_resolution_retries_audit_after_revision_advance(tmp_path, monkeypatch) -> None:
+    harness = _ready_harness(tmp_path)
+    conflict = revision_with_trip_budget(harness.revision, 45_000)
+    revisions = _AdvancingRevisionPort(conflict)
+    service = CollaborationService(
+        repository=harness.repository,
+        revisions=revisions,
+        evaluator=DeterministicHardConflictEvaluator(),
+    )
+    state = service.organizer_state(harness.revision.trip_id, harness.organizer_token)
+    issue = next(item for item in state.confirmation_items if item.code is IssueCode.CONFLICT)
+    option = next(item for item in issue.relaxations if item.actor_scope.value == "ORGANIZER")
+    request = ResolveConfirmationItemRequest(
+        schemaVersion="1.0",
+        baseRevision=1,
+        expectedVersion=3,
+        relaxationId=option.relaxation_id,
+    )
+    original_audit = harness.repository.record_resolution_audit
+    audit_calls = 0
+
+    def fail_once(**kwargs):
+        nonlocal audit_calls
+        audit_calls += 1
+        if audit_calls == 1:
+            raise CollaborationStoreError("AUDIT_WRITE_FAILED")
+        return original_audit(**kwargs)
+
+    monkeypatch.setattr(harness.repository, "record_resolution_audit", fail_once)
+    with pytest.raises(AppError) as captured:
+        service.resolve_organizer_issue(
+            trip_id=harness.revision.trip_id,
+            item_id=issue.item_id,
+            request=request,
+            organizer_token=harness.organizer_token,
+            idempotency_key="resolve-recovery-0001",
+        )
+    assert captured.value.code == "AUDIT_WRITE_FAILED"
+    assert revisions.relaxation_calls == 1
+
+    service.resolve_organizer_issue(
+        trip_id=harness.revision.trip_id,
+        item_id=issue.item_id,
+        request=request,
+        organizer_token=harness.organizer_token,
+        idempotency_key="resolve-recovery-0001",
+    )
+
+    assert revisions.relaxation_calls == 1
+    assert audit_calls == 2
+    with harness.repository._connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM collaboration_resolution_audit"
+        ).fetchone()[0] == 1

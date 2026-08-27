@@ -953,6 +953,27 @@ class SqliteCollaborationRepository:
                     connection.execute("ROLLBACK")
                 raise
 
+    def get_idempotency_record(
+        self,
+        *,
+        actor_scope: str,
+        actor_id: str,
+        operation: str,
+        idempotency_key: str,
+    ) -> tuple[str, dict[str, object] | None] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT request_digest, result_json FROM collaboration_idempotency "
+                "WHERE actor_scope=? AND actor_id=? AND operation=? AND idempotency_key=?",
+                (actor_scope, actor_id, operation, idempotency_key),
+            ).fetchone()
+        if row is None:
+            return None
+        return (
+            row["request_digest"],
+            json.loads(row["result_json"]) if row["result_json"] else None,
+        )
+
     def complete_idempotent_operation(
         self,
         *,
