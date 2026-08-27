@@ -421,3 +421,68 @@ def test_member_cannot_use_organizer_relaxation(tmp_path) -> None:
 
     assert captured.value.code == "RELAXATION_PERMISSION_DENIED"
     assert harness.revisions.relaxation_calls == 0
+
+
+def test_missing_confirmation_item_is_stale_without_idempotency_write(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    request = ResolveConfirmationItemRequest(
+        schemaVersion="1.0",
+        baseRevision=1,
+        expectedVersion=3,
+        relaxationId="rx_0000000000000000",
+    )
+
+    with pytest.raises(AppError) as captured:
+        harness.service.resolve_organizer_issue(
+            trip_id=harness.revision.trip_id,
+            item_id="ci_ffffffffffffffff",
+            request=request,
+            organizer_token=harness.organizer_token,
+            idempotency_key="resolve-missing-item-1",
+        )
+
+    assert captured.value.code == "CONFIRMATION_ITEM_STALE"
+    assert captured.value.http_status == 409
+    assert harness.revisions.relaxation_calls == 0
+    with harness.repository._connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM collaboration_idempotency "
+            "WHERE operation='RESOLVE_CONFIRMATION' AND idempotency_key=?",
+            ("resolve-missing-item-1",),
+        ).fetchone()[0] == 0
+
+
+def test_missing_relaxation_is_stale_without_idempotency_write(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    conflict = revision_with_trip_budget(harness.revision, 45_000)
+    harness.revisions.current = conflict
+    state = harness.service.organizer_state(
+        harness.revision.trip_id,
+        harness.organizer_token,
+    )
+    issue = next(item for item in state.confirmation_items if item.code is IssueCode.CONFLICT)
+    request = ResolveConfirmationItemRequest(
+        schemaVersion="1.0",
+        baseRevision=1,
+        expectedVersion=3,
+        relaxationId="rx_ffffffffffffffff",
+    )
+
+    with pytest.raises(AppError) as captured:
+        harness.service.resolve_organizer_issue(
+            trip_id=harness.revision.trip_id,
+            item_id=issue.item_id,
+            request=request,
+            organizer_token=harness.organizer_token,
+            idempotency_key="resolve-missing-option-1",
+        )
+
+    assert captured.value.code == "CONFIRMATION_ITEM_STALE"
+    assert captured.value.http_status == 409
+    assert harness.revisions.relaxation_calls == 0
+    with harness.repository._connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM collaboration_idempotency "
+            "WHERE operation='RESOLVE_CONFIRMATION' AND idempotency_key=?",
+            ("resolve-missing-option-1",),
+        ).fetchone()[0] == 0
