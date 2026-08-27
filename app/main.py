@@ -25,6 +25,8 @@ from app.application.arrival_decision_service import ArrivalDecisionService
 from app.application.arrival_evidence_service import ArrivalEvidenceService
 from app.application.arrival_execution_service import ArrivalExecutionService
 from app.application.collaboration_service import CollaborationService
+from app.application.collaboration_ports import CollaborationReadinessGuard
+from app.application.collaboration_readiness import SqliteCollaborationReadinessGuard
 from app.application.collaboration_ports import (
     TripDraftRevisionPort,
     UnavailableTripDraftRevisionPort,
@@ -172,6 +174,7 @@ def create_app(
     arrival_decision_service: ArrivalDecisionService | None = None,
     trip_draft_revision_port: TripDraftRevisionPort | None = None,
     collaboration_repository: SqliteCollaborationRepository | None = None,
+    collaboration_readiness_guard: CollaborationReadinessGuard | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     managed_client: AmapClient | None = None
@@ -252,6 +255,29 @@ def create_app(
             SqlitePlanVersionRepository(resolved_settings.plan_version_db_path),
             workflow_service=workflow_service,
         )
+
+    resolved_collaboration_repository = (
+        collaboration_repository
+        or SqliteCollaborationRepository(resolved_settings.plan_version_db_path)
+    )
+    resolved_revision_port = (
+        trip_draft_revision_port or UnavailableTripDraftRevisionPort()
+    )
+    collaboration_service = CollaborationService(
+        repository=resolved_collaboration_repository,
+        revisions=resolved_revision_port,
+        evaluator=DeterministicHardConflictEvaluator(),
+    )
+    resolved_readiness_guard = (
+        collaboration_readiness_guard
+        or SqliteCollaborationReadinessGuard(
+            database_path=resolved_settings.plan_version_db_path,
+            repository=resolved_collaboration_repository,
+            collaboration=collaboration_service,
+            provider_timeout_seconds=resolved_settings.amap_request_timeout_seconds,
+            candidate_timeout_seconds=resolved_settings.bailian_candidate_timeout_seconds,
+        )
+    )
 
     if planning_boundary_service is None and isinstance(
         plan_service,
@@ -403,14 +429,8 @@ def create_app(
         app.state.arrival_decision_service,
         workflow_service,
     )
-    app.state.collaboration_service = CollaborationService(
-        repository=(
-            collaboration_repository
-            or SqliteCollaborationRepository(resolved_settings.plan_version_db_path)
-        ),
-        revisions=(trip_draft_revision_port or UnavailableTripDraftRevisionPort()),
-        evaluator=DeterministicHardConflictEvaluator(),
-    )
+    app.state.collaboration_service = collaboration_service
+    app.state.collaboration_readiness_guard = resolved_readiness_guard
     app.state.plan_version_service = plan_service
     app.state.workflow_service = workflow_service
     app.state.memory_timeline_service = MemoryTimelineService(
