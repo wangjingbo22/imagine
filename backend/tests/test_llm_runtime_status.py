@@ -13,16 +13,17 @@ class UnusedLocationService:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("api_key", "expected_mode"),
+    ("api_key", "expected_mode", "expected_explainer"),
     [
-        (None, "DETERMINISTIC_RULES"),
-        ("test-bailian-key", "BAILIAN_CONFIGURED"),
+        (None, "DETERMINISTIC_RULES", "NOT_CONFIGURED"),
+        ("test-bailian-key", "BAILIAN_CONFIGURED", "BAILIAN_CONFIGURED"),
     ],
 )
 async def test_health_exposes_the_actual_natural_language_parser(
     tmp_path,
     api_key: str | None,
     expected_mode: str,
+    expected_explainer: str,
 ) -> None:
     settings = Settings(
         amap_web_service_key="test-amap-key",
@@ -46,7 +47,12 @@ async def test_health_exposes_the_actual_natural_language_parser(
 
     assert root_health.status_code == 200
     assert root_health.json()["naturalLanguageParser"] == expected_mode
+    assert root_health.json()["replanDifferenceExplainer"] == expected_explainer
     assert api_health.status_code == 200
     assert api_health.json()["data"]["naturalLanguageParser"] == expected_mode
+    assert (
+        api_health.json()["data"]["replanDifferenceExplainer"]
+        == expected_explainer
+    )
     assert "test-bailian-key" not in root_health.text
     assert "test-bailian-key" not in api_health.text

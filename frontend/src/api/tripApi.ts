@@ -87,11 +87,16 @@ export const tripApi = {
     })
   },
 
-  generatePlanVersion(tripId: string, candidate: CandidatePlanRequest) {
+  generatePlanVersion(
+    tripId: string,
+    candidate: CandidatePlanRequest,
+    organizerToken?: string | null,
+  ) {
     return request<StoredPlanVersion>(
       `/api/v1/trips/${tripId}/plan-versions/generate`,
       {
         method: 'POST',
+        headers: organizerToken ? { 'X-Organizer-Token': organizerToken } : undefined,
         body: JSON.stringify(candidate),
       },
     )

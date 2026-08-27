@@ -363,7 +363,19 @@ def _key(value: str) -> str:
 
 def _extract_city(text: str) -> str | None:
     matches = [city for city in _CITY_NAMES if city in text]
-    return matches[0] if len(matches) == 1 else None
+    if len(matches) == 1:
+        return matches[0]
+    # The fixed city list is only a conservative fallback.  Keep supporting
+    # ordinary prefecture-level names such as "驻马店" when a user explicitly
+    # says they are going there; the provider will still validate it later.
+    landmark = re.search(r"(?:想去|去|到)\s*([\u4e00-\u9fff]{2,6}?)(?:市)?(?:博物馆|火车站)", text)
+    if landmark:
+        return landmark.group(1)
+    generic = re.search(
+        r"(?:想去|去|到)\s*([\u4e00-\u9fff]{2,8}?)(?:市|，|,|。|\s|玩|旅游|一日游)",
+        text,
+    )
+    return generic.group(1) if generic else None
 
 
 def _explicit_date(value: str | None) -> date | None:

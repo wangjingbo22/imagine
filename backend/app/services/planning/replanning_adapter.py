@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
@@ -59,11 +59,13 @@ class T011ReplanCandidateValidator:
         self,
         fact_source: TrustedCandidateFactSource,
         planner: DeterministicCandidatePlanner | None = None,
+        identity_digest_by_plan_id: Mapping[UUID, str] | None = None,
     ) -> None:
         if not isinstance(fact_source, TrustedCandidateFactSource):
             raise TypeError("fact_source must implement TrustedCandidateFactSource")
         self._fact_source = fact_source
         self._planner = planner or DeterministicCandidatePlanner()
+        self._identity_digest_by_plan_id = dict(identity_digest_by_plan_id or {})
 
     def validate_candidate(
         self,
@@ -113,6 +115,9 @@ class T011ReplanCandidateValidator:
                 request,
                 current,
                 reason=proposed.reason,
+                identity_digest=self._identity_digest_by_plan_id.get(
+                    proposed.plan_id
+                ),
             )
         except CandidatePlanInputError as exc:
             raise ReplanningContractError(

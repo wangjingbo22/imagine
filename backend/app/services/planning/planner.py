@@ -160,7 +160,10 @@ class DeterministicCandidatePlanner:
                 *warnings,
             )
 
-        participant_cap = valid.trip.participants[0].budget_cap_cents
+        participant_cap = min(
+            participant.budget_cap_cents
+            for participant in valid.trip.participants
+        )
         day_budget = valid.trip.days[0].daily_budget_cents
         budget_limit = min(
             valid.trip.total_budget_cents,
@@ -239,10 +242,7 @@ class DeterministicCandidatePlanner:
         self,
         request: CandidatePlanRequest,
     ) -> tuple[Constraint, ...]:
-        profile = request.trip.participants[0].assistance_profile
-        expected = (
-            self._constraint_compiler.compile(profile) if profile is not None else ()
-        )
+        expected = self._group_constraints(request)
         if _constraint_payload(request.confirmed_constraints) != _constraint_payload(
             expected
         ):
@@ -255,6 +255,64 @@ class DeterministicCandidatePlanner:
                 ),
             )
         return expected
+
+    def _group_constraints(
+        self,
+        request: CandidatePlanRequest,
+    ) -> tuple[Constraint, ...]:
+        grouped: dict[tuple[str, str, str, str], list[Constraint]] = {}
+        for participant in request.trip.participants:
+            profile = participant.assistance_profile
+            if profile is None:
+                continue
+            for constraint in self._constraint_compiler.compile(profile):
+                key = (
+                    constraint.field,
+                    constraint.operator,
+                    constraint.scope,
+                    constraint.hardness,
+                )
+                grouped.setdefault(key, []).append(constraint)
+
+        merged: list[Constraint] = []
+        for key, constraints in grouped.items():
+            first = constraints[0]
+            values = [item.value for item in constraints]
+            if all(value == values[0] for value in values[1:]):
+                merged.append(first)
+                continue
+            if first.operator == "LTE" and all(
+                isinstance(value, (int, float)) and not isinstance(value, bool)
+                for value in values
+            ):
+                merged.append(first.model_copy(update={"value": min(values)}))
+                continue
+            if first.field == FIELD_NAP_WINDOW and all(
+                isinstance(value, dict)
+                and isinstance(value.get("start"), str)
+                and isinstance(value.get("end"), str)
+                for value in values
+            ):
+                merged.append(
+                    first.model_copy(
+                        update={
+                            "value": {
+                                "start": min(value["start"] for value in values),
+                                "end": max(value["end"] for value in values),
+                            }
+                        }
+                    )
+                )
+                continue
+            raise CandidatePlanInputError(
+                code="GROUP_CONSTRAINT_CONFLICT",
+                field="confirmedConstraints",
+                message=(
+                    "confirmed participant constraints cannot be merged "
+                    f"deterministically for {key[0]}"
+                ),
+            )
+        return tuple(merged)
 
     @staticmethod
     def _validate_same_city_facts(request: CandidatePlanRequest) -> None:
@@ -634,6 +692,7 @@ def candidate_to_proposed_plan_version_v2(
     current_plan: PlanVersion,
     *,
     reason: PlanVersionReason = PlanVersionReason.USER_FEEDBACK,
+    identity_digest: str | None = None,
 ) -> ProposedPlanVersion:
     """Create a deterministic V2 tied to one immutable CURRENT V1 snapshot."""
 
@@ -656,6 +715,14 @@ def candidate_to_proposed_plan_version_v2(
             field="reason",
             message="Plan V2 reason cannot be INITIAL_PLAN",
         )
+    if identity_digest is not None and re.fullmatch(
+        r"[0-9a-f]{64}", identity_digest
+    ) is None:
+        raise CandidatePlanInputError(
+            code="CANDIDATE_V2_IDENTITY_DIGEST_INVALID",
+            field="identityDigest",
+            message="identityDigest must be a lowercase SHA-256 hex digest",
+        )
 
     valid_candidate, valid_request = _validated_complete_candidate(
         candidate,
@@ -672,7 +739,12 @@ def candidate_to_proposed_plan_version_v2(
         valid_candidate,
         valid_request,
         trip_snapshot=current.trip_snapshot,
-        plan_id=_plan_uuid_v2(valid_request, current, reason),
+        plan_id=_plan_uuid_v2(
+            valid_request,
+            current,
+            reason,
+            identity_digest=identity_digest,
+        ),
         version=2,
         parent_id=current.plan_id,
         reason=reason,
@@ -693,6 +765,7 @@ def generate_proposed_plan_version_v2(
     current_plan: PlanVersion,
     *,
     reason: PlanVersionReason = PlanVersionReason.USER_FEEDBACK,
+    identity_digest: str | None = None,
 ) -> ProposedPlanVersion:
     candidate = generate_candidate_plan(request)
     return candidate_to_proposed_plan_version_v2(
@@ -700,6 +773,7 @@ def generate_proposed_plan_version_v2(
         request,
         current_plan,
         reason=reason,
+        identity_digest=identity_digest,
     )
 
 
@@ -943,9 +1017,15 @@ def _plan_uuid_v2(
     request: CandidatePlanRequest,
     current: PlanVersion,
     reason: PlanVersionReason,
+    *,
+    identity_digest: str | None = None,
 ) -> UUID:
+    identity = bytes.fromhex(identity_digest) if identity_digest is not None else b""
     digest = sha256(
-        _request_digest(request) + current.plan_id.bytes + reason.value.encode("utf-8")
+        _request_digest(request)
+        + current.plan_id.bytes
+        + reason.value.encode("utf-8")
+        + identity
     ).digest()
     return _uuid4_from_digest(digest)
 

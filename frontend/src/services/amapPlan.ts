@@ -66,6 +66,7 @@ export interface AmapPlanOptions {
   excludePlaceIds?: string[]
   preferredMaxWalkMeters?: number
   confirmedTrip?: CreateSingleDayTrip | CandidatePlanningTrip
+  organizerToken?: string | null
 }
 
 export interface AmapReplanOptions extends AmapPlanOptions {
@@ -647,7 +648,11 @@ async function createAmapPlan(
   let planningIssue: PlanningIssue | null = null
   let plan = previewFromCandidate(candidateRequest, 1)
   try {
-    registeredPlan = (await tripApi.generatePlanVersion(tripId, candidateRequest)).data
+    registeredPlan = (await tripApi.generatePlanVersion(
+      tripId,
+      candidateRequest,
+      options.organizerToken,
+    )).data
     plan = previewFromStored(registeredPlan, candidateRequest)
   } catch (error) {
     planningIssue = confirmationIssue(error)

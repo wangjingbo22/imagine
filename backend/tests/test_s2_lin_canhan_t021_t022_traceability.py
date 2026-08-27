@@ -1,0 +1,158 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+
+ROOT = Path(__file__).parents[2]
+TRACE = (
+    ROOT
+    / "docs"
+    / "traceability"
+    / "sprint2"
+    / "lin_canhan_s2_t021_t022_day2.json"
+)
+
+
+def _trace() -> dict[str, object]:
+    return json.loads(TRACE.read_text(encoding="utf-8"))
+
+
+def _evidence_paths(task: dict[str, object]) -> set[str]:
+    paths: set[str] = set()
+    for key in (
+        "moduleFiles",
+        "integrationFiles",
+        "documentationFiles",
+        "fixtureFiles",
+        "testFiles",
+    ):
+        paths.update(task.get(key, []))
+    return paths
+
+
+def test_day2_trace_locks_owner_pbi_ac_and_latest_main_base() -> None:
+    trace = _trace()
+    assert trace["schemaVersion"] == "1.0"
+    assert trace["sprint"] == "Sprint2"
+    assert trace["deliveryDay"] == "Day2"
+    assert trace["owner"] == "林粲涵"
+    assert trace["verifiedAgainstMainCommit"] == (
+        "5e71d03b98cd80fd92ffbc442d369ec4aa29330a"
+    )
+    assert trace["deliveryBaseCommit"] == (
+        "5b846f35eafc51a3834701e9c0b729f22ae21223"
+    )
+    assert trace["latestMainMergeCommit"] == (
+        "3c1daa638363a531f43d07c6bdcdc52a31dd1694"
+    )
+    assert trace["implementationCommit"] == (
+        "d738b0a2ecde37f4fb9d76f420b73b645d7ed150"
+    )
+    assert trace["pbi"]["pbiId"] == "PBI-11-B"
+    assert trace["pbi"]["acceptanceCriteriaId"] == "AC-11-B"
+
+
+def test_task_dependencies_and_day2_evidence_paths_are_machine_resolvable() -> None:
+    tasks = {item["taskId"]: item for item in _trace()["tasks"]}
+    assert set(tasks) == {"S2-T021", "S2-T022"}
+    assert tasks["S2-T021"]["dependsOn"] == [
+        "S2-T005",
+        "S2-T006",
+        "S2-T019",
+        "S2-T020",
+    ]
+    assert tasks["S2-T022"]["dependsOn"] == ["S2-T005", "S2-T021"]
+
+    for task in tasks.values():
+        assert task["owner"] == "林粲涵"
+        assert task["deliveryDay"] == "Day2"
+        assert task["pbiId"] == "PBI-11-B"
+        assert task["acceptanceCriteriaId"] == "AC-11-B"
+        assert task["status"] == "VERIFIED"
+        for path in _evidence_paths(task):
+            assert (ROOT / path).is_file(), path
+
+
+def test_pbi_linkage_is_complete_through_downstream_consumers() -> None:
+    links = {
+        (item["from"], item["to"]): item
+        for item in _trace()["crossTaskLinkages"]
+    }
+    assert set(links) == {
+        ("S2-T005", "S2-T021"),
+        ("S2-T006", "S2-T021"),
+        ("S2-T019", "S2-T020"),
+        ("S2-T020", "S2-T021"),
+        ("S2-T021", "S2-T022"),
+        ("S2-T022", "S2-T018"),
+        ("S2-T022", "S2-T023"),
+    }
+    assert links[("S2-T020", "S2-T021")]["artifact"] == (
+        "server-recompiled transient EventConstraintSet"
+    )
+    assert links[("S2-T021", "S2-T022")]["artifact"] == (
+        "PROPOSED PlanVersion plus full HARD validation report"
+    )
+    assert links[("S2-T022", "S2-T023")]["status"] == (
+        "BACKEND_CONTRACT_READY_UI_NOT_IMPLEMENTED_HERE"
+    )
+    for link in links.values():
+        for path in link["evidenceFiles"]:
+            assert (ROOT / path).is_file(), path
+
+
+def test_acceptance_and_authority_boundaries_cannot_be_silently_weakened() -> None:
+    trace = _trace()
+    contract = trace["acceptanceContract"]
+    assert "only the unfinished suffix is adjusted" in contract["S2-T021"]
+    assert "all HARD rules are revalidated" in contract["S2-T021"]
+    assert "no infeasible partial candidate is persisted" in contract["S2-T021"]
+    assert "CURRENT is unchanged until candidate acceptance" in contract["S2-T022"]
+    assert (
+        "explanation failure does not remove structured candidate or Diff"
+        in contract["S2-T022"]
+    )
+
+    boundaries = trace["integrationBoundaries"]
+    assert boundaries["llmAuthority"] == (
+        "EXPLANATION_ONLY_BEST_EFFORT_NO_PLAN_WRITE_AUTHORITY"
+    )
+    assert boundaries["constraintLifetime"] == (
+        "S2_T020_EVENT_CONSTRAINTS_ARE_TRANSIENT_AND_NOT_APPENDED_TO_S1_T007_PROFILE"
+    )
+    assert boundaries["candidateState"] == "PROPOSED_UNTIL_EXPLICIT_ACCEPT"
+    assert boundaries["defaultCandidateSource"] == (
+        "EVENT_AWARE_SUFFIX_PLANNER_REQUIRED_FAIL_CLOSED_WHEN_ABSENT"
+    )
+    assert boundaries["frontendScope"] == "NO_FRONTEND_IMPLEMENTED_BY_THIS_DELIVERY"
+
+
+def test_known_upstream_and_external_gaps_are_explicit_not_claimed_done() -> None:
+    trace = _trace()
+    gaps = trace["knownGaps"]
+    assert gaps["s2T006ConcreteFactRefRegistry"] == (
+        "ABSENT_ON_BASELINE_MAIN_ONLY_CONTRACT_SEAM_AVAILABLE"
+    )
+    assert gaps["s2T005TwoThreePersonPlanVersionChain"] == (
+        "BLOCKED_BY_S2_T005_UPSTREAM_DELIVERY"
+    )
+    assert gaps["s2T023Frontend"] == "MISSING_OUTSIDE_THIS_DELIVERY"
+    assert gaps["fatigueThresholds"] == "PO_CONFIRMATION_PENDING"
+    assert gaps["lateBeyondRemainingWindowPolicy"] == "PO_CONFIRMATION_PENDING"
+    assert gaps["onlineE2E"] == "NOT_CLAIMED"
+    assert trace["localVerification"]["onlineE2E"] == "NOT_RUN_NOT_CLAIMED"
+    assert trace["externalAcceptanceStillNeeded"]
+
+
+def test_verification_is_pending_or_contains_real_final_results() -> None:
+    verification = _trace()["localVerification"]
+    assert verification["status"] in {"PENDING", "PASS"}
+    if verification["status"] == "PENDING":
+        assert verification["focusedResult"] == "PENDING"
+        assert verification["backendResult"] == "PENDING"
+        assert verification["diffCheck"] == "PENDING"
+    else:
+        assert verification["focusedResult"] != "PENDING"
+        assert verification["backendResult"] != "PENDING"
+        assert verification["diffCheck"] == "PASS"

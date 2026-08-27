@@ -19,7 +19,22 @@ from app.infrastructure.trusted_planning_store import (
     proposal_digest,
 )
 from app.schemas.execution import ExecutionEvent, ExecutionEventType
-from app.schemas.plan import PlanVersion, PlanVersionStatus, ProposedPlanVersion
+from app.schemas.execution_adjustment import (
+    EventConstraintSet,
+    ExecutionAdjustmentType,
+    ExecutionConstraintCompileRequest,
+)
+from app.schemas.execution_replan import (
+    ExecutionAdjustmentReplanRequest,
+    RegisteredExecutionAdjustmentReplan,
+)
+from app.schemas.plan import (
+    PlanVersion,
+    PlanVersionReason,
+    PlanVersionStatus,
+    ProposedPlanVersion,
+)
+from app.schemas.trip import TripStatus
 from app.schemas.planning import (
     EventDrivenReplanRequest,
     RegisteredReplan,
@@ -41,16 +56,27 @@ from app.services.planning.planner import (
     generate_candidate_plan,
 )
 from app.services.planning.replanning_adapter import T011ReplanCandidateValidator
+from app.services.execution_adjustments import compile_execution_constraints
+from app.services.execution_replanning import (
+    EventConstraintReplanValidator,
+    ExecutionReplanContextError,
+    project_execution_adjustment,
+)
 from app.services.replanning import (
     DeterministicRetainedSuffixPlanner,
     SuffixPlanner,
     SuffixPlanningInput,
 )
-from app.services.replanning.models import NoFeasibleReplan, ReplanCandidate
+from app.services.replanning.models import (
+    NoFeasibleReplan,
+    ReplanCandidate,
+    ReplanValidationReport,
+)
 from app.services.replanning.selector import (
     MinimumDisruptionSelector,
     ReplanningContractError,
 )
+from app.services.route_risk import ValidationStatus
 
 
 class _InMemoryTrustedCandidateFacts:
@@ -598,6 +624,104 @@ class PlanningBoundaryService:
             candidate_inputs=((candidate_request, 0),),
         )
 
+    def generate_v2_from_adjustment(
+        self,
+        trip_id: UUID,
+        request: ExecutionAdjustmentReplanRequest,
+    ) -> RegisteredExecutionAdjustmentReplan:
+        """S2-T021: replan a trusted suffix under a transient T020 overlay."""
+
+        self._require_adjustment_execution_state(trip_id)
+        if isinstance(self.suffix_planner, DeterministicRetainedSuffixPlanner):
+            raise AppError(
+                code="S2_T021_CANDIDATE_SOURCE_UNAVAILABLE",
+                message=(
+                    "S2-T021 requires an event-aware trusted suffix planner; "
+                    "the retained-suffix fallback cannot issue an adjustment V2."
+                ),
+                http_status=503,
+                retryable=True,
+            )
+        current, events = self._load_current_v1_context(trip_id)
+        current_request = self._load_current_candidate_request(trip_id, current)
+        try:
+            projection = project_execution_adjustment(
+                current_plan=current,
+                current_request=current_request,
+                events=events,
+                adjustment=request.adjustment,
+                locked_task_ids=request.locked_task_ids,
+            )
+        except ExecutionReplanContextError as error:
+            raise AppError(
+                code=error.code,
+                message=error.message,
+                http_status=409,
+                retryable=False,
+                errors=[error.as_dict()],
+            ) from error
+
+        event_constraints = compile_execution_constraints(
+            ExecutionConstraintCompileRequest(
+                event=request.adjustment,
+                current_constraints=projection.remaining_context,
+            )
+        )
+        prefix_length = len(projection.frozen_task_ids)
+        original_suffix = tuple(current_request.task_facts[prefix_length:])
+        planned_suffix = self._plan_suffix(
+            SuffixPlanningInput(
+                task_facts=original_suffix,
+                frozen_task_ids=projection.frozen_task_ids,
+                actual_spent_cents=projection.actual_spent_cents,
+                event_constraints=event_constraints,
+                source_event_task_id=request.adjustment.task_id,
+            ),
+            original_suffix=original_suffix,
+            start_order=prefix_length + 1,
+        )
+        payload = current_request.model_dump(mode="json", by_alias=True)
+        payload["taskFacts"] = [
+            item.model_dump(mode="json", by_alias=True)
+            for item in (
+                *current_request.task_facts[:prefix_length],
+                *planned_suffix,
+            )
+        ]
+        try:
+            candidate_request = CandidatePlanRequest.model_validate_json(
+                json.dumps(payload, ensure_ascii=False),
+                strict=True,
+            )
+        except ValidationError as error:
+            raise AppError(
+                code="S2_T021_SUFFIX_PLANNER_INVALID",
+                message="transient suffix output is not a valid CandidatePlanRequest",
+                http_status=422,
+                errors=[{"path": "taskFacts", "message": str(error)}],
+            ) from error
+
+        reason = (
+            PlanVersionReason.DELAY
+            if request.adjustment.event_type is ExecutionAdjustmentType.LATE
+            else PlanVersionReason.FATIGUE
+        )
+        registered = self._select_and_register_v2(
+            trip_id=trip_id,
+            current=current,
+            events=events,
+            reason=reason,
+            locked_task_ids=projection.frozen_task_ids,
+            candidate_inputs=((candidate_request, 0),),
+            event_constraints=event_constraints,
+        )
+        return RegisteredExecutionAdjustmentReplan(
+            current_plan_id=current.plan_id,
+            replan=registered,
+            event_constraints=event_constraints,
+            derived_context=projection.remaining_context,
+        )
+
     def _load_current_v1_context(
         self,
         trip_id: UUID,
@@ -625,6 +749,21 @@ class PlanningBoundaryService:
         except TrustedPlanningStoreError as error:
             raise self._trust_error(error) from error
         return current, tuple(self.workflow_service.list_events(trip_id))
+
+    def _require_adjustment_execution_state(self, trip_id: UUID) -> None:
+        state = self.plan_service.get_trip_state(trip_id)
+        if state.trip_status is not TripStatus.EXECUTING:
+            raise AppError(
+                code="REPLAN_EXECUTION_REQUIRED",
+                message="Trip must be EXECUTING before server-side replanning.",
+                http_status=409,
+            )
+        if state.proposed_plans:
+            raise AppError(
+                code="REPLAN_CANDIDATE_PENDING",
+                message="Resolve the existing proposed Plan V2 before replanning again.",
+                http_status=409,
+            )
 
     def _load_current_candidate_request(
         self,
@@ -905,6 +1044,7 @@ class PlanningBoundaryService:
         reason: Any,
         locked_task_ids: Sequence[str],
         candidate_inputs: Sequence[tuple[CandidatePlanRequest, int]],
+        event_constraints: EventConstraintSet | None = None,
     ) -> RegisteredReplan:
         candidates: list[ReplanCandidate] = []
         candidate_requests: dict[UUID, CandidatePlanRequest] = {}
@@ -919,6 +1059,11 @@ class PlanningBoundaryService:
                     candidate_request,
                     current,
                     reason=reason,
+                    identity_digest=(
+                        event_constraints.input_digest
+                        if event_constraints is not None
+                        else None
+                    ),
                 )
             except CandidatePlanRejected as error:
                 generation_failures.append(
@@ -954,6 +1099,41 @@ class PlanningBoundaryService:
             )
 
         if not candidates:
+            if event_constraints is not None:
+                affected = sorted(
+                    {
+                        rule_id
+                        for failure in generation_failures
+                        for rule_id in failure.get("affectedRuleIds", ())
+                    }
+                    | {
+                        str(failure.get("code"))
+                        for failure in generation_failures
+                        if failure.get("code")
+                    }
+                )
+                raise AppError(
+                    code="REPLAN_NO_FEASIBLE_CANDIDATE",
+                    message="No adjustment candidate passed server-side HARD validation.",
+                    http_status=422,
+                    errors=[
+                        {
+                            "frozenTaskIds": list(locked_task_ids),
+                            "affectedRuleIds": affected,
+                            "conflicts": [
+                                {
+                                    "candidateIndex": failure.get("candidateIndex"),
+                                    "code": failure.get("code"),
+                                    "affectedRuleIds": failure.get(
+                                        "affectedRuleIds", []
+                                    ),
+                                }
+                                for failure in generation_failures
+                            ],
+                            "relaxations": [],
+                        }
+                    ],
+                )
             raise AppError(
                 code="REPLAN_NO_FEASIBLE_CANDIDATE",
                 message="No candidate passed server-side T011 validation.",
@@ -961,11 +1141,26 @@ class PlanningBoundaryService:
                 errors=generation_failures,
             )
 
-        selector = MinimumDisruptionSelector(
-            T011ReplanCandidateValidator(
-                _InMemoryTrustedCandidateFacts(candidate_requests)
-            )
+        fact_source = _InMemoryTrustedCandidateFacts(candidate_requests)
+        validator = T011ReplanCandidateValidator(
+            fact_source,
+            identity_digest_by_plan_id=(
+                {
+                    plan_id: event_constraints.input_digest
+                    for plan_id in candidate_requests
+                }
+                if event_constraints is not None
+                else None
+            ),
         )
+        if event_constraints is not None:
+            validator = EventConstraintReplanValidator(
+                base_validator=validator,
+                fact_source=fact_source,
+                event_constraints=event_constraints,
+                frozen_task_ids=locked_task_ids,
+            )
+        selector = MinimumDisruptionSelector(validator)
         try:
             outcome = selector.select(
                 current_plan=current,
@@ -977,6 +1172,26 @@ class PlanningBoundaryService:
             raise self._contract_error(error) from error
 
         if isinstance(outcome, NoFeasibleReplan):
+            if event_constraints is not None:
+                raise AppError(
+                    code="REPLAN_NO_FEASIBLE_CANDIDATE",
+                    message="No adjustment candidate satisfied frozen-prefix and HARD constraints.",
+                    http_status=422,
+                    errors=[
+                        {
+                            "frozenTaskIds": list(outcome.frozen_task_ids),
+                            "affectedRuleIds": list(outcome.affected_rule_ids),
+                            "conflicts": [
+                                {"ruleId": rule_id}
+                                for rule_id in outcome.affected_rule_ids
+                            ],
+                            "relaxations": [
+                                item.model_dump(mode="json", by_alias=True)
+                                for item in outcome.relaxations
+                            ],
+                        }
+                    ],
+                )
             raise AppError(
                 code="REPLAN_NO_FEASIBLE_CANDIDATE",
                 message="T018 found no candidate satisfying frozen-prefix and HARD constraints.",
@@ -1018,6 +1233,10 @@ class PlanningBoundaryService:
                 for item in outcome.assessments
             ],
         }
+        if event_constraints is not None:
+            selection_validation["transientEventConstraints"] = (
+                event_constraints.model_dump(mode="json", by_alias=True)
+            )
         try:
             self.trust_repository.stage_candidate(
                 plan=outcome.selected_plan,
@@ -1066,6 +1285,69 @@ class PlanningBoundaryService:
 
     def require_v2_acceptance(self, trip_id: UUID, plan_id: UUID) -> None:
         self._require_issued(trip_id, plan_id, boundary_kind="V2")
+
+    def require_adjustment_v2_decision(
+        self,
+        trip_id: UUID,
+        plan_id: UUID,
+    ) -> None:
+        """Require immutable T021 evidence, not merely any issued V2."""
+
+        plan = self.plan_service.get_plan_version(trip_id, plan_id)
+        if plan.reason not in {PlanVersionReason.DELAY, PlanVersionReason.FATIGUE}:
+            raise AppError(
+                code="S2_T022_ADJUSTMENT_V2_REQUIRED",
+                message="This decision endpoint only accepts S2-T021 adjustment V2 plans.",
+                http_status=409,
+            )
+        try:
+            validation = self.trust_repository.get_issued_validation(
+                trip_id=trip_id,
+                plan=plan,
+                boundary_kind="V2",
+            )
+            constraints = EventConstraintSet.model_validate_json(
+                json.dumps(
+                    validation["transientEventConstraints"],
+                    ensure_ascii=False,
+                ),
+                strict=True,
+            )
+            report = ReplanValidationReport.model_validate_json(
+                json.dumps(validation["validationReport"], ensure_ascii=False),
+                strict=True,
+            )
+        except TrustedPlanningStoreError as error:
+            raise self._trust_error(error) from error
+        except (KeyError, TypeError, ValueError, ValidationError) as error:
+            raise AppError(
+                code="S2_T022_VALIDATION_EVIDENCE_INVALID",
+                message="The issued V2 lacks strict S2-T021 validation evidence.",
+                http_status=409,
+            ) from error
+
+        expected_event = (
+            ExecutionAdjustmentType.LATE
+            if plan.reason is PlanVersionReason.DELAY
+            else ExecutionAdjustmentType.FATIGUE
+        )
+        hard_checks = tuple(
+            check for check in report.checks if check.hardness == "HARD"
+        )
+        if (
+            constraints.source_event.event_type is not expected_event
+            or report.candidate_plan_id != plan.plan_id
+            or not constraints.constraints
+            or not hard_checks
+            or any(
+                check.status is not ValidationStatus.PASS for check in hard_checks
+            )
+        ):
+            raise AppError(
+                code="S2_T022_VALIDATION_EVIDENCE_INVALID",
+                message="The issued V2 has inconsistent event or HARD validation evidence.",
+                http_status=409,
+            )
 
     def get_planning_facts(self, trip_id: UUID) -> CandidatePlanRequest:
         """Restore facts only for the active server-issued planning lineage."""

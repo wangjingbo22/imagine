@@ -32,13 +32,19 @@ class Settings(BaseSettings):
         gt=0,
         le=10,
     )
+    bailian_replan_explanation_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=10,
+    )
     plan_version_db_path: Path = Path("data/plan_versions.sqlite3")
     build_sha: str | None = Field(
         default=None,
         validation_alias=AliasChoices("BUILD_SHA", "RENDER_GIT_COMMIT"),
     )
     cors_allowed_origins: str = (
-        "http://localhost:5173,http://127.0.0.1:5173"
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "http://localhost:5174,http://127.0.0.1:5174"
     )
 
     @property

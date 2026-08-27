@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "1.0",
+  "sourcePlanningFixture": "backend/tests/fixtures/planning/golden_candidate_plan.json",
+  "cases": {
+    "lateFeasible": {
+      "schemaVersion": "1.0",
+      "adjustment": {
+        "schemaVersion": "1.0",
+        "confirmationStatus": "CONFIRMED",
+        "eventType": "LATE",
+        "taskId": "task-lunch",
+        "lateMinutes": 30,
+        "fatigueLevel": null
+      },
+      "lockedTaskIds": ["task-park"],
+      "explainDifferences": true
+    },
+    "fatigueFeasible": {
+      "schemaVersion": "1.0",
+      "adjustment": {
+        "schemaVersion": "1.0",
+        "confirmationStatus": "CONFIRMED",
+        "eventType": "FATIGUE",
+        "taskId": "task-museum",
+        "lateMinutes": null,
+        "fatigueLevel": "MODERATE"
+      },
+      "lockedTaskIds": [],
+      "explainDifferences": false
+    },
+    "lateNoFeasible": {
+      "schemaVersion": "1.0",
+      "adjustment": {
+        "schemaVersion": "1.0",
+        "confirmationStatus": "CONFIRMED",
+        "eventType": "LATE",
+        "taskId": "task-park",
+        "lateMinutes": 240,
+        "fatigueLevel": null
+      },
+      "lockedTaskIds": [],
+      "explainDifferences": false
+    },
+    "fatigueNoFeasible": {
+      "schemaVersion": "1.0",
+      "adjustment": {
+        "schemaVersion": "1.0",
+        "confirmationStatus": "CONFIRMED",
+        "eventType": "FATIGUE",
+        "taskId": "task-museum",
+        "lateMinutes": null,
+        "fatigueLevel": "SEVERE"
+      },
+      "lockedTaskIds": [],
+      "explainDifferences": false
+    }
+  }
+}
