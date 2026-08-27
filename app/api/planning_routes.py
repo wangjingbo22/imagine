@@ -3,6 +3,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request
 from pydantic import ValidationError
 
+from app.api.planning_access import build_planning_access
+from app.application.collaboration_ports import PlanningOperation
 from app.application.planning_boundary_service import PlanningBoundaryService
 from app.core.errors import AppError
 from app.domain.models import ApiResponse
@@ -29,14 +31,6 @@ def get_planning_boundary(request: Request) -> PlanningBoundaryService:
     return service
 
 
-def require_s2_planning_ready(trip_id: UUID, request: Request) -> None:
-    """S1 legacy trips pass through; S2 collaboration trips require organizer proof."""
-    request.app.state.collaboration_service.assert_planning_ready(
-        trip_id,
-        request.headers.get("X-Organizer-Token"),
-    )
-
-
 @router.get(
     "/trips/{trip_id}/planning-facts",
     summary="恢复当前服务端签发的规划事实",
@@ -47,9 +41,11 @@ def require_s2_planning_ready(trip_id: UUID, request: Request) -> None:
 )
 async def get_planning_facts(
     trip_id: UUID,
+    request: Request,
     service: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
-    return ApiResponse(data=service.get_planning_facts(trip_id))
+    access = build_planning_access(request, trip_id, PlanningOperation.GENERATE_V1)
+    return ApiResponse(data=service.get_planning_facts(trip_id, access=access))
 
 
 @router.post(
@@ -65,7 +61,7 @@ async def generate_plan_v1(
     request: Request,
     service: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
-    require_s2_planning_ready(trip_id, request)
+    access = build_planning_access(request, trip_id, PlanningOperation.GENERATE_V1)
     try:
         candidate_request = CandidatePlanRequest.model_validate_json(
             await request.body(),
@@ -73,7 +69,9 @@ async def generate_plan_v1(
         )
     except ValidationError as error:
         raise TripSchemaError(issues_from_pydantic(error.errors())) from error
-    return ApiResponse(data=service.generate_v1(trip_id, candidate_request))
+    return ApiResponse(
+        data=service.generate_v1(trip_id, candidate_request, access=access)
+    )
 
 
 @router.get(
@@ -84,9 +82,11 @@ async def generate_plan_v1(
 async def get_plan_review(
     trip_id: UUID,
     review_id: str,
+    request: Request,
     service: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
-    return ApiResponse(data=service.get_review(trip_id, review_id))
+    access = build_planning_access(request, trip_id, PlanningOperation.CONFIRM_REVIEW)
+    return ApiResponse(data=service.get_review(trip_id, review_id, access=access))
 
 
 @router.post(
@@ -103,6 +103,7 @@ async def confirm_plan_review(
     request: Request,
     service: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
+    access = build_planning_access(request, trip_id, PlanningOperation.CONFIRM_REVIEW)
     try:
         confirmation = CandidateReviewConfirmationRequest.model_validate_json(
             await request.body(),
@@ -111,7 +112,12 @@ async def confirm_plan_review(
     except ValidationError as error:
         raise TripSchemaError(issues_from_pydantic(error.errors())) from error
     return ApiResponse(
-        data=service.confirm_review(trip_id, review_id, confirmation)
+        data=service.confirm_review(
+            trip_id,
+            review_id,
+            confirmation,
+            access=access,
+        )
     )
 
 
@@ -128,7 +134,7 @@ async def generate_plan_v2(
     request: Request,
     service: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
-    require_s2_planning_ready(trip_id, request)
+    access = build_planning_access(request, trip_id, PlanningOperation.GENERATE_V2)
     try:
         replan_request = ReplanGenerationRequest.model_validate_json(
             await request.body(),
@@ -136,7 +142,9 @@ async def generate_plan_v2(
         )
     except ValidationError as error:
         raise TripSchemaError(issues_from_pydantic(error.errors())) from error
-    return ApiResponse(data=service.generate_v2(trip_id, replan_request))
+    return ApiResponse(
+        data=service.generate_v2(trip_id, replan_request, access=access)
+    )
 
 
 @router.post(
@@ -152,7 +160,7 @@ async def generate_plan_v2_from_events(
     request: Request,
     service: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
-    require_s2_planning_ready(trip_id, request)
+    access = build_planning_access(request, trip_id, PlanningOperation.GENERATE_V2)
     try:
         replan_request = EventDrivenReplanRequest.model_validate_json(
             await request.body(),
@@ -160,7 +168,13 @@ async def generate_plan_v2_from_events(
         )
     except ValidationError as error:
         raise TripSchemaError(issues_from_pydantic(error.errors())) from error
-    return ApiResponse(data=service.generate_v2_from_events(trip_id, replan_request))
+    return ApiResponse(
+        data=service.generate_v2_from_events(
+            trip_id,
+            replan_request,
+            access=access,
+        )
+    )
 
 
 __all__ = ["router"]

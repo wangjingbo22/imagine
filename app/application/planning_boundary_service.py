@@ -5,11 +5,17 @@ from copy import deepcopy
 from datetime import datetime
 from hashlib import sha256
 import json
-from typing import Any, Literal
+from typing import Any, ContextManager, Literal
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import ValidationError
 
+from app.application.collaboration_ports import (
+    CollaborationReadinessGuard,
+    PlanningAccess,
+    PlanningOperation,
+    ReadinessPermit,
+)
 from app.application.plan_service import PlanVersionService
 from app.application.workflow_service import WorkflowService
 from app.core.errors import AppError
@@ -99,14 +105,32 @@ class PlanningBoundaryService:
         plan_service: PlanVersionService,
         workflow_service: WorkflowService,
         trust_repository: SqliteTrustedPlanningRepository,
+        readiness_guard: CollaborationReadinessGuard,
         suffix_planner: SuffixPlanner | None = None,
     ) -> None:
         self.plan_service = plan_service
         self.workflow_service = workflow_service
         self.trust_repository = trust_repository
+        self.readiness_guard = readiness_guard
         self.suffix_planner = suffix_planner or DeterministicRetainedSuffixPlanner()
         if not isinstance(self.suffix_planner, SuffixPlanner):
             raise TypeError("suffix_planner must implement SuffixPlanner")
+
+    def _planning_operation(
+        self,
+        *,
+        trip_id: UUID,
+        access: PlanningAccess,
+        expected: PlanningOperation,
+    ) -> ContextManager[ReadinessPermit]:
+        if access.trip_id != trip_id or access.operation is not expected:
+            raise AppError(
+                "PLANNING_ACCESS_INVALID",
+                "规划访问上下文不匹配",
+                409,
+                False,
+            )
+        return self.readiness_guard.operation(access)
 
     @staticmethod
     def _require_trip_id(trip_id: UUID, request: CandidatePlanRequest) -> None:
@@ -216,6 +240,20 @@ class PlanningBoundaryService:
         self,
         trip_id: UUID,
         request: CandidatePlanRequest,
+        *,
+        access: PlanningAccess,
+    ) -> PlanVersion:
+        with self._planning_operation(
+            trip_id=trip_id,
+            access=access,
+            expected=PlanningOperation.GENERATE_V1,
+        ):
+            return self._generate_v1_ready(trip_id, request)
+
+    def _generate_v1_ready(
+        self,
+        trip_id: UUID,
+        request: CandidatePlanRequest,
     ) -> PlanVersion:
         self._require_trip_id(trip_id, request)
         self.workflow_service.require_constraint_confirmed(
@@ -269,7 +307,21 @@ class PlanningBoundaryService:
             raise self._trust_error(error) from error
         return stored
 
-    def get_review(self, trip_id: UUID, review_id: str) -> CandidatePlanReview:
+    def get_review(
+        self,
+        trip_id: UUID,
+        review_id: str,
+        *,
+        access: PlanningAccess,
+    ) -> CandidatePlanReview:
+        with self._planning_operation(
+            trip_id=trip_id,
+            access=access,
+            expected=PlanningOperation.CONFIRM_REVIEW,
+        ):
+            return self._get_review_ready(trip_id, review_id)
+
+    def _get_review_ready(self, trip_id: UUID, review_id: str) -> CandidatePlanReview:
         row = self.trust_repository.get_review(review_id)
         if row is None:
             raise AppError(
@@ -287,6 +339,21 @@ class PlanningBoundaryService:
         return self._review_from_row(row, candidate)
 
     def confirm_review(
+        self,
+        trip_id: UUID,
+        review_id: str,
+        confirmation: CandidateReviewConfirmationRequest,
+        *,
+        access: PlanningAccess,
+    ) -> PlanVersion:
+        with self._planning_operation(
+            trip_id=trip_id,
+            access=access,
+            expected=PlanningOperation.CONFIRM_REVIEW,
+        ):
+            return self._confirm_review_ready(trip_id, review_id, confirmation)
+
+    def _confirm_review_ready(
         self,
         trip_id: UUID,
         review_id: str,
@@ -607,6 +674,20 @@ class PlanningBoundaryService:
         self,
         trip_id: UUID,
         request: EventDrivenReplanRequest,
+        *,
+        access: PlanningAccess,
+    ) -> RegisteredReplan:
+        with self._planning_operation(
+            trip_id=trip_id,
+            access=access,
+            expected=PlanningOperation.GENERATE_V2,
+        ):
+            return self._generate_v2_from_events_ready(trip_id, request)
+
+    def _generate_v2_from_events_ready(
+        self,
+        trip_id: UUID,
+        request: EventDrivenReplanRequest,
     ) -> RegisteredReplan:
         current, events = self._load_current_v1_context(trip_id)
         current_request = self._load_current_candidate_request(trip_id, current)
@@ -625,6 +706,20 @@ class PlanningBoundaryService:
         )
 
     def generate_v2_from_adjustment(
+        self,
+        trip_id: UUID,
+        request: ExecutionAdjustmentReplanRequest,
+        *,
+        access: PlanningAccess,
+    ) -> RegisteredExecutionAdjustmentReplan:
+        with self._planning_operation(
+            trip_id=trip_id,
+            access=access,
+            expected=PlanningOperation.GENERATE_V2,
+        ):
+            return self._generate_v2_from_adjustment_ready(trip_id, request)
+
+    def _generate_v2_from_adjustment_ready(
         self,
         trip_id: UUID,
         request: ExecutionAdjustmentReplanRequest,
@@ -1265,6 +1360,20 @@ class PlanningBoundaryService:
         self,
         trip_id: UUID,
         request: ReplanGenerationRequest,
+        *,
+        access: PlanningAccess,
+    ) -> RegisteredReplan:
+        with self._planning_operation(
+            trip_id=trip_id,
+            access=access,
+            expected=PlanningOperation.GENERATE_V2,
+        ):
+            return self._generate_v2_ready(trip_id, request)
+
+    def _generate_v2_ready(
+        self,
+        trip_id: UUID,
+        request: ReplanGenerationRequest,
     ) -> RegisteredReplan:
         current, events = self._load_current_v1_context(trip_id)
         candidate_inputs = tuple(
@@ -1280,13 +1389,55 @@ class PlanningBoundaryService:
             candidate_inputs=candidate_inputs,
         )
 
-    def require_v1_confirmation(self, trip_id: UUID, plan_id: UUID) -> None:
+    def require_v1_confirmation(
+        self,
+        trip_id: UUID,
+        plan_id: UUID,
+        *,
+        access: PlanningAccess,
+    ) -> None:
+        with self._planning_operation(
+            trip_id=trip_id,
+            access=access,
+            expected=PlanningOperation.PLAN_DECISION,
+        ):
+            self._require_v1_confirmation_ready(trip_id, plan_id)
+
+    def _require_v1_confirmation_ready(self, trip_id: UUID, plan_id: UUID) -> None:
         self._require_issued(trip_id, plan_id, boundary_kind="V1")
 
-    def require_v2_acceptance(self, trip_id: UUID, plan_id: UUID) -> None:
+    def require_v2_acceptance(
+        self,
+        trip_id: UUID,
+        plan_id: UUID,
+        *,
+        access: PlanningAccess,
+    ) -> None:
+        with self._planning_operation(
+            trip_id=trip_id,
+            access=access,
+            expected=PlanningOperation.PLAN_DECISION,
+        ):
+            self._require_v2_acceptance_ready(trip_id, plan_id)
+
+    def _require_v2_acceptance_ready(self, trip_id: UUID, plan_id: UUID) -> None:
         self._require_issued(trip_id, plan_id, boundary_kind="V2")
 
     def require_adjustment_v2_decision(
+        self,
+        trip_id: UUID,
+        plan_id: UUID,
+        *,
+        access: PlanningAccess,
+    ) -> None:
+        with self._planning_operation(
+            trip_id=trip_id,
+            access=access,
+            expected=PlanningOperation.PLAN_DECISION,
+        ):
+            self._require_adjustment_v2_decision_ready(trip_id, plan_id)
+
+    def _require_adjustment_v2_decision_ready(
         self,
         trip_id: UUID,
         plan_id: UUID,
@@ -1349,7 +1500,20 @@ class PlanningBoundaryService:
                 http_status=409,
             )
 
-    def get_planning_facts(self, trip_id: UUID) -> CandidatePlanRequest:
+    def get_planning_facts(
+        self,
+        trip_id: UUID,
+        *,
+        access: PlanningAccess,
+    ) -> CandidatePlanRequest:
+        with self._planning_operation(
+            trip_id=trip_id,
+            access=access,
+            expected=PlanningOperation.GENERATE_V1,
+        ):
+            return self._get_planning_facts_ready(trip_id)
+
+    def _get_planning_facts_ready(self, trip_id: UUID) -> CandidatePlanRequest:
         """Restore facts only for the active server-issued planning lineage."""
 
         state = self.plan_service.get_trip_state(trip_id)

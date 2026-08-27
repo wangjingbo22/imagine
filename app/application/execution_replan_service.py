@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
+from app.application.collaboration_ports import PlanningAccess
 from app.application.plan_service import PlanVersionService
 from app.application.planning_boundary_service import PlanningBoundaryService
 from app.infrastructure.bailian_replan_explanation import ReplanExplanationError
@@ -46,10 +47,13 @@ class ExecutionReplanService:
         self,
         trip_id: UUID,
         request: ExecutionAdjustmentReplanRequest,
+        *,
+        access: PlanningAccess,
     ) -> ExecutionAdjustmentReplanPreview:
         generated = self.planning_service.generate_v2_from_adjustment(
             trip_id,
             request,
+            access=access,
         )
         candidate = generated.replan.plan
         # Candidate and Diff are frozen before any best-effort model call.
@@ -72,9 +76,15 @@ class ExecutionReplanService:
         trip_id: UUID,
         plan_id: UUID,
         request: ExecutionAdjustmentDecisionRequest,
+        *,
+        access: PlanningAccess,
     ) -> ExecutionAdjustmentDecisionView:
         # Both ACCEPT and REJECT require a server-issued V2.
-        self.planning_service.require_adjustment_v2_decision(trip_id, plan_id)
+        self.planning_service.require_adjustment_v2_decision(
+            trip_id,
+            plan_id,
+            access=access,
+        )
         result = (
             self.plan_service.accept_v2(trip_id, plan_id)
             if request.decision is ExecutionAdjustmentDecision.ACCEPT

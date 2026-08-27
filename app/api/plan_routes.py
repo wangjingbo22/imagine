@@ -2,6 +2,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
 
+from app.api.planning_access import build_planning_access
+from app.application.collaboration_ports import PlanningOperation
 from app.application.planning_boundary_service import PlanningBoundaryService
 from app.application.plan_service import PlanVersionService
 from app.core.errors import AppError
@@ -25,12 +27,6 @@ def get_planning_boundary(request: Request) -> PlanningBoundaryService:
             retryable=True,
         )
     return service
-
-
-def require_s2_organizer(trip_id: UUID, request: Request) -> None:
-    request.app.state.collaboration_service.assert_planning_ready(
-        trip_id, request.headers.get("X-Organizer-Token")
-    )
 
 
 @router.post(
@@ -64,8 +60,8 @@ async def confirm_plan_version(
     service: PlanVersionService = Depends(get_plan_service),
     planning: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
-    require_s2_organizer(trip_id, request)
-    planning.require_v1_confirmation(trip_id, plan_id)
+    access = build_planning_access(request, trip_id, PlanningOperation.PLAN_DECISION)
+    planning.require_v1_confirmation(trip_id, plan_id, access=access)
     return ApiResponse(data=service.confirm(trip_id, plan_id))
 
 
@@ -118,8 +114,8 @@ async def accept_plan_v2(
     service: PlanVersionService = Depends(get_plan_service),
     planning: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
-    require_s2_organizer(trip_id, request)
-    planning.require_v2_acceptance(trip_id, plan_id)
+    access = build_planning_access(request, trip_id, PlanningOperation.PLAN_DECISION)
+    planning.require_v2_acceptance(trip_id, plan_id, access=access)
     return ApiResponse(data=service.accept_v2(trip_id, plan_id))
 
 
@@ -135,6 +131,6 @@ async def reject_plan_v2(
     service: PlanVersionService = Depends(get_plan_service),
     planning: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
-    require_s2_organizer(trip_id, request)
-    planning.require_v2_acceptance(trip_id, plan_id)
+    access = build_planning_access(request, trip_id, PlanningOperation.PLAN_DECISION)
+    planning.require_v2_acceptance(trip_id, plan_id, access=access)
     return ApiResponse(data=service.reject_v2(trip_id, plan_id))

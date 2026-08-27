@@ -3,6 +3,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request
 from pydantic import ValidationError
 
+from app.api.planning_access import build_planning_access
+from app.application.collaboration_ports import PlanningOperation
 from app.application.execution_replan_service import ExecutionReplanService
 from app.core.errors import AppError
 from app.domain.models import ApiResponse
@@ -31,13 +33,6 @@ def get_execution_replan_service(request: Request) -> ExecutionReplanService:
     return service
 
 
-def require_organizer(trip_id: UUID, request: Request) -> None:
-    request.app.state.collaboration_service.assert_planning_ready(
-        trip_id,
-        request.headers.get("X-Organizer-Token"),
-    )
-
-
 @router.post(
     "/trips/{trip_id}/replans/from-adjustment",
     summary="从已确认迟到或疲劳事件生成 Plan V2 候选与 Diff",
@@ -51,7 +46,7 @@ async def create_execution_replan_preview(
     request: Request,
     service: ExecutionReplanService = Depends(get_execution_replan_service),
 ) -> ApiResponse:
-    require_organizer(trip_id, request)
+    access = build_planning_access(request, trip_id, PlanningOperation.GENERATE_V2)
     try:
         command = ExecutionAdjustmentReplanRequest.model_validate_json(
             await request.body(),
@@ -59,7 +54,9 @@ async def create_execution_replan_preview(
         )
     except ValidationError as error:
         raise TripSchemaError(issues_from_pydantic(error.errors())) from error
-    return ApiResponse(data=await service.create_preview(trip_id, command))
+    return ApiResponse(
+        data=await service.create_preview(trip_id, command, access=access)
+    )
 
 
 @router.post(
@@ -76,7 +73,7 @@ async def decide_execution_replan(
     request: Request,
     service: ExecutionReplanService = Depends(get_execution_replan_service),
 ) -> ApiResponse:
-    require_organizer(trip_id, request)
+    access = build_planning_access(request, trip_id, PlanningOperation.PLAN_DECISION)
     try:
         command = ExecutionAdjustmentDecisionRequest.model_validate_json(
             await request.body(),
@@ -84,7 +81,9 @@ async def decide_execution_replan(
         )
     except ValidationError as error:
         raise TripSchemaError(issues_from_pydantic(error.errors())) from error
-    return ApiResponse(data=service.decide(trip_id, plan_id, command))
+    return ApiResponse(
+        data=service.decide(trip_id, plan_id, command, access=access)
+    )
 
 
 __all__ = ["router"]

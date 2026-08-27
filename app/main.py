@@ -256,9 +256,14 @@ def create_app(
             workflow_service=workflow_service,
         )
 
+    planning_database_path = getattr(
+        getattr(plan_service, "repository", None),
+        "database_path",
+        resolved_settings.plan_version_db_path,
+    )
     resolved_collaboration_repository = (
         collaboration_repository
-        or SqliteCollaborationRepository(resolved_settings.plan_version_db_path)
+        or SqliteCollaborationRepository(planning_database_path)
     )
     resolved_revision_port = (
         trip_draft_revision_port or UnavailableTripDraftRevisionPort()
@@ -271,7 +276,7 @@ def create_app(
     resolved_readiness_guard = (
         collaboration_readiness_guard
         or SqliteCollaborationReadinessGuard(
-            database_path=resolved_settings.plan_version_db_path,
+            database_path=planning_database_path,
             repository=resolved_collaboration_repository,
             collaboration=collaboration_service,
             provider_timeout_seconds=resolved_settings.amap_request_timeout_seconds,
@@ -283,17 +288,13 @@ def create_app(
         plan_service,
         PlanVersionService,
     ):
-        planning_database_path = getattr(
-            plan_service.repository,
-            "database_path",
-            resolved_settings.plan_version_db_path,
-        )
         planning_boundary_service = PlanningBoundaryService(
             plan_service=plan_service,
             workflow_service=workflow_service,
             trust_repository=SqliteTrustedPlanningRepository(
                 planning_database_path
             ),
+            readiness_guard=resolved_readiness_guard,
             suffix_planner=suffix_planner,
         )
 

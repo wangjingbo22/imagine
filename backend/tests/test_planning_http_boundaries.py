@@ -162,7 +162,7 @@ async def test_v1_generation_requires_an_authoritative_confirmed_trip(
         )
 
     assert response.status_code == 409
-    assert response.json()["code"] == "TRIP_NOT_CONFIRMED"
+    assert response.json()["code"] == "TRIP_FLOW_SCOPE_UNKNOWN"
     with sqlite3.connect(database_path) as connection:
         assert connection.execute(
             "SELECT COUNT(*) FROM plan_versions"
@@ -786,8 +786,8 @@ async def test_planning_facts_survive_app_rebuild_and_raw_plan_cannot_read_them(
         )
     assert registered.status_code == 403, registered.text
     assert registered.json()["code"] == "PLAN_VERSION_DIRECT_REGISTRATION_FORBIDDEN"
-    assert blocked.status_code == 404
-    assert blocked.json()["code"] == "TRIP_NOT_FOUND"
+    assert blocked.status_code == 409
+    assert blocked.json()["code"] == "TRIP_FLOW_SCOPE_UNKNOWN"
 
 
 @pytest.mark.asyncio
