@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 from uuid import UUID
 
 from app.application.collaboration_ports import CanonicalRevisionPatch
 from app.domain.collaboration import ConversationSubmission
 from app.domain.trip_draft import TripUnderstandingProposal
+
+
+UNDERSTANDING_FIXTURES = Path(__file__).parent / "fixtures" / "trip_understanding"
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,3 +55,42 @@ class FakeTripDraftRevisionPort:
     ) -> FakeRevision:
         self.relaxation_calls += 1
         return self.current
+
+
+def load_revision(name: str = "two_participants.json") -> FakeRevision:
+    proposal = TripUnderstandingProposal.model_validate_json(
+        (UNDERSTANDING_FIXTURES / name).read_text(encoding="utf-8"),
+        strict=True,
+    )
+    bindings = {
+        participant.member_key: UUID(f"10000000-0000-4000-8000-{index:012d}")
+        for index, participant in enumerate(proposal.participants, start=1)
+    }
+    return FakeRevision(
+        draft_id=UUID("20000000-0000-4000-8000-000000000001"),
+        revision=1,
+        trip_id=UUID("30000000-0000-4000-8000-000000000001"),
+        understanding=proposal,
+        member_bindings=bindings,
+        source_digest="a" * 64,
+    )
+
+
+def revision_with_trip_budget(revision: FakeRevision, cents: int) -> FakeRevision:
+    trip = revision.understanding.trip.model_copy(update={"budget_cents": cents})
+    proposal = revision.understanding.model_copy(update={"trip": trip})
+    return replace(revision, understanding=proposal)
+
+
+def revision_with_member_budget(
+    revision: FakeRevision,
+    member_key: str,
+    cents: int,
+) -> FakeRevision:
+    participants = [
+        item.model_copy(update={"budget_cap_cents": cents})
+        if item.member_key == member_key else item
+        for item in revision.understanding.participants
+    ]
+    proposal = revision.understanding.model_copy(update={"participants": participants})
+    return replace(revision, understanding=proposal)
