@@ -545,6 +545,8 @@ class CollaborationService:
             stored = self.repository.get_stored(trip_id)
             if stored.version != request.expected_version:
                 raise AppError("COLLABORATION_VERSION_STALE", "协作版本已经变化", 409, False)
+            if stored.current_revision != request.base_revision:
+                raise AppError("DRAFT_REVISION_STALE", "Draft revision is stale", 409, False)
             revision = self._current(trip_id)
             aggregate = self._derive(revision, stored)
             issue = next((item for item in aggregate.confirmation_items if item.item_id == item_id), None)
@@ -553,6 +555,11 @@ class CollaborationService:
             option = next((item for item in issue.relaxations if item.relaxation_id == request.relaxation_id), None)
             if option is None:
                 raise AppError("CONFIRMATION_ITEM_STALE", "Confirmation item is stale", 409, False)
+            if organizer:
+                if option.actor_scope is not ActorScope.ORGANIZER:
+                    raise AppError("RELAXATION_PERMISSION_DENIED", "Relaxation permission denied", 403, False)
+            elif option.actor_scope is not ActorScope.PARTICIPANT or option.participant_id != actor.participant_id:
+                raise AppError("RELAXATION_PERMISSION_DENIED", "Relaxation permission denied", 403, False)
             self.repository.begin_idempotent_operation(
                 actor_scope=actor_scope,
                 actor_id=actor_id,

@@ -486,3 +486,145 @@ def test_missing_relaxation_is_stale_without_idempotency_write(tmp_path) -> None
             "WHERE operation='RESOLVE_CONFIRMATION' AND idempotency_key=?",
             ("resolve-missing-option-1",),
         ).fetchone()[0] == 0
+
+
+def test_stale_base_revision_rejects_before_idempotency_and_t002(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    conflict = revision_with_trip_budget(harness.revision, 45_000)
+    revision2 = replace(conflict, revision=2, source_digest="b" * 64)
+    harness.repository.advance_revision(
+        trip_id=harness.revision.trip_id,
+        before_revision=1,
+        after_revision=2,
+        expected_version=3,
+        actor_scope="ORGANIZER",
+        actor_id=str(harness.revision.member_bindings["member-1"]),
+        idempotency_key="d014-prep-advance-1",
+    )
+    revisions = FakeTripDraftRevisionPort(revision2)
+    service = CollaborationService(
+        repository=harness.repository,
+        revisions=revisions,
+        evaluator=DeterministicHardConflictEvaluator(),
+    )
+    state = service.organizer_state(harness.revision.trip_id, harness.organizer_token)
+    issue = next(item for item in state.confirmation_items if item.code is IssueCode.CONFLICT)
+    option = next(item for item in issue.relaxations if item.actor_scope.value == "ORGANIZER")
+    request = ResolveConfirmationItemRequest(
+        schemaVersion="1.0",
+        baseRevision=1,
+        expectedVersion=4,
+        relaxationId=option.relaxation_id,
+    )
+
+    with pytest.raises(AppError) as captured:
+        service.resolve_organizer_issue(
+            trip_id=harness.revision.trip_id,
+            item_id=issue.item_id,
+            request=request,
+            organizer_token=harness.organizer_token,
+            idempotency_key="d014-stale-base-1",
+        )
+
+    assert captured.value.code == "DRAFT_REVISION_STALE"
+    assert captured.value.http_status == 409
+    assert revisions.relaxation_calls == 0
+    with harness.repository._connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM collaboration_idempotency "
+            "WHERE operation='RESOLVE_CONFIRMATION' AND idempotency_key=?",
+            ("d014-stale-base-1",),
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM collaboration_resolution_audit"
+        ).fetchone()[0] == 0
+        session = connection.execute(
+            "SELECT current_revision, version FROM collaboration_sessions WHERE trip_id=?",
+            (str(harness.revision.trip_id),),
+        ).fetchone()
+    assert (session["current_revision"], session["version"]) == (2, 4)
+
+
+def test_actor_scope_rejects_before_idempotency_and_t002(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    conflict = revision_with_trip_budget(harness.revision, 45_000)
+    revisions = FakeTripDraftRevisionPort(conflict)
+    service = CollaborationService(
+        repository=harness.repository,
+        revisions=revisions,
+        evaluator=DeterministicHardConflictEvaluator(),
+    )
+    state = service.organizer_state(harness.revision.trip_id, harness.organizer_token)
+    issue = next(item for item in state.confirmation_items if item.code is IssueCode.CONFLICT)
+    organizer_option = next(
+        item for item in issue.relaxations if item.actor_scope.value == "ORGANIZER"
+    )
+    participant_option = next(
+        item for item in issue.relaxations if item.actor_scope.value == "PARTICIPANT"
+    )
+    invitation = harness.repository.create_invitation(
+        trip_id=harness.revision.trip_id,
+        participant_id=harness.revision.member_bindings["member-2"],
+        organizer_token=harness.organizer_token,
+        expected_version=3,
+        idempotency_key="d015-scope-invite-1",
+    )
+    redeemed = harness.repository.redeem_invitation(
+        invitation.invitation_url.split("=", 1)[1],
+        "d015-scope-redeem-1",
+    )
+    assert redeemed.participant_session_token is not None
+    request = ResolveConfirmationItemRequest(
+        schemaVersion="1.0",
+        baseRevision=1,
+        expectedVersion=4,
+        relaxationId=organizer_option.relaxation_id,
+    )
+    participant_request = request.model_copy(
+        update={"relaxation_id": participant_option.relaxation_id}
+    )
+
+    def snapshot() -> tuple[tuple[object, ...], int]:
+        with harness.repository._connect() as connection:
+            session = tuple(
+                connection.execute(
+                    "SELECT current_revision, version FROM collaboration_sessions WHERE trip_id=?",
+                    (str(harness.revision.trip_id),),
+                ).fetchone()
+            )
+            audit_count = connection.execute(
+                "SELECT COUNT(*) FROM collaboration_resolution_audit"
+            ).fetchone()[0]
+        return session, audit_count
+
+    before = snapshot()
+    with pytest.raises(AppError) as member_error:
+        service.resolve_member_issue(
+            session_token=redeemed.participant_session_token,
+            item_id=issue.item_id,
+            request=request,
+            idempotency_key="d015-member-denied-1",
+        )
+    with pytest.raises(AppError) as organizer_error:
+        service.resolve_organizer_issue(
+            trip_id=harness.revision.trip_id,
+            item_id=issue.item_id,
+            request=participant_request,
+            organizer_token=harness.organizer_token,
+            idempotency_key="d015-organizer-denied-1",
+        )
+    after = snapshot()
+
+    assert member_error.value.code == "RELAXATION_PERMISSION_DENIED"
+    assert member_error.value.http_status == 403
+    assert organizer_error.value.code == "RELAXATION_PERMISSION_DENIED"
+    assert organizer_error.value.http_status == 403
+    assert revisions.relaxation_calls == 0
+    assert before == after
+    with harness.repository._connect() as connection:
+        for key in ("d015-member-denied-1", "d015-organizer-denied-1"):
+            assert connection.execute(
+                "SELECT COUNT(*) FROM collaboration_idempotency "
+                "WHERE operation='RESOLVE_CONFIRMATION' AND idempotency_key=?",
+                (key,),
+            ).fetchone()[0] == 0
