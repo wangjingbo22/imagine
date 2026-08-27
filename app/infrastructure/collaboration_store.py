@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Callable
 from uuid import UUID, uuid4
 
+from app.application.collaboration_ports import PlanningAccess, PlanningOperation, ReadinessPermit
 from app.application.collaboration_ports import TripDraftRevisionView
-from app.application.collaboration_ports import PlanningAccess, ReadinessPermit
 from app.domain.collaboration import (
     InvitationCreated,
     InvitationRedeemed,
@@ -261,6 +261,27 @@ class SqliteCollaborationRepository:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                existing = connection.execute(
+                    "SELECT trip_id, readiness_digest, operation, expires_at "
+                    "FROM collaboration_operation_leases WHERE operation_id=?",
+                    (access.operation_id,),
+                ).fetchone()
+                if existing is not None:
+                    if (
+                        existing["trip_id"] != str(access.trip_id)
+                        or existing["readiness_digest"] != readiness_digest
+                        or existing["operation"] != access.operation.value
+                    ):
+                        raise CollaborationStoreError("COLLABORATION_OPERATION_STALE")
+                    connection.execute("COMMIT")
+                    return ReadinessPermit(
+                        trip_id=UUID(existing["trip_id"]),
+                        readiness_digest=existing["readiness_digest"],
+                        operation_id=access.operation_id,
+                        operation=PlanningOperation(existing["operation"]),
+                        flow_kind=TripFlowKind.COLLABORATION_V2,
+                        expires_at=datetime.fromisoformat(existing["expires_at"]),
+                    )
                 self._assert_mutation_allowed_connection(connection, access.trip_id, now)
                 connection.execute(
                     """INSERT INTO collaboration_operation_leases

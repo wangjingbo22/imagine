@@ -148,3 +148,36 @@ def test_source_digest_change_invalidates_ready_guard_before_body(tmp_path) -> N
 
     assert captured.value.code == "COLLABORATION_NOT_READY"
     assert calls == 0
+
+
+def test_same_operation_lease_retry_is_stable_and_digest_reuse_is_stale(tmp_path) -> None:
+    from app.infrastructure.collaboration_store import SqliteCollaborationRepository
+
+    repository = SqliteCollaborationRepository(tmp_path / "leases.sqlite3")
+    access = _access()
+    first = repository.acquire_lease(
+        access=access,
+        readiness_digest="a" * 64,
+        ttl=timedelta(minutes=1),
+    )
+
+    retry = repository.acquire_lease(
+        access=access,
+        readiness_digest="a" * 64,
+        ttl=timedelta(minutes=1),
+    )
+    assert retry == first
+
+    with pytest.raises(CollaborationStoreError, match="COLLABORATION_OPERATION_STALE"):
+        repository.acquire_lease(
+            access=access,
+            readiness_digest="b" * 64,
+            ttl=timedelta(minutes=1),
+        )
+
+    repository.complete_lease(access.operation_id)
+    assert repository.acquire_lease(
+        access=access,
+        readiness_digest="a" * 64,
+        ttl=timedelta(minutes=1),
+    ) == first
