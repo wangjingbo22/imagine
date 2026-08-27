@@ -4,6 +4,8 @@ from datetime import time
 from unicodedata import normalize
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from app.application.collaboration_ports import TripDraftRevisionView
 from app.domain.collaboration import (
     ActorScope,
@@ -14,6 +16,18 @@ from app.domain.collaboration import (
     RelaxationOption,
 )
 from app.domain.collaboration_digest import POLICY_VERSION, canonical_sha256
+from app.domain.trip_draft import CareDraft
+from app.schemas.assistance import create_assistance_profile
+from app.schemas.trip import AssistanceProfile, AssistanceType, NapWindow
+from app.services.assistance_constraints.compiler import (
+    AssistanceConstraintCompileError,
+    FIELD_NAP_WINDOW,
+)
+from app.services.planning.group_constraints import (
+    GroupConstraintMergeError,
+    GroupConstraintMergeResult,
+    merge_group_constraints,
+)
 
 
 def _stable_id(prefix: str, payload: object) -> str:
@@ -85,6 +99,60 @@ def _issue(
     )
 
 
+def assistance_profile_from_care(care: CareDraft) -> AssistanceProfile:
+    if care.assistance_type_hint is None:
+        raise ValueError("assistanceTypeHint must be confirmed")
+    preset = create_assistance_profile(AssistanceType(care.assistance_type_hint))
+    walk = preset.walk_limits.model_copy(update={
+        "max_continuous_meters": (
+            care.walk_limits.max_continuous_meters
+            if care.walk_limits.max_continuous_meters is not None
+            else preset.walk_limits.max_continuous_meters
+        ),
+        "max_daily_meters": (
+            care.walk_limits.max_daily_meters
+            if care.walk_limits.max_daily_meters is not None
+            else preset.walk_limits.max_daily_meters
+        ),
+    })
+    nap = preset.nap_window
+    if care.nap_window is not None and care.nap_window.start and care.nap_window.end:
+        nap = NapWindow(
+            start=time.fromisoformat(care.nap_window.start),
+            end=time.fromisoformat(care.nap_window.end),
+        )
+    candidate = preset.model_copy(update={
+        "child_age": care.child_age if care.child_age is not None else preset.child_age,
+        "walk_limits": walk,
+        "max_transfers": care.max_transfers if care.max_transfers is not None else preset.max_transfers,
+        "rest_interval": (
+            care.rest_interval_minutes
+            if care.rest_interval_minutes is not None
+            else preset.rest_interval
+        ),
+        "nap_window": nap,
+        "avoid_stairs": care.avoid_stairs if care.avoid_stairs is not None else preset.avoid_stairs,
+    })
+    return AssistanceProfile.model_validate_json(
+        candidate.model_dump_json(by_alias=True),
+        strict=True,
+    )
+
+
+def merged_constraints_for_revision(
+    revision: TripDraftRevisionView,
+) -> GroupConstraintMergeResult:
+    participants: list[tuple[UUID, AssistanceProfile]] = []
+    for participant in revision.understanding.participants:
+        if participant.care_draft is None:
+            continue
+        participants.append((
+            revision.member_bindings[participant.member_key],
+            assistance_profile_from_care(participant.care_draft),
+        ))
+    return merge_group_constraints(tuple(participants))
+
+
 BASE_RULES = {
     "binding": "S2T003.BINDING.INVALID",
     "missing": "S2T003.FIELD.REQUIRED",
@@ -124,6 +192,74 @@ class DeterministicHardConflictEvaluator:
         self,
         revision: TripDraftRevisionView,
     ) -> tuple[CollaborationIssue, ...]:
+        profiles: list[tuple[UUID, AssistanceProfile]] = []
+        issues: list[CollaborationIssue] = []
+        for index, participant in enumerate(revision.understanding.participants):
+            owner = revision.member_bindings[participant.member_key]
+            path = f"participants[{index}].careDraft.assistanceTypeHint"
+            if participant.care_draft is None:
+                issues.append(_issue(
+                    field_path=path,
+                    participant_id=owner,
+                    related=(),
+                    rule_id="S2T003.CARE.PROFILE_INVALID",
+                    code=IssueCode.INVALID,
+                    reason="成员必须明确确认关怀模式",
+                    operands={"memberKey": participant.member_key, "careDraft": None},
+                ))
+                continue
+            try:
+                profiles.append((owner, assistance_profile_from_care(participant.care_draft)))
+            except (ValueError, ValidationError, AssistanceConstraintCompileError) as error:
+                issues.append(_issue(
+                    field_path=path,
+                    participant_id=owner,
+                    related=(),
+                    rule_id="S2T003.CARE.PROFILE_INVALID",
+                    code=IssueCode.INVALID,
+                    reason="已确认的关怀资料无法构建严格 AssistanceProfile",
+                    operands={"memberKey": participant.member_key, "error": type(error).__name__},
+                ))
+        if issues:
+            return tuple(issues)
+        try:
+            merged = merge_group_constraints(tuple(profiles))
+        except GroupConstraintMergeError as error:
+            primary, *related = error.participant_ids
+            return (_issue(
+                field_path="participants",
+                participant_id=primary,
+                related=tuple(related),
+                rule_id="S2T003.CARE.CONSTRAINT_MERGE_UNSUPPORTED",
+                code=IssueCode.CONFLICT,
+                reason=f"关怀硬约束 {error.field} 无法确定性合并",
+                operands={"field": error.field, "participants": [str(value) for value in error.participant_ids]},
+            ),)
+        nap = next((item for item in merged.constraints if item.field == FIELD_NAP_WINDOW), None)
+        trip = revision.understanding.trip
+        if (
+            nap is not None
+            and trip.start_time is not None
+            and trip.end_time is not None
+            and _time(nap.value["start"]) <= _time(trip.start_time)
+            and _time(nap.value["end"]) >= _time(trip.end_time)
+        ):
+            key = "napWindow|BLOCK|DAY|HARD"
+            contributors = merged.contributors[key]
+            primary, *related = contributors
+            return (_issue(
+                field_path="trip.endTime",
+                participant_id=primary,
+                related=tuple(related),
+                rule_id="S2T003.TIME.BLOCKS_ALL_DAY",
+                code=IssueCode.CONFLICT,
+                reason="合并后的硬休息窗口覆盖全部可用出行时间",
+                operands={"trip": [trip.start_time, trip.end_time], "nap": nap.value},
+                relaxation_specs=(
+                    (RelaxationAction.EXTEND_SHARED_TIME, ActorScope.ORGANIZER, None,
+                     "trip.endTime", None, "由组织者扩展共享出行时间"),
+                ),
+            ),)
         return ()
 
     def _binding_issues(
