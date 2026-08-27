@@ -488,6 +488,7 @@ class CollaborationService:
         actor: CollaborationActor,
         idempotency_key: str,
         organizer: bool,
+        view_token: str | None,
     ) -> CollaborationAggregate | MemberSessionView | None:
         actor_scope = "ORGANIZER" if organizer else "PARTICIPANT"
         actor_id = str(actor.participant_id)
@@ -626,8 +627,8 @@ class CollaborationService:
         except CollaborationStoreError as error:
             raise self._store_error(error) from error
         if organizer:
-            return self.organizer_state(trip_id, None)  # pragma: no cover - replaced below
-        return self.member_view(None)  # pragma: no cover - replaced below
+            return self.organizer_state(trip_id, view_token)
+        return self.member_view(view_token)
 
     def resolve_member_issue(
         self,
@@ -639,14 +640,17 @@ class CollaborationService:
     ) -> MemberSessionView:
         try:
             actor = self.repository.authenticate_participant(session_token)
-            self._resolve(
+            result = self._resolve(
                 trip_id=actor.trip_id,
                 item_id=item_id,
                 request=request,
                 actor=actor,
                 idempotency_key=idempotency_key,
                 organizer=False,
+                view_token=session_token,
             )
+            if result is not None:
+                return result
             return self.member_view(session_token)
         except AppError:
             raise
@@ -668,14 +672,17 @@ class CollaborationService:
             raise self._store_error(error) from error
         if actor.trip_id != trip_id:
             raise AppError("ORGANIZER_PERMISSION_REQUIRED", "组织者权限不足", 403, False)
-        self._resolve(
+        result = self._resolve(
             trip_id=trip_id,
             item_id=item_id,
             request=request,
             actor=actor,
             idempotency_key=idempotency_key,
             organizer=True,
+            view_token=organizer_token,
         )
+        if result is not None:
+            return result
         return self.organizer_state(trip_id, organizer_token)
 
     def revoke_invitation(

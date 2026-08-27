@@ -5,7 +5,10 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.application.collaboration_ports import UnavailableTripDraftRevisionPort
+from app.application.collaboration_ports import (
+    TripDraftRevisionUnavailable,
+    UnavailableTripDraftRevisionPort,
+)
 from app.application.collaboration_service import CollaborationService
 from app.core.errors import AppError
 from app.domain.collaboration import (
@@ -251,6 +254,19 @@ class _AdvancingRevisionPort(FakeTripDraftRevisionPort):
         return self.current
 
 
+class _FailOnceAdvancingRevisionPort(_AdvancingRevisionPort):
+    def __init__(self, revision):
+        super().__init__(revision)
+        self.fail_next = True
+
+    def apply_relaxation(self, **kwargs):
+        if self.fail_next:
+            self.fail_next = False
+            self.relaxation_calls += 1
+            raise TripDraftRevisionUnavailable("injected apply failure")
+        return super().apply_relaxation(**kwargs)
+
+
 def test_resolution_retries_audit_after_revision_advance(tmp_path, monkeypatch) -> None:
     harness = _ready_harness(tmp_path)
     conflict = revision_with_trip_budget(harness.revision, 45_000)
@@ -305,6 +321,175 @@ def test_resolution_retries_audit_after_revision_advance(tmp_path, monkeypatch) 
         assert connection.execute(
             "SELECT COUNT(*) FROM collaboration_resolution_audit"
         ).fetchone()[0] == 1
+
+
+def test_first_organizer_resolution_returns_latest_state_and_stable_replay(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    conflict = revision_with_trip_budget(harness.revision, 45_000)
+    revisions = _AdvancingRevisionPort(conflict)
+    service = CollaborationService(
+        repository=harness.repository,
+        revisions=revisions,
+        evaluator=DeterministicHardConflictEvaluator(),
+    )
+    state = service.organizer_state(harness.revision.trip_id, harness.organizer_token)
+    issue = next(item for item in state.confirmation_items if item.code is IssueCode.CONFLICT)
+    option = next(item for item in issue.relaxations if item.actor_scope.value == "ORGANIZER")
+    request = ResolveConfirmationItemRequest(
+        schemaVersion="1.0",
+        baseRevision=1,
+        expectedVersion=3,
+        relaxationId=option.relaxation_id,
+    )
+
+    result = service.resolve_organizer_issue(
+        trip_id=harness.revision.trip_id,
+        item_id=issue.item_id,
+        request=request,
+        organizer_token=harness.organizer_token,
+        idempotency_key="d016-organizer-resolution-1",
+    )
+    replay = service.resolve_organizer_issue(
+        trip_id=harness.revision.trip_id,
+        item_id=issue.item_id,
+        request=request,
+        organizer_token=harness.organizer_token,
+        idempotency_key="d016-organizer-resolution-1",
+    )
+
+    assert result.current_revision == 2
+    assert result.collaboration_version == 4
+    assert result.model_dump(mode="json", by_alias=True) == replay.model_dump(
+        mode="json", by_alias=True
+    )
+    assert revisions.relaxation_calls == 1
+    with harness.repository._connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM collaboration_resolution_audit"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM collaboration_idempotency "
+            "WHERE operation='RESOLVE_CONFIRMATION' AND idempotency_key=?",
+            ("d016-organizer-resolution-1",),
+        ).fetchone()[0] == 1
+
+
+def test_first_member_resolution_returns_latest_view_and_stable_replay(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    conflict = revision_with_trip_budget(harness.revision, 45_000)
+    revisions = _AdvancingRevisionPort(conflict)
+    service = CollaborationService(
+        repository=harness.repository,
+        revisions=revisions,
+        evaluator=DeterministicHardConflictEvaluator(),
+    )
+    state = service.organizer_state(harness.revision.trip_id, harness.organizer_token)
+    issue = next(item for item in state.confirmation_items if item.code is IssueCode.CONFLICT)
+    option = next(
+        item
+        for item in issue.relaxations
+        if item.actor_scope.value == "PARTICIPANT"
+        and item.participant_id == harness.revision.member_bindings["member-2"]
+    )
+    invitation = harness.repository.create_invitation(
+        trip_id=harness.revision.trip_id,
+        participant_id=harness.revision.member_bindings["member-2"],
+        organizer_token=harness.organizer_token,
+        expected_version=3,
+        idempotency_key="d016-member-invite-1",
+    )
+    redeemed = harness.repository.redeem_invitation(
+        invitation.invitation_url.split("=", 1)[1],
+        "d016-member-redeem-1",
+    )
+    assert redeemed.participant_session_token is not None
+    request = ResolveConfirmationItemRequest(
+        schemaVersion="1.0",
+        baseRevision=1,
+        expectedVersion=4,
+        relaxationId=option.relaxation_id,
+    )
+
+    result = service.resolve_member_issue(
+        session_token=redeemed.participant_session_token,
+        item_id=issue.item_id,
+        request=request,
+        idempotency_key="d016-member-resolution-1",
+    )
+    replay = service.resolve_member_issue(
+        session_token=redeemed.participant_session_token,
+        item_id=issue.item_id,
+        request=request,
+        idempotency_key="d016-member-resolution-1",
+    )
+
+    assert result.current_revision == 2
+    assert result.model_dump(mode="json", by_alias=True) == replay.model_dump(
+        mode="json", by_alias=True
+    )
+    assert revisions.relaxation_calls == 1
+    with harness.repository._connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM collaboration_resolution_audit"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM collaboration_idempotency "
+            "WHERE operation='RESOLVE_CONFIRMATION' AND idempotency_key=?",
+            ("d016-member-resolution-1",),
+        ).fetchone()[0] == 1
+
+
+def test_t002_apply_failure_recovery_returns_latest_state(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    conflict = revision_with_trip_budget(harness.revision, 45_000)
+    revisions = _FailOnceAdvancingRevisionPort(conflict)
+    service = CollaborationService(
+        repository=harness.repository,
+        revisions=revisions,
+        evaluator=DeterministicHardConflictEvaluator(),
+    )
+    state = service.organizer_state(harness.revision.trip_id, harness.organizer_token)
+    issue = next(item for item in state.confirmation_items if item.code is IssueCode.CONFLICT)
+    option = next(item for item in issue.relaxations if item.actor_scope.value == "ORGANIZER")
+    request = ResolveConfirmationItemRequest(
+        schemaVersion="1.0",
+        baseRevision=1,
+        expectedVersion=3,
+        relaxationId=option.relaxation_id,
+    )
+
+    with pytest.raises(AppError) as captured:
+        service.resolve_organizer_issue(
+            trip_id=harness.revision.trip_id,
+            item_id=issue.item_id,
+            request=request,
+            organizer_token=harness.organizer_token,
+            idempotency_key="d016-recovery-1",
+        )
+    assert captured.value.code == "TRIP_DRAFT_REVISION_UNAVAILABLE"
+
+    result = service.resolve_organizer_issue(
+        trip_id=harness.revision.trip_id,
+        item_id=issue.item_id,
+        request=request,
+        organizer_token=harness.organizer_token,
+        idempotency_key="d016-recovery-1",
+    )
+
+    assert result.current_revision == 2
+    assert result.collaboration_version == 4
+    assert revisions.relaxation_calls == 2
+    with harness.repository._connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM collaboration_resolution_audit"
+        ).fetchone()[0] == 1
+        row = connection.execute(
+            "SELECT result_json, completed_at FROM collaboration_idempotency "
+            "WHERE operation='RESOLVE_CONFIRMATION' AND idempotency_key=?",
+            ("d016-recovery-1",),
+        ).fetchone()
+    assert row[0] is not None
+    assert row[1] is not None
 
 
 def test_expired_member_session_uses_required_error_code(tmp_path) -> None:
