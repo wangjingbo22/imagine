@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.api.arrival_decision_routes import router as arrival_decision_router
 from app.api.arrival_evidence_routes import router as arrival_evidence_router
+from app.api.arrival_execution_routes import router as arrival_execution_router
 from app.api.routes import router
 from app.api.execution_adjustment_routes import router as execution_adjustment_router
 from app.api.execution_replan_routes import router as execution_replan_router
@@ -19,8 +20,10 @@ from app.api.workflow_routes import router as workflow_router
 from app.api.collaboration_routes import router as collaboration_router
 from app.api.recommendation_routes import router as recommendation_router
 from app.api.media_routes import router as media_router
+from app.api.memory_timeline_routes import router as memory_timeline_router
 from app.application.arrival_decision_service import ArrivalDecisionService
 from app.application.arrival_evidence_service import ArrivalEvidenceService
+from app.application.arrival_execution_service import ArrivalExecutionService
 from app.application.collaboration_service import CollaborationService
 from app.application.amap_service import AmapLocationService
 from app.application.llm_gateway import (
@@ -45,6 +48,7 @@ from app.infrastructure.amap import AmapClient
 from app.infrastructure.arrival_evidence_store import (
     SqliteArrivalEvidenceRepository,
 )
+from app.application.memory_timeline_service import MemoryTimelineService
 from app.infrastructure.bailian import BailianTripDraftExtractor
 from app.infrastructure.bailian_execution_event import BailianExecutionEventExtractor
 from app.infrastructure.bailian_replan_explanation import (
@@ -55,6 +59,7 @@ from app.infrastructure.openai_compatible_llm import (
     OpenAiCompatibleCandidateSelectionClient,
 )
 from app.infrastructure.collaboration_store import SqliteCollaborationRepository
+from app.infrastructure.memory_media_reader import SqliteMemoryMediaReader
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.infrastructure.trusted_planning_store import SqliteTrustedPlanningRepository
 from app.infrastructure.workflow_store import SqliteWorkflowRepository
@@ -380,6 +385,10 @@ def create_app(
         arrival_decision_service
         or ArrivalDecisionService(app.state.arrival_evidence_service)
     )
+    app.state.arrival_execution_service = ArrivalExecutionService(
+        app.state.arrival_decision_service,
+        workflow_service,
+    )
     app.state.collaboration_service = CollaborationService(
         SqliteCollaborationRepository(resolved_settings.plan_version_db_path),
         app.state.trip_draft_service,
@@ -387,10 +396,18 @@ def create_app(
     )
     app.state.plan_version_service = plan_service
     app.state.workflow_service = workflow_service
+    app.state.memory_timeline_service = MemoryTimelineService(
+        workflow_service=workflow_service,
+        plan_service=plan_service,
+        media_reader=SqliteMemoryMediaReader(
+            resolved_settings.plan_version_db_path
+        ),
+    )
     app.state.planning_boundary_service = planning_boundary_service
     app.state.recommendation_service = recommendation_service
     app.include_router(arrival_decision_router)
     app.include_router(arrival_evidence_router)
+    app.include_router(arrival_execution_router)
     app.include_router(router)
     app.include_router(execution_adjustment_router)
     app.include_router(execution_replan_router)
@@ -400,6 +417,7 @@ def create_app(
     app.include_router(collaboration_router)
     app.include_router(recommendation_router)
     app.include_router(media_router)
+    app.include_router(memory_timeline_router)
     app.include_router(workflow_router)
 
     @app.get("/health", tags=["系统"], summary="健康检查")

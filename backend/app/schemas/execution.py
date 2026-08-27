@@ -4,8 +4,10 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field, StrictInt, UUID4, model_validator
+from pydantic import ConfigDict, Field, StrictFloat, StrictInt, UUID4, model_validator
 
+from .arrival_decision import ArrivalDecisionResult
+from .arrival_evidence import LocationEvidenceSource
 from .trip import ContractModel
 
 
@@ -14,6 +16,15 @@ class ExecutionEventType(str, Enum):
     COMPLETE = "COMPLETE"
     SKIP = "SKIP"
     EXPENSE = "EXPENSE"
+
+
+class ArrivalEvidenceSnapshot(ContractModel):
+    evidence_id: UUID4
+    distance_meters: Annotated[StrictFloat, Field(ge=0)]
+    accuracy: Annotated[StrictFloat, Field(gt=0)]
+    result: Literal[ArrivalDecisionResult.ARRIVED]
+    source: LocationEvidenceSource
+    reason_code: Literal["WITHIN_ARRIVAL_THRESHOLD"]
 
 
 class CreateExecutionEvent(ContractModel):
@@ -46,6 +57,16 @@ class CreateExecutionEvent(ContractModel):
         return self
 
 
+class CreateArrivalExecutionEvent(CreateExecutionEvent):
+    arrival_evidence: ArrivalEvidenceSnapshot
+
+    @model_validator(mode="after")
+    def validate_arrival_completion(self) -> "CreateArrivalExecutionEvent":
+        if self.event_type is not ExecutionEventType.COMPLETE:
+            raise ValueError("arrivalEvidence requires COMPLETE eventType")
+        return self
+
+
 class ExecutionEvent(ContractModel):
     schema_version: Literal["1.0"] = "1.0"
     event_id: UUID4
@@ -54,6 +75,7 @@ class ExecutionEvent(ContractModel):
     plan_version_id: UUID4
     event_type: ExecutionEventType
     amount_cents: int | None = None
+    arrival_evidence: ArrivalEvidenceSnapshot | None = None
     idempotency_key: str
     occurred_at: datetime
 
@@ -69,6 +91,8 @@ class ActualBudgetSummary(ContractModel):
 
 __all__ = [
     "ActualBudgetSummary",
+    "ArrivalEvidenceSnapshot",
+    "CreateArrivalExecutionEvent",
     "CreateExecutionEvent",
     "ExecutionEvent",
     "ExecutionEventType",

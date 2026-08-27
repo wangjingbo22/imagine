@@ -684,6 +684,23 @@ class SqlitePlanVersionRepository:
             )
         return self._plan_from_row(row)
 
+    def list_plan_versions(self, trip_id: UUID) -> list[PlanVersion]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM plan_versions
+                WHERE trip_id = ?
+                ORDER BY created_at, version, plan_id
+                """,
+                (str(trip_id),),
+            ).fetchall()
+        if not rows:
+            raise PlanStoreError(
+                "PLAN_VERSION_NOT_FOUND",
+                "未找到该 Trip 的 PlanVersion",
+            )
+        return [self._plan_from_row(row) for row in rows]
+
     def get_trip_state(self, trip_id: UUID) -> TripPlanState:
         trip_text = str(trip_id)
         with closing(self._connect()) as connection:
