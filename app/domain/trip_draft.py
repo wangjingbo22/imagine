@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime
 import re
 from typing import Annotated, Literal
 from unicodedata import normalize
@@ -577,6 +577,7 @@ class TripUnderstandingProposal(UnderstandingContractModel):
             )
         return self
 
+
     def _validate_path(
         self,
         field_path: str,
@@ -639,6 +640,34 @@ class TripUnderstandingProposal(UnderstandingContractModel):
                 f"{location}.fieldPath",
                 "fieldPath is not in the canonical field path allowlist",
             )
+
+
+class TripDraftRevision(UnderstandingContractModel):
+    schema_version: Literal["1.0"] = "1.0"
+    draft_id: UUID
+    revision: int = Field(ge=1)
+    trip_id: UUID
+    understanding: TripUnderstandingProposal
+    member_bindings: dict[str, UUID]
+    source_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    created_at: datetime
+
+    @model_validator(mode="after")
+    def validate_member_bindings(self) -> "TripDraftRevision":
+        member_keys = [member.member_key for member in self.understanding.participants]
+        if set(self.member_bindings) != set(member_keys):
+            raise ValueError("memberBindings must exactly match proposal member keys")
+        if len(set(self.member_bindings.values())) != len(self.member_bindings):
+            raise ValueError("participant bindings must be unique")
+        return self
+
+
+class TripUnderstandingExtraction(UnderstandingContractModel):
+    proposal: TripUnderstandingProposal
+    recognition_source: str = Field(min_length=1, max_length=40)
+    recognition_model: str | None = Field(default=None, max_length=120)
+    degraded_reason: str | None = Field(default=None, max_length=240)
+    llm_call_count: Literal[0, 1, 2]
 
 
 TripUnderstandingFailureCode = Literal[
@@ -835,6 +864,8 @@ __all__ = [
     "TripUnderstandingProposal",
     "TripUnderstandingRequest",
     "TripUnderstandingTrip",
+    "TripDraftRevision",
+    "TripUnderstandingExtraction",
     "TripDraftParseRequest",
     "TripDraftParseResult",
     "TripDraftExtractionError",

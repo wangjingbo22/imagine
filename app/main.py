@@ -29,13 +29,15 @@ from app.application.collaboration_ports import CollaborationReadinessGuard
 from app.application.collaboration_readiness import SqliteCollaborationReadinessGuard
 from app.application.collaboration_ports import (
     TripDraftRevisionPort,
-    UnavailableTripDraftRevisionPort,
 )
 from app.application.amap_service import AmapLocationService
 from app.application.llm_gateway import (
     CandidateSelectionGateway,
     StrictCandidateSelectionGateway,
+    StrictTripUnderstandingGateway,
+    TripUnderstandingGateway,
     UnavailableLlmGateway,
+    UnavailableTripUnderstandingGateway,
 )
 from app.application.execution_event_draft_service import ExecutionEventDraftService
 from app.application.execution_replan_service import (
@@ -66,6 +68,10 @@ from app.infrastructure.openai_compatible_llm import (
 )
 from app.infrastructure.collaboration_store import SqliteCollaborationRepository
 from app.domain.hard_conflicts import DeterministicHardConflictEvaluator
+from app.infrastructure.trip_draft_revision_store import (
+    SqliteTripDraftRevisionRepository,
+)
+from app.application.trip_draft_revision_service import TripDraftRevisionService
 from app.infrastructure.memory_media_reader import SqliteMemoryMediaReader
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.infrastructure.provider_fact_registry import SqliteProviderFactRegistry
@@ -173,6 +179,7 @@ def create_app(
     arrival_evidence_service: ArrivalEvidenceService | None = None,
     arrival_decision_service: ArrivalDecisionService | None = None,
     trip_draft_revision_port: TripDraftRevisionPort | None = None,
+    trip_understanding_gateway: TripUnderstandingGateway | None = None,
     collaboration_repository: SqliteCollaborationRepository | None = None,
     collaboration_readiness_guard: CollaborationReadinessGuard | None = None,
 ) -> FastAPI:
@@ -261,12 +268,22 @@ def create_app(
         "database_path",
         resolved_settings.plan_version_db_path,
     )
+    if trip_understanding_gateway is None:
+        trip_understanding_gateway = (
+            StrictTripUnderstandingGateway(managed_bailian_extractor)
+            if managed_bailian_extractor is not None
+            else UnavailableTripUnderstandingGateway()
+        )
+    trip_draft_revision_creator = TripDraftRevisionService(
+        repository=SqliteTripDraftRevisionRepository(planning_database_path),
+        gateway=trip_understanding_gateway,
+    )
     resolved_collaboration_repository = (
         collaboration_repository
         or SqliteCollaborationRepository(planning_database_path)
     )
     resolved_revision_port = (
-        trip_draft_revision_port or UnavailableTripDraftRevisionPort()
+        trip_draft_revision_port or trip_draft_revision_creator
     )
     collaboration_service = CollaborationService(
         repository=resolved_collaboration_repository,
@@ -451,6 +468,7 @@ def create_app(
         workflow_service,
     )
     app.state.collaboration_service = collaboration_service
+    app.state.trip_draft_revision_creator = trip_draft_revision_creator
     app.state.collaboration_readiness_guard = resolved_readiness_guard
     app.state.plan_version_service = plan_service
     app.state.workflow_service = workflow_service

@@ -355,8 +355,21 @@ class CollaborationService:
     ) -> MemberSessionView:
         try:
             actor = self.repository.authenticate_participant(session_token)
+            is_advance_replay = self.repository.has_completed_operation(
+                actor_scope="PARTICIPANT",
+                actor_id=str(actor.participant_id),
+                operation="ADVANCE_REVISION",
+                idempotency_key=idempotency_key,
+            )
+            if not is_advance_replay:
+                stored = self.repository.get_stored(actor.trip_id)
+                if request.expected_version != stored.version:
+                    raise AppError("COLLABORATION_VERSION_STALE", "鍗忎綔鐗堟湰宸茬粡鍙樺寲", 409, False)
+                if request.base_revision != stored.current_revision:
+                    raise AppError("DRAFT_REVISION_STALE", "鑽夌鐗堟湰宸茬粡鍙樺寲", 409, False)
+                self.repository.assert_mutation_allowed(actor.trip_id)
             current = self._current(actor.trip_id)
-            if request.base_revision != current.revision:
+            if current.trip_id != actor.trip_id:
                 raise AppError("DRAFT_REVISION_STALE", "成员草稿版本已经变化", 409, False)
             try:
                 revised = await self.revisions.submit_participant_conversation(
@@ -368,11 +381,15 @@ class CollaborationService:
                 )
             except TripDraftRevisionUnavailable as error:
                 raise self._revision_error(error) from error
-            if revised.trip_id != actor.trip_id or revised.revision != current.revision + 1:
+            if (
+                revised.trip_id != actor.trip_id
+                or revised.revision != request.base_revision + 1
+                or revised.member_bindings != current.member_bindings
+            ):
                 raise AppError("DRAFT_REVISION_STALE", "T002 返回了非连续草稿版本", 409, False)
             self.repository.advance_revision(
                 trip_id=actor.trip_id,
-                before_revision=current.revision,
+                before_revision=request.base_revision,
                 after_revision=revised.revision,
                 expected_version=request.expected_version,
                 actor_scope="PARTICIPANT",

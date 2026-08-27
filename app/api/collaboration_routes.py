@@ -9,6 +9,8 @@ from app.core.errors import AppError
 from app.domain.collaboration import (
     InvitationCreateRequest,
     InvitationRedeemRequest,
+    OrganizerConversationCreated,
+    OrganizerConversationRequest,
     ParticipantConversationRequest,
     ParticipantMutationRequest,
     ResolveConfirmationItemRequest,
@@ -52,12 +54,27 @@ def require_organizer_token(request: Request) -> str:
 
 
 @router.post("/trips/conversations")
-async def create_organizer() -> ApiResponse:
-    raise AppError(
-        code="TRIP_DRAFT_REVISION_UNAVAILABLE",
-        message="该入口等待 T002 TripDraftRevision 接力",
-        http_status=503,
-        retryable=True,
+async def create_conversation(
+    payload: OrganizerConversationRequest,
+    request: Request,
+    response: Response,
+    current: CollaborationService = Depends(service),
+) -> ApiResponse[OrganizerConversationCreated]:
+    response.headers["Cache-Control"] = "no-store"
+    idempotency_key = require_idempotency_key(request)
+    revision = await request.app.state.trip_draft_revision_creator.create_initial(
+        payload,
+        idempotency_key=idempotency_key,
+    )
+    organizer_access = current.bootstrap(
+        revision=revision,
+        idempotency_key=idempotency_key,
+    )
+    return ApiResponse(
+        data=OrganizerConversationCreated(
+            revision=revision,
+            organizerAccess=organizer_access,
+        )
     )
 
 

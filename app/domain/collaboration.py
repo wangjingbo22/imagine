@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
 from uuid import UUID
@@ -12,6 +12,7 @@ from app.domain.trip_draft import (
     CanonicalFieldPath,
     ParticipantUnderstanding,
     TripUnderstandingTrip,
+    TripDraftRevision,
 )
 
 
@@ -126,6 +127,11 @@ class ConversationSubmission(CollaborationModel):
             if value in text:
                 return {"3": 3, "三": 3, "2": 2, "二": 2, "两": 2, "1": 1, "一": 1}[value]
         return 1
+
+
+class OrganizerConversationRequest(ConversationSubmission):
+    schema_version: Literal["1.0"]
+    reference_date: date
 
 
 class FixedQuestionReviewItem(CollaborationModel):
@@ -246,6 +252,11 @@ class OrganizerBootstrapResult(CollaborationModel):
     collaboration_version: int = Field(ge=1)
 
 
+class OrganizerConversationCreated(CollaborationModel):
+    revision: TripDraftRevision
+    organizer_access: OrganizerBootstrapResult
+
+
 class InvitationRedeemed(CollaborationModel):
     session_id: UUID
     participant_session_token: str | None
@@ -348,6 +359,8 @@ __all__ = [
     "JsonValue",
     "MemberSessionView",
     "OrganizerBootstrapResult",
+    "OrganizerConversationCreated",
+    "OrganizerConversationRequest",
     "ParticipantAccessStatus",
     "ParticipantConfirmationStatus",
     "ParticipantConversationRequest",
