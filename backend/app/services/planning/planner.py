@@ -51,6 +51,10 @@ from app.services.route_risk import (
     ValidationStatus,
     evaluate_route_risk,
 )
+from app.services.planning.group_constraints import (
+    GroupConstraintMergeError,
+    merge_group_constraints,
+)
 
 from .models import (
     CandidateConstraintResult,
@@ -260,59 +264,22 @@ class DeterministicCandidatePlanner:
         self,
         request: CandidatePlanRequest,
     ) -> tuple[Constraint, ...]:
-        grouped: dict[tuple[str, str, str, str], list[Constraint]] = {}
-        for participant in request.trip.participants:
-            profile = participant.assistance_profile
-            if profile is None:
-                continue
-            for constraint in self._constraint_compiler.compile(profile):
-                key = (
-                    constraint.field,
-                    constraint.operator,
-                    constraint.scope,
-                    constraint.hardness,
-                )
-                grouped.setdefault(key, []).append(constraint)
-
-        merged: list[Constraint] = []
-        for key, constraints in grouped.items():
-            first = constraints[0]
-            values = [item.value for item in constraints]
-            if all(value == values[0] for value in values[1:]):
-                merged.append(first)
-                continue
-            if first.operator == "LTE" and all(
-                isinstance(value, (int, float)) and not isinstance(value, bool)
-                for value in values
-            ):
-                merged.append(first.model_copy(update={"value": min(values)}))
-                continue
-            if first.field == FIELD_NAP_WINDOW and all(
-                isinstance(value, dict)
-                and isinstance(value.get("start"), str)
-                and isinstance(value.get("end"), str)
-                for value in values
-            ):
-                merged.append(
-                    first.model_copy(
-                        update={
-                            "value": {
-                                "start": min(value["start"] for value in values),
-                                "end": max(value["end"] for value in values),
-                            }
-                        }
-                    )
-                )
-                continue
+        participants = tuple(
+            (participant.participant_id, participant.assistance_profile)
+            for participant in request.trip.participants
+            if participant.assistance_profile is not None
+        )
+        try:
+            return merge_group_constraints(
+                participants,
+                compiler=self._constraint_compiler,
+            ).constraints
+        except GroupConstraintMergeError as error:
             raise CandidatePlanInputError(
                 code="GROUP_CONSTRAINT_CONFLICT",
                 field="confirmedConstraints",
-                message=(
-                    "confirmed participant constraints cannot be merged "
-                    f"deterministically for {key[0]}"
-                ),
-            )
-        return tuple(merged)
+                message=str(error),
+            ) from error
 
     @staticmethod
     def _validate_same_city_facts(request: CandidatePlanRequest) -> None:
