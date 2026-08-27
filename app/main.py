@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.api.arrival_decision_routes import router as arrival_decision_router
 from app.api.arrival_evidence_routes import router as arrival_evidence_router
+from app.api.arrival_execution_routes import router as arrival_execution_router
 from app.api.routes import router
 from app.api.execution_adjustment_routes import router as execution_adjustment_router
 from app.api.plan_routes import router as plan_router
@@ -20,6 +21,7 @@ from app.api.recommendation_routes import router as recommendation_router
 from app.api.media_routes import router as media_router
 from app.application.arrival_decision_service import ArrivalDecisionService
 from app.application.arrival_evidence_service import ArrivalEvidenceService
+from app.application.arrival_execution_service import ArrivalExecutionService
 from app.application.collaboration_service import CollaborationService
 from app.application.amap_service import AmapLocationService
 from app.application.llm_gateway import (
@@ -325,6 +327,10 @@ def create_app(
         arrival_decision_service
         or ArrivalDecisionService(app.state.arrival_evidence_service)
     )
+    app.state.arrival_execution_service = ArrivalExecutionService(
+        app.state.arrival_decision_service,
+        workflow_service,
+    )
     app.state.collaboration_service = CollaborationService(
         SqliteCollaborationRepository(resolved_settings.plan_version_db_path),
         app.state.trip_draft_service,
@@ -336,6 +342,7 @@ def create_app(
     app.state.recommendation_service = recommendation_service
     app.include_router(arrival_decision_router)
     app.include_router(arrival_evidence_router)
+    app.include_router(arrival_execution_router)
     app.include_router(router)
     app.include_router(execution_adjustment_router)
     app.include_router(plan_router)

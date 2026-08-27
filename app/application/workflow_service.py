@@ -5,7 +5,12 @@ from uuid import UUID
 from app.core.errors import AppError
 from app.infrastructure.plan_store import PlanStoreError
 from app.infrastructure.workflow_store import SqliteWorkflowRepository
-from app.schemas.execution import ActualBudgetSummary, CreateExecutionEvent, ExecutionEvent
+from app.schemas.execution import (
+    ActualBudgetSummary,
+    CreateArrivalExecutionEvent,
+    CreateExecutionEvent,
+    ExecutionEvent,
+)
 from app.schemas.trip import AssistanceProfile, CreateSingleDayTrip, Trip
 from app.schemas.workflow import (
     ConstraintConfirmationResult,
@@ -83,6 +88,16 @@ class WorkflowService:
         self,
         trip_id: UUID,
         request: CreateExecutionEvent,
+    ) -> ExecutionEvent:
+        try:
+            return self.repository.create_event(trip_id, request)
+        except PlanStoreError as error:
+            raise self._as_app_error(error) from error
+
+    def create_arrival_event(
+        self,
+        trip_id: UUID,
+        request: CreateArrivalExecutionEvent,
     ) -> ExecutionEvent:
         try:
             return self.repository.create_event(trip_id, request)
