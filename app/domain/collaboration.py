@@ -2,15 +2,26 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, alias_generators, model_validator
+from typing_extensions import TypeAliasType
 
-from app.domain.trip_draft import ParsedTripFields, TripDraftParseResult
+from app.domain.trip_draft import (
+    CanonicalFieldPath,
+    ParticipantUnderstanding,
+    TripUnderstandingTrip,
+)
 
 
 QUESTION_IDS = (
     "trip", "party", "endpoints_budget", "preferences", "assistance", "confirm",
+)
+
+JsonValue = TypeAliasType(
+    "JsonValue",
+    None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"],
 )
 
 
@@ -31,12 +42,48 @@ class CollaborationStatus(StrEnum):
     READY_TO_PLAN = "READY_TO_PLAN"
 
 
-class ParticipantConfirmationStatus(StrEnum):
+class ParticipantAccessStatus(StrEnum):
+    ORGANIZER_ACTIVE = "ORGANIZER_ACTIVE"
+    NOT_INVITED = "NOT_INVITED"
     INVITED = "INVITED"
-    DRAFT = "DRAFT"
-    CONFIRMED = "CONFIRMED"
+    SESSION_ACTIVE = "SESSION_ACTIVE"
     REVOKED = "REVOKED"
     EXPIRED = "EXPIRED"
+
+
+class TripFlowKind(StrEnum):
+    LEGACY_SINGLE = "LEGACY_SINGLE"
+    COLLABORATION_V2 = "COLLABORATION_V2"
+
+
+class ParticipantConfirmationStatus(StrEnum):
+    DRAFT = "DRAFT"
+    CONFIRMED = "CONFIRMED"
+    NEEDS_RECONFIRMATION = "NEEDS_RECONFIRMATION"
+
+
+class IssueCode(StrEnum):
+    MISSING = "MISSING"
+    AMBIGUOUS = "AMBIGUOUS"
+    INVALID = "INVALID"
+    CONFLICT = "CONFLICT"
+
+
+class ActorScope(StrEnum):
+    ORGANIZER = "ORGANIZER"
+    PARTICIPANT = "PARTICIPANT"
+
+
+class RelaxationAction(StrEnum):
+    SELECT_CANDIDATE = "SELECT_CANDIDATE"
+    SET_SHARED_FIELD = "SET_SHARED_FIELD"
+    SET_MEMBER_FIELD = "SET_MEMBER_FIELD"
+    REMOVE_MUST_VISIT = "REMOVE_MUST_VISIT"
+    REMOVE_AVOID_PLACE = "REMOVE_AVOID_PLACE"
+    RAISE_MEMBER_BUDGET_CAP = "RAISE_MEMBER_BUDGET_CAP"
+    LOWER_SHARED_BUDGET = "LOWER_SHARED_BUDGET"
+    EXTEND_SHARED_TIME = "EXTEND_SHARED_TIME"
+    CHANGE_NAP_WINDOW = "CHANGE_NAP_WINDOW"
 
 
 class ConversationAnswer(CollaborationModel):
@@ -79,66 +126,163 @@ class ConversationSubmission(CollaborationModel):
         return 1
 
 
-class CollaborationParticipant(CollaborationModel):
+class RelaxationOption(CollaborationModel):
+    relaxation_id: str = Field(pattern=r"^rx_[a-f0-9]{16}$")
+    action: RelaxationAction
+    actor_scope: ActorScope
+    participant_id: UUID | None
+    field_path: CanonicalFieldPath
+    proposed_value: JsonValue
+    label: str = Field(min_length=1, max_length=160)
+
+
+class CollaborationIssue(CollaborationModel):
+    item_id: str = Field(pattern=r"^ci_[a-f0-9]{16}$")
+    field_path: CanonicalFieldPath
+    participant_id: UUID | None
+    related_participant_ids: list[UUID]
+    rule_id: str = Field(pattern=r"^S2T003\.[A-Z0-9_.]+$")
+    code: IssueCode
+    reason: str = Field(min_length=1, max_length=240)
+    candidates: list[str] = Field(default_factory=list, max_length=5)
+    relaxations: list[RelaxationOption] = Field(default_factory=list)
+
+
+class ParticipantProgress(CollaborationModel):
     participant_id: UUID
-    display_name: str | None = Field(default=None, max_length=40)
-    status: ParticipantConfirmationStatus
-    is_organizer: bool
-    parsed: ParsedTripFields | None = None
+    member_key: str = Field(pattern=r"^member-[1-3]$")
+    role: Literal["ORGANIZER", "MEMBER"]
+    access_status: ParticipantAccessStatus
+    confirmation_status: ParticipantConfirmationStatus
+    confirmed_revision: int | None = Field(default=None, ge=1)
 
 
-class CollaborationConflict(CollaborationModel):
-    conflict_id: str
-    participant_ids: list[UUID]
-    rule_id: str
-    message: str
-    suggestion: str
-    allowed_relaxations: list[str] = Field(default_factory=list)
+class CollaborationProgress(CollaborationModel):
+    expected_count: int = Field(ge=1, le=3)
+    confirmed_count: int = Field(ge=0, le=3)
+    open_issue_count: int = Field(ge=0)
 
 
-class CollaborationState(CollaborationModel):
+class CollaborationAggregate(CollaborationModel):
+    schema_version: Literal["1.0"] = "1.0"
     trip_id: UUID
+    draft_id: UUID
+    current_revision: int = Field(ge=1)
     organizer_participant_id: UUID
     status: CollaborationStatus
-    expected_participants: int = Field(ge=1, le=3)
-    participants: list[CollaborationParticipant]
-    conflicts: list[CollaborationConflict] = Field(default_factory=list)
+    collaboration_version: int = Field(ge=1)
+    policy_version: Literal["S2-T003.1"] = "S2-T003.1"
+    readiness_digest: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    can_plan: bool
+    progress: CollaborationProgress
+    participants: list[ParticipantProgress]
+    confirmation_items: list[CollaborationIssue]
 
 
-class OrganizerConversationResult(CollaborationModel):
-    state: CollaborationState | None
-    parse: TripDraftParseResult
-    # This is an opaque capability for the browser session that created the
-    # collaboration.  The database only keeps its digest.
-    organizer_access_token: str | None = None
+class InvitationCreateRequest(CollaborationModel):
+    schema_version: Literal["1.0"]
+    expected_version: int = Field(ge=1)
+    expires_in_hours: int = Field(default=72, ge=1, le=168)
 
 
-class MemberConversationResult(CollaborationModel):
-    state: CollaborationState
-    parse: TripDraftParseResult
+class InvitationRedeemRequest(CollaborationModel):
+    schema_version: Literal["1.0"]
+    token: str = Field(min_length=43, max_length=43, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class InvitationCreated(CollaborationModel):
+    invitation_id: UUID
+    trip_id: UUID
     participant_id: UUID
-    invitation_url: str
+    invitation_url: str | None
     expires_at: datetime
+    link_available: bool
+    collaboration_version: int = Field(ge=1)
 
 
-class InvitationConversation(CollaborationModel):
+class OrganizerBootstrapResult(CollaborationModel):
+    trip_id: UUID
+    organizer_participant_id: UUID
+    organizer_token: str | None
+    organizer_token_available: bool
+    collaboration_version: int = Field(ge=1)
+
+
+class InvitationRedeemed(CollaborationModel):
+    session_id: UUID
+    participant_session_token: str | None
     trip_id: UUID
     participant_id: UUID
     expires_at: datetime
-    status: ParticipantConfirmationStatus
-    shared_trip: ParsedTripFields
+    session_token_available: bool
 
 
-class ConflictResolution(CollaborationModel):
-    relaxation: str = Field(min_length=1, max_length=80)
+class ParticipantMutationRequest(CollaborationModel):
+    schema_version: Literal["1.0"]
+    base_revision: int = Field(ge=1)
+    expected_version: int = Field(ge=1)
+
+
+class ParticipantConversationRequest(ParticipantMutationRequest):
+    natural_language_request: str = Field(min_length=1, max_length=1000)
+    answers: list[ConversationAnswer] = Field(min_length=6, max_length=6)
+
+    @model_validator(mode="after")
+    def require_fixed_questions(self) -> "ParticipantConversationRequest":
+        ConversationSubmission(
+            naturalLanguageRequest=self.natural_language_request,
+            answers=self.answers,
+        )
+        return self
+
+    def submission(self) -> ConversationSubmission:
+        return ConversationSubmission(
+            naturalLanguageRequest=self.natural_language_request,
+            answers=self.answers,
+        )
+
+
+class ResolveConfirmationItemRequest(ParticipantMutationRequest):
+    relaxation_id: str = Field(pattern=r"^rx_[a-f0-9]{16}$")
+
+
+class MemberSessionView(CollaborationModel):
+    schema_version: Literal["1.0"] = "1.0"
+    trip_id: UUID
+    participant_id: UUID
+    current_revision: int = Field(ge=1)
+    shared_trip: TripUnderstandingTrip
+    participant: ParticipantUnderstanding
+    access_status: ParticipantAccessStatus
+    confirmation_status: ParticipantConfirmationStatus
+    confirmation_items: list[CollaborationIssue]
 
 
 __all__ = [
-    "CollaborationConflict", "CollaborationParticipant", "CollaborationState",
-    "CollaborationStatus", "ConversationSubmission", "InvitationConversation",
-    "InvitationCreated", "OrganizerConversationResult", "ParticipantConfirmationStatus",
-    "ConflictResolution", "MemberConversationResult", "QUESTION_IDS",
+    "ActorScope",
+    "CollaborationAggregate",
+    "CollaborationIssue",
+    "CollaborationModel",
+    "CollaborationProgress",
+    "CollaborationStatus",
+    "ConversationAnswer",
+    "ConversationSubmission",
+    "InvitationCreateRequest",
+    "InvitationCreated",
+    "InvitationRedeemRequest",
+    "InvitationRedeemed",
+    "IssueCode",
+    "JsonValue",
+    "MemberSessionView",
+    "OrganizerBootstrapResult",
+    "ParticipantAccessStatus",
+    "ParticipantConfirmationStatus",
+    "ParticipantConversationRequest",
+    "ParticipantMutationRequest",
+    "ParticipantProgress",
+    "QUESTION_IDS",
+    "RelaxationAction",
+    "RelaxationOption",
+    "ResolveConfirmationItemRequest",
+    "TripFlowKind",
 ]
