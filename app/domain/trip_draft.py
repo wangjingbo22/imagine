@@ -670,6 +670,38 @@ class TripUnderstandingExtraction(UnderstandingContractModel):
     llm_call_count: Literal[0, 1, 2]
 
 
+TripUnderstandingFailureCode = Literal[
+    "LLM_NOT_CONFIGURED",
+    "LLM_TIMEOUT",
+    "LLM_AUTH_FAILED",
+    "LLM_UNAVAILABLE",
+    "LLM_INVALID_RESPONSE",
+    "LLM_INVALID_JSON",
+    "LLM_SCHEMA_INVALID",
+    "LLM_CONTENT_INVALID",
+]
+
+
+class TripUnderstandingGatewayResult(UnderstandingContractModel):
+    decision: Literal["MODEL_PROPOSAL", "FIXED_QUESTIONS"]
+    proposal: TripUnderstandingProposal | None
+    failure_code: TripUnderstandingFailureCode | None
+    call_count: int = Field(ge=0, le=2)
+    model: str | None
+
+    @model_validator(mode="after")
+    def validate_result_shape(self) -> "TripUnderstandingGatewayResult":
+        if self.decision == "MODEL_PROPOSAL":
+            valid = (
+                self.proposal is not None
+                and self.failure_code is None
+                and 1 <= self.call_count <= 2
+            )
+        else:
+            valid = self.proposal is None and self.failure_code is not None
+        if not valid:
+            raise ValueError("trip understanding gateway result is inconsistent")
+        return self
 def _camel_to_snake(value: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", value).lower()
 
@@ -825,6 +857,8 @@ __all__ = [
     "ParticipantUnderstanding",
     "ParsedTripFields",
     "TripUnderstandingExplicitFields",
+    "TripUnderstandingFailureCode",
+    "TripUnderstandingGatewayResult",
     "TripUnderstandingProposal",
     "TripUnderstandingRequest",
     "TripUnderstandingTrip",
