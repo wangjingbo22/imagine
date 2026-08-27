@@ -5,10 +5,19 @@ import pytest
 
 from app.api.collaboration_routes import router
 from app.application.collaboration_ports import UnavailableTripDraftRevisionPort
+from app.domain.collaboration import IssueCode, ResolveConfirmationItemRequest
 from app.core.config import Settings
 from app.infrastructure.collaboration_store import SqliteCollaborationRepository
 from app.main import create_app
-from backend.tests.s2_t003_support import FakeTripDraftRevisionPort, load_revision
+from backend.tests.s2_t003_support import (
+    FakeTripDraftRevisionPort,
+    load_revision,
+    revision_with_trip_budget,
+)
+from backend.tests.test_s2_t003_collaboration_service import (
+    _AdvancingRevisionPort,
+    _ready_harness,
+)
 
 
 def test_collaboration_route_table_contains_only_scoped_frozen_paths() -> None:
@@ -173,3 +182,90 @@ async def test_resolve_authentication_failures_are_json_contract_errors(tmp_path
     assert organizer_response.status_code == 403
     assert organizer_response.headers["content-type"].startswith("application/json")
     assert organizer_response.json()["code"] == "ORGANIZER_PERMISSION_REQUIRED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ("organizer", "member"))
+async def test_resolve_success_and_replay_responses_are_no_store(tmp_path, scope) -> None:
+    case_root = tmp_path / scope
+    case_root.mkdir()
+    harness = _ready_harness(case_root)
+    conflict = revision_with_trip_budget(harness.revision, 45_000)
+    revisions = _AdvancingRevisionPort(conflict)
+    app = create_app(
+        settings=Settings(
+            amap_web_service_key="test-amap",
+            amap_cache_db_path=case_root / "amap.sqlite3",
+            plan_version_db_path=case_root / "plan.sqlite3",
+        ),
+        collaboration_repository=harness.repository,
+        trip_draft_revision_port=revisions,
+    )
+    state = app.state.collaboration_service.organizer_state(
+        harness.revision.trip_id,
+        harness.organizer_token,
+    )
+    issue = next(item for item in state.confirmation_items if item.code is IssueCode.CONFLICT)
+    if scope == "organizer":
+        option = next(item for item in issue.relaxations if item.actor_scope.value == "ORGANIZER")
+        path = (
+            f"/api/v2/trips/{harness.revision.trip_id}/confirmation-items/"
+            f"{issue.item_id}/resolve"
+        )
+        headers = {
+            "X-Organizer-Token": harness.organizer_token,
+            "Idempotency-Key": "d018-organizer-resolve-1",
+        }
+        expected_version = 3
+    else:
+        option = next(
+            item
+            for item in issue.relaxations
+            if item.actor_scope.value == "PARTICIPANT"
+            and item.participant_id == harness.revision.member_bindings["member-2"]
+        )
+        invitation = harness.repository.create_invitation(
+            trip_id=harness.revision.trip_id,
+            participant_id=harness.revision.member_bindings["member-2"],
+            organizer_token=harness.organizer_token,
+            expected_version=3,
+            idempotency_key="d018-member-invite-1",
+        )
+        redeemed = harness.repository.redeem_invitation(
+            invitation.invitation_url.split("=", 1)[1],
+            "d018-member-redeem-1",
+        )
+        assert redeemed.participant_session_token is not None
+        path = f"/api/v2/member-session/confirmation-items/{issue.item_id}/resolve"
+        headers = {
+            "X-Participant-Session": redeemed.participant_session_token,
+            "Idempotency-Key": "d018-member-resolve-1",
+        }
+        expected_version = 4
+    request = ResolveConfirmationItemRequest(
+        schemaVersion="1.0",
+        baseRevision=1,
+        expectedVersion=expected_version,
+        relaxationId=option.relaxation_id,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        first = await client.post(
+            path,
+            headers=headers,
+            json=request.model_dump(mode="json", by_alias=True),
+        )
+        replay = await client.post(
+            path,
+            headers=headers,
+            json=request.model_dump(mode="json", by_alias=True),
+        )
+
+    assert first.status_code == 200
+    assert replay.status_code == 200
+    assert first.headers["Cache-Control"] == "no-store"
+    assert replay.headers["Cache-Control"] == "no-store"
+    assert first.json()["data"] == replay.json()["data"]

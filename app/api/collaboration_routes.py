@@ -134,8 +134,10 @@ async def resolve_member_issue(
     item_id: str,
     payload: ResolveConfirmationItemRequest,
     request: Request,
+    response: Response,
     current: CollaborationService = Depends(service),
 ) -> ApiResponse:
+    response.headers["Cache-Control"] = "no-store"
     return ApiResponse(data=current.resolve_member_issue(
         session_token=require_member_session(request),
         item_id=item_id,
@@ -179,8 +181,10 @@ async def resolve_organizer_issue(
     item_id: str,
     payload: ResolveConfirmationItemRequest,
     request: Request,
+    response: Response,
     current: CollaborationService = Depends(service),
 ) -> ApiResponse:
+    response.headers["Cache-Control"] = "no-store"
     return ApiResponse(data=current.resolve_organizer_issue(
         trip_id=trip_id,
         item_id=item_id,
