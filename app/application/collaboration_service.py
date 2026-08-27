@@ -209,6 +209,7 @@ class CollaborationService:
         confirmed = bool(
             confirmation
             and confirmation.confirmed_revision == revision.revision
+            and confirmation.confirmed_source_digest == revision.source_digest
             and confirmation.confirmed_shared_digest == shared_digest(revision)
             and confirmation.confirmed_member_digest == current_member
         )
@@ -405,6 +406,7 @@ class CollaborationService:
                 trip_id=trip_id,
                 participant_id=participant_id,
                 revision=revision.revision,
+                source_digest=revision.source_digest,
                 shared_digest=shared_digest(revision),
                 member_digest=member_digest(revision, member_key),
                 expected_version=request.expected_version,

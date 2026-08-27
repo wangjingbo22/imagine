@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from dataclasses import replace
 from uuid import UUID
 
 import pytest
@@ -122,3 +123,28 @@ def test_active_ready_lease_blocks_member_mutation(tmp_path) -> None:
         with pytest.raises(CollaborationStoreError, match="COLLABORATION_OPERATION_IN_PROGRESS"):
             harness.repository.assert_mutation_allowed(access.trip_id)
     assert harness.repository.active_lease(access.trip_id) is None
+
+
+def test_source_digest_change_invalidates_ready_guard_before_body(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    guard = SqliteCollaborationReadinessGuard(
+        database_path=harness.repository._path,
+        repository=harness.repository,
+        collaboration=harness.service,
+        flow_registry=SqliteTripFlowRegistry(harness.repository._path),
+    )
+    harness.revisions.current = replace(harness.revision, source_digest="b" * 64)
+    access = PlanningAccess(
+        trip_id=harness.revision.trip_id,
+        organizer_capability=harness.organizer_token,
+        operation_id="source-digest-stale-0001",
+        operation=PlanningOperation.PROVIDER_FACTS,
+    )
+    calls = 0
+
+    with pytest.raises(AppError) as captured:
+        with guard.operation(access):
+            calls += 1
+
+    assert captured.value.code == "COLLABORATION_NOT_READY"
+    assert calls == 0

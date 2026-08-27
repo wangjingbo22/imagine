@@ -66,6 +66,7 @@ def _ready_harness(tmp_path) -> ReadyHarness:
             trip_id=revision.trip_id,
             participant_id=revision.member_bindings[member_key],
             revision=revision.revision,
+            source_digest=revision.source_digest,
             shared_digest=shared_digest(revision),
             member_digest=member_digest(revision, member_key),
             expected_version=version,

@@ -42,6 +42,7 @@ class CollaborationActor:
 class ConfirmationRecord:
     participant_id: UUID
     confirmed_revision: int | None
+    confirmed_source_digest: str | None
     confirmed_shared_digest: str | None
     confirmed_member_digest: str | None
 
@@ -148,6 +149,7 @@ class SqliteCollaborationRepository:
                 ("member_key", "TEXT"),
                 ("role", "TEXT"),
                 ("confirmed_revision", "INTEGER"),
+                ("confirmed_source_digest", "TEXT"),
                 ("confirmed_shared_digest", "TEXT"),
                 ("confirmed_member_digest", "TEXT"),
                 ("updated_at", "TEXT"),
@@ -379,8 +381,9 @@ class SqliteCollaborationRepository:
                         """INSERT INTO collaboration_participants
                         (trip_id, participant_id, display_name, status, is_organizer,
                          parsed_json, member_key, role, confirmed_revision,
-                         confirmed_shared_digest, confirmed_member_digest, updated_at)
-                        VALUES (?, ?, ?, 'DRAFT', ?, NULL, ?, ?, NULL, NULL, NULL, ?)""",
+                         confirmed_source_digest, confirmed_shared_digest,
+                         confirmed_member_digest, updated_at)
+                        VALUES (?, ?, ?, 'DRAFT', ?, NULL, ?, ?, NULL, NULL, NULL, NULL, ?)""",
                         (
                             str(revision.trip_id),
                             str(participant_id),
@@ -690,7 +693,8 @@ class SqliteCollaborationRepository:
             if session is None:
                 raise CollaborationStoreError("COLLABORATION_NOT_FOUND")
             rows = connection.execute(
-                "SELECT participant_id, confirmed_revision, confirmed_shared_digest, "
+                "SELECT participant_id, confirmed_revision, confirmed_source_digest, "
+                "confirmed_shared_digest, "
                 "confirmed_member_digest FROM collaboration_participants WHERE trip_id=?",
                 (str(trip_id),),
             ).fetchall()
@@ -704,6 +708,7 @@ class SqliteCollaborationRepository:
                 UUID(row["participant_id"]): ConfirmationRecord(
                     participant_id=UUID(row["participant_id"]),
                     confirmed_revision=row["confirmed_revision"],
+                    confirmed_source_digest=row["confirmed_source_digest"],
                     confirmed_shared_digest=row["confirmed_shared_digest"],
                     confirmed_member_digest=row["confirmed_member_digest"],
                 )
@@ -782,7 +787,8 @@ class SqliteCollaborationRepository:
     def confirmation_records(self, trip_id: UUID) -> dict[UUID, ConfirmationRecord]:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT participant_id, confirmed_revision, confirmed_shared_digest, "
+                "SELECT participant_id, confirmed_revision, confirmed_source_digest, "
+                "confirmed_shared_digest, "
                 "confirmed_member_digest FROM collaboration_participants WHERE trip_id=?",
                 (str(trip_id),),
             ).fetchall()
@@ -790,6 +796,7 @@ class SqliteCollaborationRepository:
             UUID(row["participant_id"]): ConfirmationRecord(
                 participant_id=UUID(row["participant_id"]),
                 confirmed_revision=row["confirmed_revision"],
+                confirmed_source_digest=row["confirmed_source_digest"],
                 confirmed_shared_digest=row["confirmed_shared_digest"],
                 confirmed_member_digest=row["confirmed_member_digest"],
             )
@@ -802,6 +809,7 @@ class SqliteCollaborationRepository:
         trip_id: UUID,
         participant_id: UUID,
         revision: int,
+        source_digest: str,
         shared_digest: str,
         member_digest: str,
         expected_version: int,
@@ -811,6 +819,7 @@ class SqliteCollaborationRepository:
             "tripId": str(trip_id),
             "participantId": str(participant_id),
             "revision": revision,
+            "sourceDigest": source_digest,
             "sharedDigest": shared_digest,
             "memberDigest": member_digest,
             "expectedVersion": expected_version,
@@ -856,10 +865,12 @@ class SqliteCollaborationRepository:
                     raise CollaborationStoreError("COLLABORATION_VERSION_STALE")
                 connection.execute(
                     "UPDATE collaboration_participants SET status='CONFIRMED', confirmed_revision=?, "
-                    "confirmed_shared_digest=?, confirmed_member_digest=?, updated_at=? "
+                    "confirmed_source_digest=?, confirmed_shared_digest=?, "
+                    "confirmed_member_digest=?, updated_at=? "
                     "WHERE trip_id=? AND participant_id=?",
                     (
                         revision,
+                        source_digest,
                         shared_digest,
                         member_digest,
                         now.isoformat(),

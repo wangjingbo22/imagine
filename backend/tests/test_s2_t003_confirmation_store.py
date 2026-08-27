@@ -46,6 +46,7 @@ def test_confirmation_binds_exact_revision_and_digests(repository, revision) -> 
         trip_id=revision.trip_id,
         participant_id=participant_id,
         revision=revision.revision,
+        source_digest=revision.source_digest,
         shared_digest=shared_digest(revision),
         member_digest=member_digest(revision, "member-2"),
         expected_version=1,
