@@ -16,6 +16,7 @@ from app.domain.collaboration import (
     InvitationCreated,
     InvitationRedeemed,
     OrganizerBootstrapResult,
+    ParticipantAccessStatus,
     TripFlowKind,
 )
 from app.domain.collaboration_digest import canonical_sha256
@@ -542,10 +543,6 @@ class SqliteCollaborationRepository:
             expires_at = datetime.fromisoformat(row["expires_at"])
             if expires_at <= self._clock():
                 raise CollaborationStoreError("PARTICIPANT_SESSION_EXPIRED")
-            connection.execute(
-                "UPDATE collaboration_actor_sessions SET last_seen_at=? WHERE session_id=?",
-                (self._clock().isoformat(), row["session_id"]),
-            )
         return CollaborationActor(
             session_id=UUID(row["session_id"]),
             trip_id=UUID(row["trip_id"]),
@@ -553,6 +550,37 @@ class SqliteCollaborationRepository:
             role=row["role"],
             expires_at=expires_at,
         )
+
+    def participant_access_status(
+        self,
+        trip_id: UUID,
+        participant_id: UUID,
+    ) -> ParticipantAccessStatus:
+        now = self._clock().isoformat()
+        with self._connect() as connection:
+            session = connection.execute(
+                "SELECT revoked_at, expires_at FROM collaboration_actor_sessions "
+                "WHERE trip_id=? AND participant_id=? ORDER BY expires_at DESC LIMIT 1",
+                (str(trip_id), str(participant_id)),
+            ).fetchone()
+            if session is not None:
+                if session["revoked_at"]:
+                    return ParticipantAccessStatus.REVOKED
+                if session["expires_at"] <= now:
+                    return ParticipantAccessStatus.EXPIRED
+                return ParticipantAccessStatus.SESSION_ACTIVE
+            invitation = connection.execute(
+                "SELECT status, revoked_at, expires_at FROM participant_invitations "
+                "WHERE trip_id=? AND participant_id=? ORDER BY expires_at DESC LIMIT 1",
+                (str(trip_id), str(participant_id)),
+            ).fetchone()
+        if invitation is None:
+            return ParticipantAccessStatus.NOT_INVITED
+        if invitation["revoked_at"] or invitation["status"] == "REVOKED":
+            return ParticipantAccessStatus.REVOKED
+        if invitation["status"] == "ACTIVE" and invitation["expires_at"] > now:
+            return ParticipantAccessStatus.INVITED
+        return ParticipantAccessStatus.EXPIRED
 
     def get_stored(self, trip_id: UUID) -> StoredCollaboration:
         with self._connect() as connection:
