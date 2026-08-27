@@ -130,8 +130,10 @@ async def member_session(
 async def submit_member(
     payload: ParticipantConversationRequest,
     request: Request,
+    response: Response,
     current: CollaborationService = Depends(service),
 ) -> ApiResponse:
+    response.headers["Cache-Control"] = "no-store"
     return ApiResponse(data=await current.submit_member(
         session_token=require_member_session(request),
         request=payload,

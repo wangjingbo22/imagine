@@ -9,6 +9,9 @@ from app.application.collaboration_ports import (
     TripDraftRevisionUnavailable,
     TripDraftRevisionView,
 )
+from app.application.trip_draft_revision_service import (
+    TripUnderstandingFallbackResponse,
+)
 from app.core.errors import AppError
 from app.domain.collaboration import (
     ActorScope,
@@ -352,7 +355,7 @@ class CollaborationService:
         session_token: str | None,
         request: ParticipantConversationRequest,
         idempotency_key: str,
-    ) -> MemberSessionView:
+    ) -> MemberSessionView | TripUnderstandingFallbackResponse:
         try:
             actor = self.repository.authenticate_participant(session_token)
             is_advance_replay = self.repository.has_completed_operation(
@@ -381,6 +384,8 @@ class CollaborationService:
                 )
             except TripDraftRevisionUnavailable as error:
                 raise self._revision_error(error) from error
+            if isinstance(revised, TripUnderstandingFallbackResponse):
+                return revised
             if (
                 revised.trip_id != actor.trip_id
                 or revised.revision != request.base_revision + 1

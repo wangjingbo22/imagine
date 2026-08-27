@@ -33,8 +33,19 @@ def _proposal() -> TripUnderstandingProposal:
     )
 
 
-def _request(*extra: str) -> OrganizerConversationRequest:
-    fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
+def _two_participant_proposal() -> TripUnderstandingProposal:
+    fixture = FIXTURE.with_name("two_participants.json")
+    return TripUnderstandingProposal.model_validate_json(
+        fixture.read_text(encoding="utf-8"),
+        strict=True,
+    )
+
+
+def _request(
+    *extra: str,
+    fixture_path: Path = FIXTURE,
+) -> OrganizerConversationRequest:
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     evidence = " ".join(item["sourceText"] for item in fixture["fieldEvidence"])
     evidence = " ".join((evidence, "ordinary assistance no stair restriction", *extra))
     return OrganizerConversationRequest(
@@ -307,3 +318,90 @@ async def test_http_without_bailian_key_returns_fixed_questions_with_zero_calls(
     assert data["understanding"] is None
     assert data["canPlan"] is False
     assert len(data["fallback"]["items"]) == 6
+
+
+@pytest.mark.asyncio
+async def test_member_conversation_fallback_returns_200_without_advancing_collaboration(
+    tmp_path: Path,
+) -> None:
+    gateway = CountingGateway(_result(proposal=_two_participant_proposal()))
+    app = _app(tmp_path, gateway)
+    request = _request(fixture_path=FIXTURE.with_name("two_participants.json"))
+
+    created = await _post(app, request, "t004-member-create-01")
+    created_data = created.json()["data"]
+    trip_id = created_data["revision"]["tripId"]
+    member_id = created_data["revision"]["memberBindings"]["member-2"]
+    organizer_token = created_data["organizerAccess"]["organizerToken"]
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        invitation = await client.post(
+            f"/api/v2/trips/{trip_id}/participants/{member_id}/invitations",
+            headers={
+                "X-Organizer-Token": organizer_token,
+                "Idempotency-Key": "t004-member-invite-01",
+            },
+            json={
+                "schemaVersion": "1.0",
+                "expectedVersion": 1,
+            },
+        )
+        invitation_token = invitation.json()["data"]["invitationUrl"].split("=", 1)[1]
+        redeemed = await client.post(
+            "/api/v2/participant-invitations/redeem",
+            headers={"Idempotency-Key": "t004-member-redeem-01"},
+            json={
+                "schemaVersion": "1.0",
+                "token": invitation_token,
+            },
+        )
+        member_token = redeemed.json()["data"]["participantSessionToken"]
+
+        gateway.result = _result(failure_code="LLM_TIMEOUT")
+        response = await client.put(
+            "/api/v2/member-session/conversation",
+            headers={
+                "X-Participant-Session": member_token,
+                "Idempotency-Key": "t004-member-fallback-01",
+            },
+            json={
+                "schemaVersion": "1.0",
+                "baseRevision": 1,
+                "expectedVersion": 2,
+                "naturalLanguageRequest": request.natural_language_request,
+                "answers": request.model_dump(mode="json", by_alias=True)["answers"],
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    data = response.json()["data"]
+    assert data["answerRevision"] == 2
+    assert data["naturalLanguageRequest"] == request.natural_language_request
+    assert data["answers"] == request.model_dump(mode="json", by_alias=True)["answers"]
+    assert data["recognition"] == {
+        "source": "FIXED_QUESTIONS",
+        "model": "test-model",
+        "failureCode": "LLM_TIMEOUT",
+        "callCount": 2,
+    }
+    assert data["fallback"]["mode"] == "FIXED_QUESTIONS"
+    assert len(data["fallback"]["items"]) == 6
+    assert data["understanding"] is None
+    assert data["canPlan"] is False
+    assert gateway.calls == 2
+
+    with sqlite3.connect(tmp_path / "planning.sqlite3") as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM trip_draft_revisions"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT current_revision, version FROM collaboration_sessions"
+        ).fetchone() == (1, 2)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM collaboration_idempotency "
+            "WHERE operation='ADVANCE_REVISION'"
+        ).fetchone()[0] == 0
