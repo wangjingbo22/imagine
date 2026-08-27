@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 import json
 from typing import Any
@@ -7,7 +8,12 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
-from app.domain.trip_draft import LlmTripDraftFields, TripDraftExtractionError
+from app.application.llm_gateway import TripUnderstandingTransportError
+from app.domain.trip_draft import (
+    LlmTripDraftFields,
+    TripDraftExtractionError,
+    TripUnderstandingRequest,
+)
 
 
 _SYSTEM_PROMPT = """你是行知旅伴的行程字段提取器。只做信息抽取，不生成攻略。
@@ -30,6 +36,14 @@ budgetCents, interests, mustVisit, avoidPlaces。
 “偏好/喜欢吃”等文字拼接进地点。没有明确的起点或终点必须填 null。
 """
 
+_TRIP_UNDERSTANDING_SYSTEM_PROMPT = """You produce only the strict T001 trip-understanding JSON contract.
+Use only schemaVersion, trip, participants, fieldEvidence, missingFields,
+ambiguities, and confirmationQuestions, with their documented nested fields.
+Do not output UUIDs, statuses, constraints, providers, plans, versions, or
+authoritative business decisions. Do not output Markdown, explanations, or
+JSON fences. Preserve source evidence exactly and return one JSON object.
+"""
+
 
 class BailianTripDraftExtractor:
     """Extract trip candidates through Bailian's OpenAI-compatible endpoint."""
@@ -43,7 +57,10 @@ class BailianTripDraftExtractor:
         timeout_seconds: float,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
+        if not 8 <= timeout_seconds <= 12:
+            raise ValueError("timeoutSeconds must be between 8 and 12 seconds")
         self.model = model
+        self.timeout_seconds = timeout_seconds
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=timeout_seconds,
@@ -99,6 +116,62 @@ class BailianTripDraftExtractor:
             raise TripDraftExtractionError(code) from exc
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, ValidationError) as exc:
             raise TripDraftExtractionError("BAILIAN_INVALID_RESPONSE") from exc
+
+    async def propose_trip_understanding(
+        self,
+        request: TripUnderstandingRequest,
+    ) -> str:
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {
+                    "role": "system",
+                    "content": _TRIP_UNDERSTANDING_SYSTEM_PROMPT,
+                },
+                {
+                    "role": "user",
+                    "content": request.model_dump_json(by_alias=True),
+                },
+            ],
+        }
+        try:
+            async with asyncio.timeout(self.timeout_seconds):
+                response = await self._client.post(
+                    "/chat/completions",
+                    headers=self._headers,
+                    json=payload,
+                )
+            response.raise_for_status()
+            body = response.json()
+            content = body["choices"][0]["message"]["content"]
+            if not isinstance(content, str):
+                raise TypeError("message content is not text")
+            return content
+        except (TimeoutError, httpx.TimeoutException) as error:
+            raise TripUnderstandingTransportError(
+                "LLM_TIMEOUT", retryable=True
+            ) from error
+        except httpx.HTTPStatusError as error:
+            status = error.response.status_code
+            if status in {401, 403}:
+                code, retryable = "LLM_AUTH_FAILED", False
+            else:
+                code = "LLM_UNAVAILABLE"
+                retryable = status == 429 or status >= 500
+            raise TripUnderstandingTransportError(
+                code,
+                retryable=retryable,
+            ) from error
+        except httpx.TransportError as error:
+            raise TripUnderstandingTransportError(
+                "LLM_UNAVAILABLE", retryable=True
+            ) from error
+        except (KeyError, IndexError, TypeError, ValueError) as error:
+            raise TripUnderstandingTransportError(
+                "LLM_INVALID_RESPONSE", retryable=False
+            ) from error
 
 
 def _strip_json_fence(content: str) -> str:
