@@ -178,16 +178,23 @@ class _NeverRouteBuilder:
         raise AssertionError("invalid client facts reached route construction")
 
 
+class _NeverReadinessGuard:
+    def operation(self, access):  # pragma: no cover - must not be called
+        raise AssertionError("invalid client facts reached readiness guard")
+
+
 @pytest.mark.asyncio
 async def test_http_client_cannot_embed_place_route_price_or_provenance(
     tmp_path: Path,
 ) -> None:
     database_path = tmp_path / "http.sqlite3"
     registry = SqliteProviderFactRegistry(database_path)
+    readiness_guard = _NeverReadinessGuard()
     recommendation = RecommendationOrchestrationService(
         fact_registry=registry,
         proposal_gateway=_NeverGateway(),
         route_builder=_NeverRouteBuilder(),
+        readiness_guard=readiness_guard,
     )
     app = create_app(
         settings=Settings(
@@ -197,6 +204,7 @@ async def test_http_client_cannot_embed_place_route_price_or_provenance(
         ),
         service=object(),  # type: ignore[arg-type]
         recommendation_service=recommendation,
+        collaboration_readiness_guard=readiness_guard,
         provider_fact_registry=registry,
     )
     command = RecommendationOrchestrationRequest(
