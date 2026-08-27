@@ -561,7 +561,7 @@ class SqliteCollaborationRepository:
                     (str(trip_id), str(participant_id)),
                 ).fetchone()
                 if active is not None:
-                    raise CollaborationStoreError("INVITATION_ALREADY_ACTIVE")
+                    raise CollaborationStoreError("INVITATION_ACTIVE_EXISTS")
                 next_version = expected_version + 1
                 connection.execute(
                     """INSERT INTO participant_invitations

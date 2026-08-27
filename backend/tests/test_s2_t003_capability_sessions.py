@@ -179,6 +179,30 @@ def test_invitation_idempotency_returns_same_metadata_without_replaying_link(tmp
         )
 
 
+def test_active_invitation_duplicate_uses_frozen_error_code(tmp_path) -> None:
+    repository = SqliteCollaborationRepository(tmp_path / "collaboration.sqlite3")
+    revision = load_revision()
+    bootstrap = repository.bootstrap_collaboration(revision, "bootstrap-active-dup")
+    assert bootstrap.organizer_token is not None
+
+    repository.create_invitation(
+        trip_id=revision.trip_id,
+        participant_id=revision.member_bindings["member-2"],
+        organizer_token=bootstrap.organizer_token,
+        expected_version=1,
+        idempotency_key="invite-active-dup-1",
+    )
+
+    with pytest.raises(CollaborationStoreError, match="INVITATION_ACTIVE_EXISTS"):
+        repository.create_invitation(
+            trip_id=revision.trip_id,
+            participant_id=revision.member_bindings["member-2"],
+            organizer_token=bootstrap.organizer_token,
+            expected_version=2,
+            idempotency_key="invite-active-dup-2",
+        )
+
+
 def test_redeem_idempotency_returns_same_metadata_without_replaying_session_secret(tmp_path) -> None:
     repository = SqliteCollaborationRepository(tmp_path / "collaboration.sqlite3")
     revision = load_revision()
