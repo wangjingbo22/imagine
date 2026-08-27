@@ -25,6 +25,10 @@ from app.application.arrival_decision_service import ArrivalDecisionService
 from app.application.arrival_evidence_service import ArrivalEvidenceService
 from app.application.arrival_execution_service import ArrivalExecutionService
 from app.application.collaboration_service import CollaborationService
+from app.application.collaboration_ports import (
+    TripDraftRevisionPort,
+    UnavailableTripDraftRevisionPort,
+)
 from app.application.amap_service import AmapLocationService
 from app.application.llm_gateway import (
     CandidateSelectionGateway,
@@ -59,6 +63,7 @@ from app.infrastructure.openai_compatible_llm import (
     OpenAiCompatibleCandidateSelectionClient,
 )
 from app.infrastructure.collaboration_store import SqliteCollaborationRepository
+from app.domain.hard_conflicts import DeterministicHardConflictEvaluator
 from app.infrastructure.memory_media_reader import SqliteMemoryMediaReader
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.infrastructure.provider_fact_registry import SqliteProviderFactRegistry
@@ -165,6 +170,8 @@ def create_app(
     replan_explanation_gateway: ReplanExplanationGateway | None = None,
     arrival_evidence_service: ArrivalEvidenceService | None = None,
     arrival_decision_service: ArrivalDecisionService | None = None,
+    trip_draft_revision_port: TripDraftRevisionPort | None = None,
+    collaboration_repository: SqliteCollaborationRepository | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     managed_client: AmapClient | None = None
@@ -338,7 +345,12 @@ def create_app(
         allow_origins=resolved_settings.cors_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "X-Organizer-Token"],
+        allow_headers=[
+            "Content-Type",
+            "X-Organizer-Token",
+            "X-Participant-Session",
+            "Idempotency-Key",
+        ],
         expose_headers=[
             "X-Recognition-Source",
             "X-Recognition-Model",
@@ -392,9 +404,12 @@ def create_app(
         workflow_service,
     )
     app.state.collaboration_service = CollaborationService(
-        SqliteCollaborationRepository(resolved_settings.plan_version_db_path),
-        app.state.trip_draft_service,
-        workflow_service,
+        repository=(
+            collaboration_repository
+            or SqliteCollaborationRepository(resolved_settings.plan_version_db_path)
+        ),
+        revisions=(trip_draft_revision_port or UnavailableTripDraftRevisionPort()),
+        evaluator=DeterministicHardConflictEvaluator(),
     )
     app.state.plan_version_service = plan_service
     app.state.workflow_service = workflow_service
