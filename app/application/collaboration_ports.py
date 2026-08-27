@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import StrEnum
 from typing import ContextManager, Protocol, runtime_checkable
 from uuid import UUID
@@ -70,6 +70,29 @@ class UnavailableTripDraftRevisionPort:
         self._raise()
         raise AssertionError("unreachable")
 
+    async def submit_participant_conversation(
+        self,
+        *,
+        trip_id: UUID,
+        participant_id: UUID,
+        base_revision: int,
+        submission: ConversationSubmission,
+        idempotency_key: str,
+    ) -> TripDraftRevisionView:
+        self._raise()
+        raise AssertionError("unreachable")
+
+    def apply_relaxation(
+        self,
+        *,
+        trip_id: UUID,
+        base_revision: int,
+        patch: CanonicalRevisionPatch,
+        idempotency_key: str,
+    ) -> TripDraftRevisionView:
+        self._raise()
+        raise AssertionError("unreachable")
+
 
 class PlanningOperation(StrEnum):
     PROVIDER_FACTS = "PROVIDER_FACTS"
@@ -100,29 +123,6 @@ class ReadinessPermit:
 
 class CollaborationReadinessGuard(Protocol):
     def operation(self, access: PlanningAccess) -> ContextManager[ReadinessPermit]: ...
-
-    async def submit_participant_conversation(
-        self,
-        *,
-        trip_id: UUID,
-        participant_id: UUID,
-        base_revision: int,
-        submission: ConversationSubmission,
-        idempotency_key: str,
-    ) -> TripDraftRevisionView:
-        self._raise()
-        raise AssertionError("unreachable")
-
-    def apply_relaxation(
-        self,
-        *,
-        trip_id: UUID,
-        base_revision: int,
-        patch: CanonicalRevisionPatch,
-        idempotency_key: str,
-    ) -> TripDraftRevisionView:
-        self._raise()
-        raise AssertionError("unreachable")
 
 
 __all__ = [
