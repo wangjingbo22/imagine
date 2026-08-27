@@ -131,7 +131,7 @@ class SqliteTripDraftRevisionRepository:
                     recognition_source TEXT NOT NULL,
                     recognition_model TEXT,
                     degraded_reason TEXT,
-                    llm_call_count INTEGER NOT NULL CHECK (llm_call_count IN (0, 1)),
+                    llm_call_count INTEGER NOT NULL CHECK (llm_call_count IN (0, 1, 2)),
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (draft_id, revision),
                     UNIQUE (trip_id, revision)
@@ -389,14 +389,28 @@ class SqliteTripDraftRevisionRepository:
         self,
         claim: ClaimedCommand,
         revision: TripDraftRevision,
-        extraction: TripUnderstandingExtraction,
+        extraction: object,
     ) -> None:
         if revision.revision != claim.target_revision:
             raise TripDraftRevisionStoreError("DRAFT_REVISION_STALE")
         if revision.draft_id != claim.draft_id or revision.trip_id != claim.trip_id:
             raise TripDraftRevisionStoreError("DRAFT_REVISION_STALE")
-        if extraction.proposal != revision.understanding:
+        if getattr(extraction, "proposal", None) != revision.understanding:
             raise TripDraftRevisionStoreError("TRIP_UNDERSTANDING_INVALID")
+        call_count = getattr(extraction, "call_count", None)
+        if call_count is None:
+            call_count = getattr(extraction, "llm_call_count", None)
+        if call_count not in {0, 1, 2}:
+            raise TripDraftRevisionStoreError("TRIP_UNDERSTANDING_INVALID")
+        recognition_source = getattr(extraction, "recognition_source", None)
+        if recognition_source is None:
+            recognition_source = "MODEL_PROPOSAL"
+        recognition_model = getattr(extraction, "model", None)
+        if recognition_model is None:
+            recognition_model = getattr(extraction, "recognition_model", None)
+        degraded_reason = getattr(extraction, "failure_code", None)
+        if degraded_reason is None:
+            degraded_reason = getattr(extraction, "degraded_reason", None)
         with self._immediate_transaction() as connection:
             prior = self._find_command(connection, claim.command)
             if prior is None or prior["request_digest"] != claim.command.request_digest:
@@ -432,10 +446,10 @@ class SqliteTripDraftRevisionRepository:
                         ),
                         claim.command.request_digest,
                         revision.source_digest,
-                        extraction.recognition_source,
-                        extraction.recognition_model,
-                        extraction.degraded_reason,
-                        extraction.llm_call_count,
+                        recognition_source,
+                        recognition_model,
+                        degraded_reason,
+                        call_count,
                         revision.created_at.isoformat(),
                     ),
                 )

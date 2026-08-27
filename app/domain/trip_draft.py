@@ -667,7 +667,7 @@ class TripUnderstandingExtraction(UnderstandingContractModel):
     recognition_source: str = Field(min_length=1, max_length=40)
     recognition_model: str | None = Field(default=None, max_length=120)
     degraded_reason: str | None = Field(default=None, max_length=240)
-    llm_call_count: Literal[0, 1]
+    llm_call_count: Literal[0, 1, 2]
 
 
 def _camel_to_snake(value: str) -> str:

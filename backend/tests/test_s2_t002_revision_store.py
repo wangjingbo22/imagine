@@ -164,3 +164,22 @@ def test_pending_command_hides_old_current_revision(tmp_path: Path) -> None:
 
     with pytest.raises(_store_module().TripDraftRevisionStoreError, match="TRIP_DRAFT_REVISION_UNAVAILABLE"):
         repository.get_current(TRIP_ID)
+
+
+def test_completed_revision_preserves_two_transport_attempts(tmp_path: Path) -> None:
+    repository = _repository(tmp_path / "drafts.sqlite3")
+    claim = repository.claim_initial(_command(), draft_id=DRAFT_ID, trip_id=TRIP_ID)
+    extraction = TripUnderstandingExtraction(
+        proposal=_proposal(),
+        recognitionSource="TEST",
+        recognitionModel="test-model",
+        degradedReason=None,
+        llmCallCount=2,
+    )
+
+    repository.complete(claim, _revision(), extraction)
+
+    with sqlite3.connect(tmp_path / "drafts.sqlite3") as connection:
+        assert connection.execute(
+            "SELECT llm_call_count FROM trip_draft_revisions"
+        ).fetchone()[0] == 2
