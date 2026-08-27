@@ -813,3 +813,154 @@ def test_actor_scope_rejects_before_idempotency_and_t002(tmp_path) -> None:
                 "WHERE operation='RESOLVE_CONFIRMATION' AND idempotency_key=?",
                 (key,),
             ).fetchone()[0] == 0
+
+
+def test_member_resolution_uses_entry_actor_after_session_expires(
+    tmp_path, monkeypatch
+) -> None:
+    harness = _ready_harness(tmp_path)
+    conflict = revision_with_trip_budget(harness.revision, 45_000)
+    revisions = _AdvancingRevisionPort(conflict)
+    service = CollaborationService(
+        repository=harness.repository,
+        revisions=revisions,
+        evaluator=DeterministicHardConflictEvaluator(),
+    )
+    state = service.organizer_state(harness.revision.trip_id, harness.organizer_token)
+    issue = next(item for item in state.confirmation_items if item.code is IssueCode.CONFLICT)
+    option = next(
+        item
+        for item in issue.relaxations
+        if item.actor_scope.value == "PARTICIPANT"
+        and item.participant_id == harness.revision.member_bindings["member-2"]
+    )
+    invitation = harness.repository.create_invitation(
+        trip_id=harness.revision.trip_id,
+        participant_id=harness.revision.member_bindings["member-2"],
+        organizer_token=harness.organizer_token,
+        expected_version=3,
+        idempotency_key="d017-entry-invite-1",
+    )
+    redeemed = harness.repository.redeem_invitation(
+        invitation.invitation_url.split("=", 1)[1],
+        "d017-entry-redeem-1",
+    )
+    assert redeemed.participant_session_token is not None
+    token = redeemed.participant_session_token
+    request = ResolveConfirmationItemRequest(
+        schemaVersion="1.0",
+        baseRevision=1,
+        expectedVersion=4,
+        relaxationId=option.relaxation_id,
+    )
+    original_auth = harness.repository.authenticate_participant
+    auth_calls = 0
+
+    def expire_after_entry_auth(value):
+        nonlocal auth_calls
+        auth_calls += 1
+        actor = original_auth(value)
+        if auth_calls == 1:
+            with harness.repository._connect() as connection:
+                connection.execute(
+                    "UPDATE collaboration_actor_sessions SET expires_at=? WHERE token_hash=?",
+                    ("2020-01-01T00:00:00+00:00", harness.repository._token_hash(token)),
+                )
+        return actor
+
+    monkeypatch.setattr(
+        harness.repository, "authenticate_participant", expire_after_entry_auth
+    )
+
+    result = service.resolve_member_issue(
+        session_token=token,
+        item_id=issue.item_id,
+        request=request,
+        idempotency_key="d017-expiry-boundary-1",
+    )
+
+    assert auth_calls == 1
+    assert result.current_revision == 2
+    assert result.confirmation_status is ParticipantConfirmationStatus.NEEDS_RECONFIRMATION
+    serialized = result.model_dump_json()
+    assert harness.organizer_token not in serialized
+    assert token not in serialized
+    assert "Alex" not in serialized
+    assert "architecture" not in serialized
+    assert revisions.relaxation_calls == 1
+    with harness.repository._connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM collaboration_resolution_audit"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM collaboration_idempotency "
+            "WHERE operation='RESOLVE_CONFIRMATION' AND idempotency_key=?",
+            ("d017-expiry-boundary-1",),
+        ).fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("session_state", ("expired", "revoked"))
+def test_member_resolution_rejects_expired_or_revoked_session_at_entry(
+    tmp_path, session_state
+) -> None:
+    harness = _ready_harness(tmp_path)
+    conflict = revision_with_trip_budget(harness.revision, 45_000)
+    revisions = _AdvancingRevisionPort(conflict)
+    service = CollaborationService(
+        repository=harness.repository,
+        revisions=revisions,
+        evaluator=DeterministicHardConflictEvaluator(),
+    )
+    state = service.organizer_state(harness.revision.trip_id, harness.organizer_token)
+    issue = next(item for item in state.confirmation_items if item.code is IssueCode.CONFLICT)
+    invitation = harness.repository.create_invitation(
+        trip_id=harness.revision.trip_id,
+        participant_id=harness.revision.member_bindings["member-2"],
+        organizer_token=harness.organizer_token,
+        expected_version=3,
+        idempotency_key=f"d017-entry-{session_state}-invite-1",
+    )
+    redeemed = harness.repository.redeem_invitation(
+        invitation.invitation_url.split("=", 1)[1],
+        f"d017-entry-{session_state}-redeem-1",
+    )
+    assert redeemed.participant_session_token is not None
+    token_hash = harness.repository._token_hash(redeemed.participant_session_token)
+    with harness.repository._connect() as connection:
+        if session_state == "expired":
+            connection.execute(
+                "UPDATE collaboration_actor_sessions SET expires_at=? WHERE token_hash=?",
+                ("2020-01-01T00:00:00+00:00", token_hash),
+            )
+        else:
+            connection.execute(
+                "UPDATE collaboration_actor_sessions SET revoked_at=? WHERE token_hash=?",
+                (datetime.now(UTC).isoformat(), token_hash),
+            )
+    request = ResolveConfirmationItemRequest(
+        schemaVersion="1.0",
+        baseRevision=1,
+        expectedVersion=4,
+        relaxationId="rx_0000000000000000",
+    )
+
+    with pytest.raises(AppError) as captured:
+        service.resolve_member_issue(
+            session_token=redeemed.participant_session_token,
+            item_id=issue.item_id,
+            request=request,
+            idempotency_key=f"d017-entry-{session_state}-resolve-1",
+        )
+
+    assert captured.value.code == "PARTICIPANT_SESSION_REQUIRED"
+    assert captured.value.http_status == 401
+    assert revisions.relaxation_calls == 0
+    with harness.repository._connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM collaboration_resolution_audit"
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM collaboration_idempotency "
+            "WHERE operation='RESOLVE_CONFIRMATION' AND idempotency_key=?",
+            (f"d017-entry-{session_state}-resolve-1",),
+        ).fetchone()[0] == 0

@@ -310,34 +310,37 @@ class CollaborationService:
         except CollaborationStoreError as error:
             raise self._store_error(error) from error
 
+    def _member_view_for_actor(self, actor: CollaborationActor) -> MemberSessionView:
+        revision = self._current(actor.trip_id)
+        stored = self.repository.get_stored(actor.trip_id)
+        member_key = self._member_key(revision, actor.participant_id)
+        participant = next(
+            item for item in revision.understanding.participants
+            if item.member_key == member_key
+        )
+        aggregate = self._derive(revision, stored)
+        visible = [
+            item for item in aggregate.confirmation_items
+            if item.participant_id is None
+            or item.participant_id == actor.participant_id
+            or actor.participant_id in item.related_participant_ids
+        ]
+        progress = next(item for item in aggregate.participants if item.participant_id == actor.participant_id)
+        return MemberSessionView(
+            tripId=actor.trip_id,
+            participantId=actor.participant_id,
+            currentRevision=revision.revision,
+            sharedTrip=revision.understanding.trip,
+            participant=participant,
+            accessStatus=progress.access_status,
+            confirmationStatus=progress.confirmation_status,
+            confirmationItems=visible,
+        )
+
     def member_view(self, session_token: str | None) -> MemberSessionView:
         try:
             actor = self.repository.authenticate_participant(session_token)
-            revision = self._current(actor.trip_id)
-            stored = self.repository.get_stored(actor.trip_id)
-            member_key = self._member_key(revision, actor.participant_id)
-            participant = next(
-                item for item in revision.understanding.participants
-                if item.member_key == member_key
-            )
-            aggregate = self._derive(revision, stored)
-            visible = [
-                item for item in aggregate.confirmation_items
-                if item.participant_id is None
-                or item.participant_id == actor.participant_id
-                or actor.participant_id in item.related_participant_ids
-            ]
-            progress = next(item for item in aggregate.participants if item.participant_id == actor.participant_id)
-            return MemberSessionView(
-                tripId=actor.trip_id,
-                participantId=actor.participant_id,
-                currentRevision=revision.revision,
-                sharedTrip=revision.understanding.trip,
-                participant=participant,
-                accessStatus=progress.access_status,
-                confirmationStatus=progress.confirmation_status,
-                confirmationItems=visible,
-            )
+            return self._member_view_for_actor(actor)
         except AppError:
             raise
         except CollaborationStoreError as error:
@@ -628,7 +631,7 @@ class CollaborationService:
             raise self._store_error(error) from error
         if organizer:
             return self.organizer_state(trip_id, view_token)
-        return self.member_view(view_token)
+        return self._member_view_for_actor(actor)
 
     def resolve_member_issue(
         self,
