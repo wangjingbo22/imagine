@@ -31,7 +31,9 @@ def get_recommendation_service(
     request: Request,
 ) -> RecommendationOrchestrationService:
     service = request.app.state.recommendation_service
-    if not isinstance(service, RecommendationOrchestrationService):
+    if not isinstance(service, RecommendationOrchestrationService) or (
+        service.readiness_guard is not request.app.state.collaboration_readiness_guard
+    ):
         raise AppError(
             code="RECOMMENDATION_SERVICE_UNAVAILABLE",
             message="推荐编排依赖尚未配置",

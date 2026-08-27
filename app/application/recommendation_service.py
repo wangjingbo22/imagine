@@ -137,6 +137,10 @@ class RecommendationOrchestrationService:
         self._planner = planner or DeterministicCandidatePlanner()
         self._fairness = fairness or DeterministicFairRecommendationService()
 
+    @property
+    def readiness_guard(self) -> CollaborationReadinessGuard:
+        return self._readiness_guard
+
     async def recommend(
         self,
         *,

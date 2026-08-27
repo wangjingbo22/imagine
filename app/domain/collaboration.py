@@ -258,12 +258,45 @@ class MemberSessionView(CollaborationModel):
     confirmation_items: list[CollaborationIssue]
 
 
+COLLABORATION_SCHEMA_MODELS = (
+    CollaborationAggregate,
+    CollaborationProgress,
+    CollaborationIssue,
+    ParticipantProgress,
+    InvitationCreateRequest,
+    InvitationCreated,
+    OrganizerBootstrapResult,
+    InvitationRedeemRequest,
+    InvitationRedeemed,
+    ParticipantMutationRequest,
+    ParticipantConversationRequest,
+    ResolveConfirmationItemRequest,
+    MemberSessionView,
+)
+
+
+def published_collaboration_schema() -> dict[str, object]:
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "S2-T003 Collaboration Contracts",
+        "schemaVersion": "1.0",
+        "$defs": {
+            model.__name__: model.model_json_schema(
+                by_alias=True,
+                mode="validation",
+            )
+            for model in COLLABORATION_SCHEMA_MODELS
+        },
+    }
+
+
 __all__ = [
     "ActorScope",
     "CollaborationAggregate",
     "CollaborationIssue",
     "CollaborationModel",
     "CollaborationProgress",
+    "COLLABORATION_SCHEMA_MODELS",
     "CollaborationStatus",
     "ConversationAnswer",
     "ConversationSubmission",
@@ -280,6 +313,7 @@ __all__ = [
     "ParticipantConversationRequest",
     "ParticipantMutationRequest",
     "ParticipantProgress",
+    "published_collaboration_schema",
     "QUESTION_IDS",
     "RelaxationAction",
     "RelaxationOption",

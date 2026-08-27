@@ -299,6 +299,26 @@ def create_app(
         )
 
     if (
+        planning_boundary_service is not None
+        and (
+            not isinstance(planning_boundary_service, PlanningBoundaryService)
+            or planning_boundary_service.readiness_guard is not resolved_readiness_guard
+        )
+    ):
+        planning_boundary_service = None
+    if (
+        recommendation_service is not None
+        and (
+            not isinstance(
+                recommendation_service,
+                RecommendationOrchestrationService,
+            )
+            or recommendation_service.readiness_guard is not resolved_readiness_guard
+        )
+    ):
+        recommendation_service = None
+
+    if (
         execution_replan_service is None
         and replan_explanation_gateway is None
         and bailian_api_key

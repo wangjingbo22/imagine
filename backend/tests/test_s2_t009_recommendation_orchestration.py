@@ -531,6 +531,7 @@ async def test_http_interface_rejects_client_satisfaction_loss(tmp_path: Path) -
         settings=settings,
         service=object(),  # type: ignore[arg-type]
         recommendation_service=service,
+        collaboration_readiness_guard=service.readiness_guard,
     )
     transport = httpx.ASGITransport(app=app)
     body = _command().model_dump(mode="json", by_alias=True)
@@ -562,6 +563,7 @@ def test_openapi_exposes_t009_route_without_candidate_or_score_input(
         ),
         service=object(),  # type: ignore[arg-type]
         recommendation_service=service,
+        collaboration_readiness_guard=service.readiness_guard,
     )
 
     operation = app.openapi()["paths"][
