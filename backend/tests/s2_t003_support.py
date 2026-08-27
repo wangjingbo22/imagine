@@ -94,3 +94,34 @@ def revision_with_member_budget(
     ]
     proposal = revision.understanding.model_copy(update={"participants": participants})
     return replace(revision, understanding=proposal)
+
+
+def revision_with_times(
+    revision: FakeRevision,
+    start: str,
+    end: str,
+) -> FakeRevision:
+    trip = revision.understanding.trip.model_copy(
+        update={"start_time": start, "end_time": end}
+    )
+    return replace(
+        revision,
+        understanding=revision.understanding.model_copy(update={"trip": trip}),
+    )
+
+
+def revision_with_places(
+    revision: FakeRevision,
+    *,
+    must_visit: list[str],
+    avoid_places: list[str],
+) -> FakeRevision:
+    participants = list(revision.understanding.participants)
+    participants[0] = participants[0].model_copy(update={"must_visit": must_visit})
+    participants[1] = participants[1].model_copy(update={"avoid_places": avoid_places})
+    return replace(
+        revision,
+        understanding=revision.understanding.model_copy(
+            update={"participants": participants}
+        ),
+    )
