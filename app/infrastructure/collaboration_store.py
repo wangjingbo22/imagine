@@ -6,6 +6,7 @@ import json
 import secrets
 from datetime import UTC, datetime, timedelta
 from dataclasses import dataclass
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Callable
 from uuid import UUID, uuid4
@@ -33,6 +34,24 @@ class CollaborationActor:
     participant_id: UUID
     role: str
     expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ConfirmationRecord:
+    participant_id: UUID
+    confirmed_revision: int | None
+    confirmed_shared_digest: str | None
+    confirmed_member_digest: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class StoredCollaboration:
+    trip_id: UUID
+    organizer_participant_id: UUID
+    current_revision: int
+    version: int
+    policy_version: str
+    confirmations: Mapping[UUID, ConfirmationRecord]
 
 
 def _ensure_column(
@@ -534,6 +553,340 @@ class SqliteCollaborationRepository:
             role=row["role"],
             expires_at=expires_at,
         )
+
+    def get_stored(self, trip_id: UUID) -> StoredCollaboration:
+        with self._connect() as connection:
+            session = connection.execute(
+                "SELECT trip_id, organizer_participant_id, current_revision, version, policy_version "
+                "FROM collaboration_sessions WHERE trip_id=?",
+                (str(trip_id),),
+            ).fetchone()
+            if session is None:
+                raise CollaborationStoreError("COLLABORATION_NOT_FOUND")
+            rows = connection.execute(
+                "SELECT participant_id, confirmed_revision, confirmed_shared_digest, "
+                "confirmed_member_digest FROM collaboration_participants WHERE trip_id=?",
+                (str(trip_id),),
+            ).fetchall()
+        return StoredCollaboration(
+            trip_id=trip_id,
+            organizer_participant_id=UUID(session["organizer_participant_id"]),
+            current_revision=int(session["current_revision"] or 1),
+            version=int(session["version"] or 1),
+            policy_version=session["policy_version"] or "S2-T003.1",
+            confirmations={
+                UUID(row["participant_id"]): ConfirmationRecord(
+                    participant_id=UUID(row["participant_id"]),
+                    confirmed_revision=row["confirmed_revision"],
+                    confirmed_shared_digest=row["confirmed_shared_digest"],
+                    confirmed_member_digest=row["confirmed_member_digest"],
+                )
+                for row in rows
+            },
+        )
+
+    def begin_idempotent_operation(
+        self,
+        *,
+        actor_scope: str,
+        actor_id: str,
+        operation: str,
+        idempotency_key: str,
+        request_digest: str,
+    ) -> dict[str, object] | None:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                prior = connection.execute(
+                    "SELECT request_digest, result_json FROM collaboration_idempotency "
+                    "WHERE actor_scope=? AND actor_id=? AND operation=? AND idempotency_key=?",
+                    (actor_scope, actor_id, operation, idempotency_key),
+                ).fetchone()
+                if prior is not None:
+                    if prior["request_digest"] != request_digest:
+                        raise CollaborationStoreError("IDEMPOTENCY_KEY_REUSED")
+                    connection.execute("COMMIT")
+                    return json.loads(prior["result_json"]) if prior["result_json"] else None
+                connection.execute(
+                    """INSERT INTO collaboration_idempotency
+                    (actor_scope, actor_id, operation, idempotency_key, request_digest)
+                    VALUES (?, ?, ?, ?, ?)""",
+                    (actor_scope, actor_id, operation, idempotency_key, request_digest),
+                )
+                connection.execute("COMMIT")
+                return None
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+
+    def complete_idempotent_operation(
+        self,
+        *,
+        actor_scope: str,
+        actor_id: str,
+        operation: str,
+        idempotency_key: str,
+        result: Mapping[str, object],
+    ) -> None:
+        now = self._clock()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                updated = connection.execute(
+                    "UPDATE collaboration_idempotency SET result_json=?, completed_at=? "
+                    "WHERE actor_scope=? AND actor_id=? AND operation=? AND idempotency_key=?",
+                    (
+                        json.dumps(dict(result), sort_keys=True, separators=(",", ":")),
+                        now.isoformat(),
+                        actor_scope,
+                        actor_id,
+                        operation,
+                        idempotency_key,
+                    ),
+                ).rowcount
+                if updated != 1:
+                    raise CollaborationStoreError("IDEMPOTENCY_OPERATION_NOT_FOUND")
+                connection.execute("COMMIT")
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+
+    def confirmation_records(self, trip_id: UUID) -> dict[UUID, ConfirmationRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT participant_id, confirmed_revision, confirmed_shared_digest, "
+                "confirmed_member_digest FROM collaboration_participants WHERE trip_id=?",
+                (str(trip_id),),
+            ).fetchall()
+        return {
+            UUID(row["participant_id"]): ConfirmationRecord(
+                participant_id=UUID(row["participant_id"]),
+                confirmed_revision=row["confirmed_revision"],
+                confirmed_shared_digest=row["confirmed_shared_digest"],
+                confirmed_member_digest=row["confirmed_member_digest"],
+            )
+            for row in rows
+        }
+
+    def record_confirmation(
+        self,
+        *,
+        trip_id: UUID,
+        participant_id: UUID,
+        revision: int,
+        shared_digest: str,
+        member_digest: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> int:
+        request_digest = canonical_sha256({
+            "tripId": str(trip_id),
+            "participantId": str(participant_id),
+            "revision": revision,
+            "sharedDigest": shared_digest,
+            "memberDigest": member_digest,
+            "expectedVersion": expected_version,
+        })
+        now = self._clock()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                prior = connection.execute(
+                    "SELECT request_digest, result_json FROM collaboration_idempotency "
+                    "WHERE actor_scope='PARTICIPANT' AND actor_id=? AND operation='CONFIRM' "
+                    "AND idempotency_key=?",
+                    (str(participant_id), idempotency_key),
+                ).fetchone()
+                if prior is not None:
+                    if prior["request_digest"] != request_digest:
+                        raise CollaborationStoreError("IDEMPOTENCY_KEY_REUSED")
+                    result = json.loads(prior["result_json"])
+                    connection.execute("COMMIT")
+                    return int(result["collaborationVersion"])
+                session = connection.execute(
+                    "SELECT version FROM collaboration_sessions WHERE trip_id=?",
+                    (str(trip_id),),
+                ).fetchone()
+                if session is None:
+                    raise CollaborationStoreError("COLLABORATION_NOT_FOUND")
+                if session["version"] != expected_version:
+                    raise CollaborationStoreError("COLLABORATION_VERSION_STALE")
+                participant = connection.execute(
+                    "SELECT 1 FROM collaboration_participants WHERE trip_id=? AND participant_id=?",
+                    (str(trip_id), str(participant_id)),
+                ).fetchone()
+                if participant is None:
+                    raise CollaborationStoreError("PARTICIPANT_NOT_BOUND")
+                next_version = expected_version + 1
+                updated = connection.execute(
+                    "UPDATE collaboration_sessions SET version=?, updated_at=? "
+                    "WHERE trip_id=? AND version=?",
+                    (next_version, now.isoformat(), str(trip_id), expected_version),
+                ).rowcount
+                if updated != 1:
+                    raise CollaborationStoreError("COLLABORATION_VERSION_STALE")
+                connection.execute(
+                    "UPDATE collaboration_participants SET status='CONFIRMED', confirmed_revision=?, "
+                    "confirmed_shared_digest=?, confirmed_member_digest=?, updated_at=? "
+                    "WHERE trip_id=? AND participant_id=?",
+                    (
+                        revision,
+                        shared_digest,
+                        member_digest,
+                        now.isoformat(),
+                        str(trip_id),
+                        str(participant_id),
+                    ),
+                )
+                result_json = json.dumps(
+                    {"collaborationVersion": next_version},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                connection.execute(
+                    """INSERT INTO collaboration_idempotency
+                    (actor_scope, actor_id, operation, idempotency_key, request_digest,
+                     resource_id, result_json, completed_at)
+                    VALUES ('PARTICIPANT', ?, 'CONFIRM', ?, ?, ?, ?, ?)""",
+                    (
+                        str(participant_id),
+                        idempotency_key,
+                        request_digest,
+                        str(trip_id),
+                        result_json,
+                        now.isoformat(),
+                    ),
+                )
+                connection.execute("COMMIT")
+                return next_version
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+
+    def advance_revision(
+        self,
+        *,
+        trip_id: UUID,
+        before_revision: int,
+        after_revision: int,
+        expected_version: int,
+        actor_scope: str,
+        actor_id: str,
+        idempotency_key: str,
+    ) -> int:
+        if after_revision <= before_revision:
+            raise CollaborationStoreError("DRAFT_REVISION_STALE")
+        request_digest = canonical_sha256({
+            "tripId": str(trip_id),
+            "beforeRevision": before_revision,
+            "afterRevision": after_revision,
+            "expectedVersion": expected_version,
+        })
+        now = self._clock()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                prior = connection.execute(
+                    "SELECT request_digest, result_json FROM collaboration_idempotency "
+                    "WHERE actor_scope=? AND actor_id=? AND operation='ADVANCE_REVISION' "
+                    "AND idempotency_key=?",
+                    (actor_scope, actor_id, idempotency_key),
+                ).fetchone()
+                if prior is not None:
+                    if prior["request_digest"] != request_digest:
+                        raise CollaborationStoreError("IDEMPOTENCY_KEY_REUSED")
+                    result = json.loads(prior["result_json"])
+                    connection.execute("COMMIT")
+                    return int(result["collaborationVersion"])
+                active = connection.execute(
+                    "SELECT 1 FROM collaboration_operation_leases "
+                    "WHERE trip_id=? AND completed_at IS NULL AND expires_at>?",
+                    (str(trip_id), now.isoformat()),
+                ).fetchone()
+                if active is not None:
+                    raise CollaborationStoreError("COLLABORATION_OPERATION_IN_PROGRESS")
+                row = connection.execute(
+                    "SELECT current_revision, version FROM collaboration_sessions WHERE trip_id=?",
+                    (str(trip_id),),
+                ).fetchone()
+                if row is None:
+                    raise CollaborationStoreError("COLLABORATION_NOT_FOUND")
+                if row["version"] != expected_version:
+                    raise CollaborationStoreError("COLLABORATION_VERSION_STALE")
+                if row["current_revision"] != before_revision:
+                    raise CollaborationStoreError("DRAFT_REVISION_STALE")
+                next_version = expected_version + 1
+                updated = connection.execute(
+                    "UPDATE collaboration_sessions SET current_revision=?, version=?, updated_at=? "
+                    "WHERE trip_id=? AND current_revision=? AND version=?",
+                    (
+                        after_revision,
+                        next_version,
+                        now.isoformat(),
+                        str(trip_id),
+                        before_revision,
+                        expected_version,
+                    ),
+                ).rowcount
+                if updated != 1:
+                    raise CollaborationStoreError("COLLABORATION_VERSION_STALE")
+                result_json = json.dumps(
+                    {"collaborationVersion": next_version},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                connection.execute(
+                    """INSERT INTO collaboration_idempotency
+                    (actor_scope, actor_id, operation, idempotency_key, request_digest,
+                     resource_id, result_json, completed_at)
+                    VALUES (?, ?, 'ADVANCE_REVISION', ?, ?, ?, ?, ?)""",
+                    (
+                        actor_scope,
+                        actor_id,
+                        idempotency_key,
+                        request_digest,
+                        str(trip_id),
+                        result_json,
+                        now.isoformat(),
+                    ),
+                )
+                connection.execute("COMMIT")
+                return next_version
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+
+    def record_resolution_audit(
+        self,
+        *,
+        trip_id: UUID,
+        item_id: str,
+        relaxation_id: str,
+        actor_id: str,
+        before_revision: int,
+        after_revision: int,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """INSERT INTO collaboration_resolution_audit
+                (audit_id, trip_id, item_id, relaxation_id, actor_id,
+                 before_revision, after_revision, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    str(uuid4()),
+                    str(trip_id),
+                    item_id,
+                    relaxation_id,
+                    actor_id,
+                    before_revision,
+                    after_revision,
+                    self._clock().isoformat(),
+                ),
+            )
 
 
 __all__ = ["CollaborationStoreError", "SqliteCollaborationRepository"]
