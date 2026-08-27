@@ -1,7 +1,11 @@
+from __future__ import annotations
+
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from app.api.planning_access import build_planning_access
+from app.application.collaboration_ports import PlanningOperation
 from app.application.recommendation_service import (
     MemberPreference,
     ProviderFactRestoreError,
@@ -83,21 +87,24 @@ async def get_provider_fact_set_summary(
 @router.post(
     "/api/v1/trips/{trip_id}/recommendations",
     summary="从服务端 FactRef 生成唯一公平推荐",
-    description=(
-        "客户端只提交服务端签发的 factSetId/digest；服务恢复事实，调用千问白名单"
-        "候选提议，重建真实路线后执行 HARD 与公平排序。模型超时、格式错误、摘要"
-        "不匹配或越界 ID 会自动切换确定性枚举，最终只返回一个 3—4 任务方案。"
-    ),
 )
 async def recommend_unique_plan(
     trip_id: UUID,
     command: RecommendationOrchestrationRequest,
+    http_request: Request,
     service: RecommendationOrchestrationService = Depends(
         get_recommendation_service
     ),
 ) -> ApiResponse[RecommendationOrchestrationResult]:
+    access = build_planning_access(
+        http_request, trip_id, PlanningOperation.RECOMMENDATION
+    )
     try:
-        result = await service.recommend(trip_id=trip_id, request=command)
+        result = await service.recommend(
+            trip_id=trip_id,
+            request=command,
+            access=access,
+        )
     except RecommendationOrchestrationError as error:
         raise AppError(
             code=error.code,
@@ -109,55 +116,56 @@ async def recommend_unique_plan(
 
 @router.get("/api/v2/trips/{trip_id}/recommendations")
 async def recommendations(trip_id: UUID, request: Request) -> ApiResponse:
-    """Fetch provider facts only after the collaboration planning gate is open."""
+    """Build recommendations only from the guarded current revision."""
     organizer_token = request.headers.get("X-Organizer-Token")
+    access = build_planning_access(
+        request, trip_id, PlanningOperation.RECOMMENDATION
+    )
+    guard = request.app.state.collaboration_readiness_guard
     collaboration = request.app.state.collaboration_service
-    collaboration.assert_planning_ready(trip_id, organizer_token)
-    state = collaboration.state(trip_id)
-    parsed = [item.parsed for item in state.participants if item.parsed is not None]
-    organizer = next(
-        item.parsed
-        for item in state.participants
-        if item.is_organizer and item.parsed is not None
-    )
-    city = await request.app.state.location_service.resolve_city(organizer.city_name)
-    interests = [interest for item in parsed for interest in item.interests]
-    must_visit = [place for item in parsed for place in item.must_visit]
-    avoid_places = [place for item in parsed for place in item.avoid_places]
-    places = await request.app.state.location_service.search_places(
-        city.cityContext,
-        keywords=" ".join(interests) or "景点",
-        types=[],
-        page=1,
-        page_size=25,
-    )
-    facts = [
-        FactRef(factRefId=f"AMAP:{place.placeId}", place=place)
-        for place in places.places
-    ]
-    service = TrustedRecommendationService()
-    candidates = service.issue_candidates(
-        facts,
-        interests=interests,
-        must_visit=must_visit,
-        avoid_places=avoid_places,
-    )
-    ranked = service.rank(candidates, None)
-    return ApiResponse(
-        data=service.choose_single_plan(
-            ranked,
-            facts,
-            [
-                MemberPreference(
-                    participant_id=str(item.participant_id),
-                    interests=tuple(item.parsed.interests),
-                    must_visit=tuple(item.parsed.must_visit),
-                )
-                for item in state.participants
-                if item.parsed is not None
-            ],
+    with guard.operation(access):
+        revision = collaboration.ready_revision(trip_id, organizer_token)
+        trip = revision.understanding.trip
+        city = await request.app.state.location_service.resolve_city(
+            trip.city_name or ""
         )
-    )
+        members = revision.understanding.participants
+        interests = [interest for item in members for interest in item.interests]
+        must_visit = [place for item in members for place in item.must_visit]
+        avoid_places = [place for item in members for place in item.avoid_places]
+        places = await request.app.state.location_service.search_places(
+            city.cityContext,
+            keywords=" ".join(interests) or "景点",
+            types=[],
+            page=1,
+            page_size=25,
+        )
+        facts = [
+            FactRef(factRefId=f"AMAP:{place.placeId}", place=place)
+            for place in places.places
+        ]
+        service = TrustedRecommendationService()
+        candidates = service.issue_candidates(
+            facts,
+            interests=interests,
+            must_visit=must_visit,
+            avoid_places=avoid_places,
+        )
+        ranked = service.rank(candidates, None)
+        return ApiResponse(
+            data=service.choose_single_plan(
+                ranked,
+                facts,
+                [
+                    MemberPreference(
+                        participant_id=str(revision.member_bindings[item.member_key]),
+                        interests=tuple(item.interests),
+                        must_visit=tuple(item.must_visit),
+                    )
+                    for item in members
+                ],
+            )
+        )
 
 
 __all__ = ["router"]

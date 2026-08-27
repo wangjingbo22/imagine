@@ -10,6 +10,12 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
+from app.application.collaboration_ports import (
+    CollaborationReadinessGuard,
+    PlanningAccess,
+    PlanningOperation,
+)
+from app.core.errors import AppError
 from app.domain.recommendation import (
     CandidatePlace,
     CandidateRecommendation,
@@ -120,9 +126,11 @@ class RecommendationOrchestrationService:
         fact_registry: ProviderFactRegistryPort,
         proposal_gateway: CandidateProposalGatewayPort,
         route_builder: RouteCandidateBuilderPort,
+        readiness_guard: CollaborationReadinessGuard,
         planner: DeterministicCandidatePlanner | None = None,
         fairness: DeterministicFairRecommendationService | None = None,
     ) -> None:
+        self._readiness_guard = readiness_guard
         self._fact_registry = fact_registry
         self._proposal_gateway = proposal_gateway
         self._route_builder = route_builder
@@ -130,6 +138,26 @@ class RecommendationOrchestrationService:
         self._fairness = fairness or DeterministicFairRecommendationService()
 
     async def recommend(
+        self,
+        *,
+        trip_id: UUID,
+        request: RecommendationOrchestrationRequest,
+        access: PlanningAccess,
+    ) -> RecommendationOrchestrationResult:
+        if (
+            access.trip_id != trip_id
+            or access.operation is not PlanningOperation.RECOMMENDATION
+        ):
+            raise AppError(
+                "PLANNING_ACCESS_INVALID",
+                "推荐访问上下文不匹配",
+                409,
+                False,
+            )
+        with self._readiness_guard.operation(access):
+            return await self._recommend_ready(trip_id=trip_id, request=request)
+
+    async def _recommend_ready(
         self,
         *,
         trip_id: UUID,

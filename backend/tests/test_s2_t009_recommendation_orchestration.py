@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -17,7 +19,13 @@ from app.application.recommendation_service import (
     RecommendationOrchestrationService,
     RouteCandidateBuildError,
 )
+from app.application.collaboration_ports import (
+    PlanningAccess,
+    PlanningOperation,
+    ReadinessPermit,
+)
 from app.core.config import Settings
+from app.domain.collaboration import TripFlowKind
 from app.domain.models import SourceStatus
 from app.main import create_app
 from app.schemas.trip import Participant, Preference, PreferenceType, TripMode
@@ -38,6 +46,28 @@ from app.services.recommendation import (
 FIXTURE = Path(__file__).parent / "fixtures" / "planning" / "golden_candidate_plan.json"
 DIGEST = "c" * 64
 FACT_SET_ID = "facts-beijing-group-v1"
+
+
+class AllowingReadinessGuard:
+    @contextmanager
+    def operation(self, access: PlanningAccess):
+        yield ReadinessPermit(
+            trip_id=access.trip_id,
+            readiness_digest="legacy",
+            operation_id=access.operation_id,
+            operation=access.operation,
+            flow_kind=TripFlowKind.LEGACY_SINGLE,
+            expires_at=datetime.now(UTC) + timedelta(minutes=1),
+        )
+
+
+def _access(trip_id: UUID) -> PlanningAccess:
+    return PlanningAccess(
+        trip_id=trip_id,
+        organizer_capability="organizer-test-token",
+        operation_id="recommendation-test",
+        operation=PlanningOperation.RECOMMENDATION,
+    )
 
 
 def _base_request() -> CandidatePlanRequest:
@@ -238,6 +268,7 @@ def _service(
         fact_registry=registry,
         proposal_gateway=resolved_gateway,
         route_builder=builder,
+        readiness_guard=AllowingReadinessGuard(),
     )
     return service, registry, resolved_gateway, builder
 
@@ -254,7 +285,9 @@ async def test_valid_qwen_proposal_builds_routes_and_returns_one_fair_plan() -> 
     service, registry, gateway, builder = _service()
     trip_id = registry.facts.trip.trip_id
 
-    result = await service.recommend(trip_id=trip_id, request=_command())
+    result = await service.recommend(
+        trip_id=trip_id, request=_command(), access=_access(trip_id)
+    )
 
     assert result.strategy == "LLM_PROPOSAL"
     assert result.fallback_reason is None
@@ -300,6 +333,7 @@ async def test_model_failures_use_deterministic_enumeration(
     result = await service.recommend(
         trip_id=registry.facts.trip.trip_id,
         request=_command(),
+        access=_access(registry.facts.trip.trip_id),
     )
 
     assert result.strategy == "DETERMINISTIC_FALLBACK"
@@ -319,6 +353,7 @@ async def test_forbidden_model_cost_field_is_strictly_rejected_and_falls_back() 
     result = await service.recommend(
         trip_id=registry.facts.trip.trip_id,
         request=_command(),
+        access=_access(registry.facts.trip.trip_id),
     )
 
     assert result.strategy == "DETERMINISTIC_FALLBACK"
@@ -335,6 +370,7 @@ async def test_allowlisted_but_unroutable_model_proposal_falls_back() -> None:
     result = await service.recommend(
         trip_id=registry.facts.trip.trip_id,
         request=_command(),
+        access=_access(registry.facts.trip.trip_id),
     )
 
     assert result.strategy == "DETERMINISTIC_FALLBACK"
@@ -353,10 +389,12 @@ async def test_repeated_same_input_returns_identical_unique_decision() -> None:
     first = await service.recommend(
         trip_id=registry.facts.trip.trip_id,
         request=_command(),
+        access=_access(registry.facts.trip.trip_id),
     )
     second = await service.recommend(
         trip_id=registry.facts.trip.trip_id,
         request=_command(),
+        access=_access(registry.facts.trip.trip_id),
     )
 
     assert first == second
@@ -377,10 +415,12 @@ async def test_same_input_and_different_model_wording_cannot_change_winner() -> 
     first = await first_service.recommend(
         trip_id=first_registry.facts.trip.trip_id,
         request=_command(),
+        access=_access(first_registry.facts.trip.trip_id),
     )
     second = await second_service.recommend(
         trip_id=second_registry.facts.trip.trip_id,
         request=_command(),
+        access=_access(second_registry.facts.trip.trip_id),
     )
 
     assert first.decision.selected_plan.candidate_id == (
@@ -402,6 +442,7 @@ async def test_tampered_client_digest_stops_before_model_and_route_calls() -> No
         await service.recommend(
             trip_id=registry.facts.trip.trip_id,
             request=tampered,
+            access=_access(registry.facts.trip.trip_id),
         )
 
     assert captured.value.code == "PROVIDER_FACT_DIGEST_MISMATCH"
