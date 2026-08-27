@@ -730,6 +730,114 @@ def test_stale_base_revision_rejects_before_idempotency_and_t002(tmp_path) -> No
     assert (session["current_revision"], session["version"]) == (2, 4)
 
 
+@pytest.mark.asyncio
+async def test_member_submit_stale_expected_version_rejects_before_t002(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    invitation = harness.repository.create_invitation(
+        trip_id=harness.revision.trip_id,
+        participant_id=harness.revision.member_bindings["member-2"],
+        organizer_token=harness.organizer_token,
+        expected_version=3,
+        idempotency_key="d018-stale-submit-invite",
+    )
+    redeemed = harness.repository.redeem_invitation(
+        invitation.invitation_url.split("=", 1)[1],
+        "d018-stale-submit-redeem",
+    )
+    assert redeemed.participant_session_token is not None
+
+    with pytest.raises(AppError) as captured:
+        await harness.service.submit_member(
+            session_token=redeemed.participant_session_token,
+            request=_member_request(version=999),
+            idempotency_key="d018-stale-submit",
+        )
+
+    assert captured.value.code == "COLLABORATION_VERSION_STALE"
+    assert harness.revisions.submit_calls == 0
+
+
+class _ReplayableSubmitRevisionPort(FakeTripDraftRevisionPort):
+    def __init__(self, revision: FakeRevision) -> None:
+        super().__init__(revision)
+        self.gateway_calls = 0
+        self._saved_result = None
+
+    async def submit_participant_conversation(self, **kwargs):
+        self.submit_calls += 1
+        if self._saved_result is not None:
+            return self._saved_result
+        self.gateway_calls += 1
+        self._saved_result = replace(
+            self.current,
+            revision=self.current.revision + 1,
+            source_digest="b" * 64,
+        )
+        self.current = self._saved_result
+        return self._saved_result
+
+
+@pytest.mark.asyncio
+async def test_member_submit_replay_finishes_collaboration_advance_without_reparse(
+    tmp_path, monkeypatch
+) -> None:
+    harness = _ready_harness(tmp_path)
+    invitation = harness.repository.create_invitation(
+        trip_id=harness.revision.trip_id,
+        participant_id=harness.revision.member_bindings["member-2"],
+        organizer_token=harness.organizer_token,
+        expected_version=3,
+        idempotency_key="d019-replay-submit-invite",
+    )
+    redeemed = harness.repository.redeem_invitation(
+        invitation.invitation_url.split("=", 1)[1],
+        "d019-replay-submit-redeem",
+    )
+    assert redeemed.participant_session_token is not None
+    revisions = _ReplayableSubmitRevisionPort(harness.revision)
+    service = CollaborationService(
+        repository=harness.repository,
+        revisions=revisions,
+        evaluator=DeterministicHardConflictEvaluator(),
+    )
+
+    original_advance = harness.repository.advance_revision
+    failed_after_commit = True
+
+    def fail_after_commit(**kwargs):
+        nonlocal failed_after_commit
+        result = original_advance(**kwargs)
+        if failed_after_commit:
+            failed_after_commit = False
+            raise RuntimeError("simulated response loss")
+        return result
+
+    monkeypatch.setattr(harness.repository, "advance_revision", fail_after_commit)
+    request = _member_request(version=4)
+    with pytest.raises(RuntimeError, match="simulated response loss"):
+        await service.submit_member(
+            session_token=redeemed.participant_session_token,
+            request=request,
+            idempotency_key="d019-replay-submit",
+        )
+
+    result = await service.submit_member(
+        session_token=redeemed.participant_session_token,
+        request=request,
+        idempotency_key="d019-replay-submit",
+    )
+
+    assert result.current_revision == 2
+    assert revisions.submit_calls == 2
+    assert revisions.gateway_calls == 1
+    with harness.repository._connect() as connection:
+        row = connection.execute(
+            "SELECT current_revision, version FROM collaboration_sessions WHERE trip_id=?",
+            (str(harness.revision.trip_id),),
+        ).fetchone()
+        assert (row["current_revision"], row["version"]) == (2, 5)
+
+
 def test_actor_scope_rejects_before_idempotency_and_t002(tmp_path) -> None:
     harness = _ready_harness(tmp_path)
     conflict = revision_with_trip_budget(harness.revision, 45_000)

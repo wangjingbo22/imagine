@@ -1010,6 +1010,24 @@ class SqliteCollaborationRepository:
             json.loads(row["result_json"]) if row["result_json"] else None,
         )
 
+    def has_completed_operation(
+        self,
+        *,
+        actor_scope: str,
+        actor_id: str,
+        operation: str,
+        idempotency_key: str,
+    ) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM collaboration_idempotency "
+                "WHERE actor_scope=? AND actor_id=? AND operation=? "
+                "AND idempotency_key=? AND result_json IS NOT NULL "
+                "AND completed_at IS NOT NULL",
+                (actor_scope, actor_id, operation, idempotency_key),
+            ).fetchone()
+        return row is not None
+
     def complete_idempotent_operation(
         self,
         *,

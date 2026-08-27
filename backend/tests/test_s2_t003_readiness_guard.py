@@ -39,6 +39,15 @@ class FakeCollaboration:
         return "a" * 64
 
 
+class SequencedCollaboration:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def require_ready(self, trip_id: UUID, organizer_capability: str | None) -> str:
+        self.calls += 1
+        return "a" * 64 if self.calls == 1 else "b" * 64
+
+
 class FakeLeaseRepository:
     def __init__(self) -> None:
         self.leases: dict[str, ReadinessPermit] = {}
@@ -148,6 +157,27 @@ def test_source_digest_change_invalidates_ready_guard_before_body(tmp_path) -> N
 
     assert captured.value.code == "COLLABORATION_NOT_READY"
     assert calls == 0
+
+
+def test_revision_change_between_ready_check_and_lease_never_enters_body() -> None:
+    repository = FakeLeaseRepository()
+    collaboration = SequencedCollaboration()
+    guard = SqliteCollaborationReadinessGuard(
+        database_path=None,
+        repository=repository,
+        collaboration=collaboration,
+        flow_registry=FakeFlowRegistry(TripFlowKind.COLLABORATION_V2),
+    )
+    calls = 0
+
+    with pytest.raises(AppError) as captured:
+        with guard.operation(_access()):
+            calls += 1
+
+    assert captured.value.code == "COLLABORATION_OPERATION_STALE"
+    assert calls == 0
+    assert collaboration.calls == 2
+    assert repository.leases == {}
 
 
 def test_same_operation_lease_retry_is_stable_and_digest_reuse_is_stale(tmp_path) -> None:

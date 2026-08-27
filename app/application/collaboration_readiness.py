@@ -78,6 +78,17 @@ class SqliteCollaborationReadinessGuard:
             ttl=self.lease_ttl,
         )
         try:
+            rechecked_digest = self.collaboration.require_ready(
+                access.trip_id,
+                access.organizer_capability,
+            )
+            if rechecked_digest != permit.readiness_digest:
+                raise AppError(
+                    "COLLABORATION_OPERATION_STALE",
+                    "就绪摘要在取得操作租约后发生变化",
+                    409,
+                    False,
+                )
             yield permit
         finally:
             self.repository.complete_lease(permit.operation_id)
