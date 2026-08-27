@@ -181,6 +181,7 @@
         },
         "ParticipantConfirmationStatus": {
           "enum": [
+            "MIGRATION_REQUIRED",
             "DRAFT",
             "CONFIRMED",
             "NEEDS_RECONFIRMATION"
@@ -1084,6 +1085,7 @@
         },
         "ParticipantConfirmationStatus": {
           "enum": [
+            "MIGRATION_REQUIRED",
             "DRAFT",
             "CONFIRMED",
             "NEEDS_RECONFIRMATION"
@@ -1564,6 +1566,7 @@
         },
         "ParticipantConfirmationStatus": {
           "enum": [
+            "MIGRATION_REQUIRED",
             "DRAFT",
             "CONFIRMED",
             "NEEDS_RECONFIRMATION"

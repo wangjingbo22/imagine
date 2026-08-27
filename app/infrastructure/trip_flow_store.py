@@ -78,6 +78,14 @@ def mark_legacy_collaboration_rows(connection: sqlite3.Connection) -> None:
         "UPDATE collaboration_sessions SET status='MIGRATION_REQUIRED' "
         "WHERE draft_id IS NULL AND status <> 'MIGRATION_REQUIRED'"
     )
+    connection.execute(
+        "UPDATE collaboration_participants SET status='MIGRATION_REQUIRED' "
+        "WHERE NOT EXISTS ("
+        "SELECT 1 FROM collaboration_sessions s WHERE s.trip_id=collaboration_participants.trip_id"
+        ") OR trip_id IN ("
+        "SELECT trip_id FROM collaboration_sessions WHERE draft_id IS NULL"
+        ")"
+    )
 
 
 class SqliteTripFlowRegistry:

@@ -58,6 +58,7 @@ class TripFlowKind(StrEnum):
 
 
 class ParticipantConfirmationStatus(StrEnum):
+    MIGRATION_REQUIRED = "MIGRATION_REQUIRED"
     DRAFT = "DRAFT"
     CONFIRMED = "CONFIRMED"
     NEEDS_RECONFIRMATION = "NEEDS_RECONFIRMATION"

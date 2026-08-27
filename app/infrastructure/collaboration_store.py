@@ -921,6 +921,12 @@ class SqliteCollaborationRepository:
                 (str(trip_id),),
             ).fetchone()
             if session is None:
+                legacy = connection.execute(
+                    "SELECT 1 FROM collaboration_participants WHERE trip_id=? LIMIT 1",
+                    (str(trip_id),),
+                ).fetchone()
+                if legacy is not None:
+                    raise CollaborationStoreError("TRIP_DRAFT_REVISION_UNAVAILABLE")
                 raise CollaborationStoreError("COLLABORATION_NOT_FOUND")
             if session["status"] == "MIGRATION_REQUIRED":
                 raise CollaborationStoreError("TRIP_DRAFT_REVISION_UNAVAILABLE")

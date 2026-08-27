@@ -217,7 +217,27 @@ def test_legacy_collaboration_rows_are_marked_migration_required(tmp_path) -> No
             "SELECT status FROM collaboration_sessions WHERE trip_id=?",
             (str(LEGACY_TRIP_ID),),
         ).fetchone()
+        participant = connection.execute(
+            "SELECT status FROM collaboration_participants WHERE trip_id=?",
+            (str(LEGACY_TRIP_ID),),
+        ).fetchone()
     assert row["status"] == "MIGRATION_REQUIRED"
+    assert participant["status"] == "MIGRATION_REQUIRED"
+    with pytest.raises(CollaborationStoreError, match="TRIP_DRAFT_REVISION_UNAVAILABLE"):
+        repository.get_stored(LEGACY_TRIP_ID)
+
+
+def test_legacy_participant_only_rows_are_marked_and_fail_closed(tmp_path) -> None:
+    path = tmp_path / "legacy-participant-only.sqlite3"
+    create_baseline_collaboration_schema(path)
+    repository = SqliteCollaborationRepository(path)
+
+    with repository._connect() as connection:
+        status = connection.execute(
+            "SELECT status FROM collaboration_participants WHERE trip_id=?",
+            (str(LEGACY_TRIP_ID),),
+        ).fetchone()["status"]
+    assert status == "MIGRATION_REQUIRED"
     with pytest.raises(CollaborationStoreError, match="TRIP_DRAFT_REVISION_UNAVAILABLE"):
         repository.get_stored(LEGACY_TRIP_ID)
 
