@@ -1,0 +1,457 @@
+{
+  "must-avoid-nfkc": [
+    {
+      "candidates": [],
+      "code": "CONFLICT",
+      "fieldPath": "participants[0].budgetCapCents",
+      "itemId": "ci_b983118a64a4445f",
+      "participantId": "10000000-0000-4000-8000-000000000001",
+      "reason": "成员预算上限低于共享预算，不能静默收紧",
+      "relatedParticipantIds": [],
+      "relaxations": [
+        {
+          "action": "LOWER_SHARED_BUDGET",
+          "actorScope": "ORGANIZER",
+          "fieldPath": "trip.budgetCents",
+          "label": "由组织者降低共享预算",
+          "participantId": null,
+          "proposedValue": 50000,
+          "relaxationId": "rx_ff92e9a5c44b6f4d"
+        },
+        {
+          "action": "RAISE_MEMBER_BUDGET_CAP",
+          "actorScope": "PARTICIPANT",
+          "fieldPath": "participants[0].budgetCapCents",
+          "label": "由该成员提高个人预算上限",
+          "participantId": "10000000-0000-4000-8000-000000000001",
+          "proposedValue": 90000,
+          "relaxationId": "rx_af0db90249f1122b"
+        }
+      ],
+      "ruleId": "S2T003.BUDGET.CAP_BELOW_SHARED"
+    },
+    {
+      "candidates": [],
+      "code": "INVALID",
+      "fieldPath": "participants[0].careDraft.assistanceTypeHint",
+      "itemId": "ci_957b44aab54ed279",
+      "participantId": "10000000-0000-4000-8000-000000000001",
+      "reason": "成员必须明确确认关怀模式",
+      "relatedParticipantIds": [],
+      "relaxations": [],
+      "ruleId": "S2T003.CARE.PROFILE_INVALID"
+    },
+    {
+      "candidates": [],
+      "code": "CONFLICT",
+      "fieldPath": "participants[1].budgetCapCents",
+      "itemId": "ci_c17fcbd70bfec6a7",
+      "participantId": "10000000-0000-4000-8000-000000000002",
+      "reason": "成员预算上限低于共享预算，不能静默收紧",
+      "relatedParticipantIds": [],
+      "relaxations": [
+        {
+          "action": "LOWER_SHARED_BUDGET",
+          "actorScope": "ORGANIZER",
+          "fieldPath": "trip.budgetCents",
+          "label": "由组织者降低共享预算",
+          "participantId": null,
+          "proposedValue": 40000,
+          "relaxationId": "rx_5aa33dc01c4b9ead"
+        },
+        {
+          "action": "RAISE_MEMBER_BUDGET_CAP",
+          "actorScope": "PARTICIPANT",
+          "fieldPath": "participants[1].budgetCapCents",
+          "label": "由该成员提高个人预算上限",
+          "participantId": "10000000-0000-4000-8000-000000000002",
+          "proposedValue": 90000,
+          "relaxationId": "rx_0ddc9e00653e6b75"
+        }
+      ],
+      "ruleId": "S2T003.BUDGET.CAP_BELOW_SHARED"
+    },
+    {
+      "candidates": [],
+      "code": "INVALID",
+      "fieldPath": "participants[1].careDraft.assistanceTypeHint",
+      "itemId": "ci_11b543729608dd27",
+      "participantId": "10000000-0000-4000-8000-000000000002",
+      "reason": "成员必须明确确认关怀模式",
+      "relatedParticipantIds": [],
+      "relaxations": [],
+      "ruleId": "S2T003.CARE.PROFILE_INVALID"
+    },
+    {
+      "candidates": [],
+      "code": "MISSING",
+      "fieldPath": "participants[1].careDraft.assistanceTypeHint",
+      "itemId": "ci_f585464dcf8aa7fb",
+      "participantId": "10000000-0000-4000-8000-000000000002",
+      "reason": "字段缺失，需要完成问题 MEMBER_CARE_PRESET",
+      "relatedParticipantIds": [],
+      "relaxations": [],
+      "ruleId": "S2T003.FIELD.REQUIRED"
+    }
+  ],
+  "nap-blocks-all-day": [
+    {
+      "candidates": [],
+      "code": "CONFLICT",
+      "fieldPath": "participants[0].budgetCapCents",
+      "itemId": "ci_b983118a64a4445f",
+      "participantId": "10000000-0000-4000-8000-000000000001",
+      "reason": "成员预算上限低于共享预算，不能静默收紧",
+      "relatedParticipantIds": [],
+      "relaxations": [
+        {
+          "action": "LOWER_SHARED_BUDGET",
+          "actorScope": "ORGANIZER",
+          "fieldPath": "trip.budgetCents",
+          "label": "由组织者降低共享预算",
+          "participantId": null,
+          "proposedValue": 50000,
+          "relaxationId": "rx_ff92e9a5c44b6f4d"
+        },
+        {
+          "action": "RAISE_MEMBER_BUDGET_CAP",
+          "actorScope": "PARTICIPANT",
+          "fieldPath": "participants[0].budgetCapCents",
+          "label": "由该成员提高个人预算上限",
+          "participantId": "10000000-0000-4000-8000-000000000001",
+          "proposedValue": 90000,
+          "relaxationId": "rx_af0db90249f1122b"
+        }
+      ],
+      "ruleId": "S2T003.BUDGET.CAP_BELOW_SHARED"
+    },
+    {
+      "candidates": [],
+      "code": "CONFLICT",
+      "fieldPath": "participants[1].budgetCapCents",
+      "itemId": "ci_c17fcbd70bfec6a7",
+      "participantId": "10000000-0000-4000-8000-000000000002",
+      "reason": "成员预算上限低于共享预算，不能静默收紧",
+      "relatedParticipantIds": [],
+      "relaxations": [
+        {
+          "action": "LOWER_SHARED_BUDGET",
+          "actorScope": "ORGANIZER",
+          "fieldPath": "trip.budgetCents",
+          "label": "由组织者降低共享预算",
+          "participantId": null,
+          "proposedValue": 40000,
+          "relaxationId": "rx_5aa33dc01c4b9ead"
+        },
+        {
+          "action": "RAISE_MEMBER_BUDGET_CAP",
+          "actorScope": "PARTICIPANT",
+          "fieldPath": "participants[1].budgetCapCents",
+          "label": "由该成员提高个人预算上限",
+          "participantId": "10000000-0000-4000-8000-000000000002",
+          "proposedValue": 90000,
+          "relaxationId": "rx_0ddc9e00653e6b75"
+        }
+      ],
+      "ruleId": "S2T003.BUDGET.CAP_BELOW_SHARED"
+    },
+    {
+      "candidates": [],
+      "code": "CONFLICT",
+      "fieldPath": "trip.endTime",
+      "itemId": "ci_3917d66140807629",
+      "participantId": "10000000-0000-4000-8000-000000000001",
+      "reason": "合并后的硬休息窗口覆盖全部可用出行时间",
+      "relatedParticipantIds": [
+        "10000000-0000-4000-8000-000000000002"
+      ],
+      "relaxations": [
+        {
+          "action": "EXTEND_SHARED_TIME",
+          "actorScope": "ORGANIZER",
+          "fieldPath": "trip.endTime",
+          "label": "由组织者扩展共享出行时间",
+          "participantId": null,
+          "proposedValue": null,
+          "relaxationId": "rx_cdbf2009efcceba3"
+        }
+      ],
+      "ruleId": "S2T003.TIME.BLOCKS_ALL_DAY"
+    }
+  ],
+  "one-person-ready": [],
+  "strictest-numeric-care": [
+    {
+      "candidates": [],
+      "code": "CONFLICT",
+      "fieldPath": "participants[0].budgetCapCents",
+      "itemId": "ci_b983118a64a4445f",
+      "participantId": "10000000-0000-4000-8000-000000000001",
+      "reason": "成员预算上限低于共享预算，不能静默收紧",
+      "relatedParticipantIds": [],
+      "relaxations": [
+        {
+          "action": "LOWER_SHARED_BUDGET",
+          "actorScope": "ORGANIZER",
+          "fieldPath": "trip.budgetCents",
+          "label": "由组织者降低共享预算",
+          "participantId": null,
+          "proposedValue": 50000,
+          "relaxationId": "rx_ff92e9a5c44b6f4d"
+        },
+        {
+          "action": "RAISE_MEMBER_BUDGET_CAP",
+          "actorScope": "PARTICIPANT",
+          "fieldPath": "participants[0].budgetCapCents",
+          "label": "由该成员提高个人预算上限",
+          "participantId": "10000000-0000-4000-8000-000000000001",
+          "proposedValue": 90000,
+          "relaxationId": "rx_af0db90249f1122b"
+        }
+      ],
+      "ruleId": "S2T003.BUDGET.CAP_BELOW_SHARED"
+    },
+    {
+      "candidates": [],
+      "code": "CONFLICT",
+      "fieldPath": "participants[1].budgetCapCents",
+      "itemId": "ci_c17fcbd70bfec6a7",
+      "participantId": "10000000-0000-4000-8000-000000000002",
+      "reason": "成员预算上限低于共享预算，不能静默收紧",
+      "relatedParticipantIds": [],
+      "relaxations": [
+        {
+          "action": "LOWER_SHARED_BUDGET",
+          "actorScope": "ORGANIZER",
+          "fieldPath": "trip.budgetCents",
+          "label": "由组织者降低共享预算",
+          "participantId": null,
+          "proposedValue": 40000,
+          "relaxationId": "rx_5aa33dc01c4b9ead"
+        },
+        {
+          "action": "RAISE_MEMBER_BUDGET_CAP",
+          "actorScope": "PARTICIPANT",
+          "fieldPath": "participants[1].budgetCapCents",
+          "label": "由该成员提高个人预算上限",
+          "participantId": "10000000-0000-4000-8000-000000000002",
+          "proposedValue": 90000,
+          "relaxationId": "rx_0ddc9e00653e6b75"
+        }
+      ],
+      "ruleId": "S2T003.BUDGET.CAP_BELOW_SHARED"
+    }
+  ],
+  "three-person-ready": [],
+  "time-window-reversed": [
+    {
+      "candidates": [],
+      "code": "CONFLICT",
+      "fieldPath": "participants[0].budgetCapCents",
+      "itemId": "ci_b983118a64a4445f",
+      "participantId": "10000000-0000-4000-8000-000000000001",
+      "reason": "成员预算上限低于共享预算，不能静默收紧",
+      "relatedParticipantIds": [],
+      "relaxations": [
+        {
+          "action": "LOWER_SHARED_BUDGET",
+          "actorScope": "ORGANIZER",
+          "fieldPath": "trip.budgetCents",
+          "label": "由组织者降低共享预算",
+          "participantId": null,
+          "proposedValue": 50000,
+          "relaxationId": "rx_ff92e9a5c44b6f4d"
+        },
+        {
+          "action": "RAISE_MEMBER_BUDGET_CAP",
+          "actorScope": "PARTICIPANT",
+          "fieldPath": "participants[0].budgetCapCents",
+          "label": "由该成员提高个人预算上限",
+          "participantId": "10000000-0000-4000-8000-000000000001",
+          "proposedValue": 90000,
+          "relaxationId": "rx_af0db90249f1122b"
+        }
+      ],
+      "ruleId": "S2T003.BUDGET.CAP_BELOW_SHARED"
+    },
+    {
+      "candidates": [],
+      "code": "INVALID",
+      "fieldPath": "participants[0].careDraft.assistanceTypeHint",
+      "itemId": "ci_957b44aab54ed279",
+      "participantId": "10000000-0000-4000-8000-000000000001",
+      "reason": "成员必须明确确认关怀模式",
+      "relatedParticipantIds": [],
+      "relaxations": [],
+      "ruleId": "S2T003.CARE.PROFILE_INVALID"
+    },
+    {
+      "candidates": [],
+      "code": "CONFLICT",
+      "fieldPath": "participants[1].budgetCapCents",
+      "itemId": "ci_c17fcbd70bfec6a7",
+      "participantId": "10000000-0000-4000-8000-000000000002",
+      "reason": "成员预算上限低于共享预算，不能静默收紧",
+      "relatedParticipantIds": [],
+      "relaxations": [
+        {
+          "action": "LOWER_SHARED_BUDGET",
+          "actorScope": "ORGANIZER",
+          "fieldPath": "trip.budgetCents",
+          "label": "由组织者降低共享预算",
+          "participantId": null,
+          "proposedValue": 40000,
+          "relaxationId": "rx_5aa33dc01c4b9ead"
+        },
+        {
+          "action": "RAISE_MEMBER_BUDGET_CAP",
+          "actorScope": "PARTICIPANT",
+          "fieldPath": "participants[1].budgetCapCents",
+          "label": "由该成员提高个人预算上限",
+          "participantId": "10000000-0000-4000-8000-000000000002",
+          "proposedValue": 90000,
+          "relaxationId": "rx_0ddc9e00653e6b75"
+        }
+      ],
+      "ruleId": "S2T003.BUDGET.CAP_BELOW_SHARED"
+    },
+    {
+      "candidates": [],
+      "code": "INVALID",
+      "fieldPath": "participants[1].careDraft.assistanceTypeHint",
+      "itemId": "ci_11b543729608dd27",
+      "participantId": "10000000-0000-4000-8000-000000000002",
+      "reason": "成员必须明确确认关怀模式",
+      "relatedParticipantIds": [],
+      "relaxations": [],
+      "ruleId": "S2T003.CARE.PROFILE_INVALID"
+    },
+    {
+      "candidates": [],
+      "code": "MISSING",
+      "fieldPath": "participants[1].careDraft.assistanceTypeHint",
+      "itemId": "ci_f585464dcf8aa7fb",
+      "participantId": "10000000-0000-4000-8000-000000000002",
+      "reason": "字段缺失，需要完成问题 MEMBER_CARE_PRESET",
+      "relatedParticipantIds": [],
+      "relaxations": [],
+      "ruleId": "S2T003.FIELD.REQUIRED"
+    },
+    {
+      "candidates": [],
+      "code": "INVALID",
+      "fieldPath": "trip.endTime",
+      "itemId": "ci_0c1710cad1411189",
+      "participantId": null,
+      "reason": "结束时间必须晚于开始时间",
+      "relatedParticipantIds": [],
+      "relaxations": [
+        {
+          "action": "SET_SHARED_FIELD",
+          "actorScope": "ORGANIZER",
+          "fieldPath": "trip.endTime",
+          "label": "由组织者修改结束时间",
+          "participantId": null,
+          "proposedValue": null,
+          "relaxationId": "rx_71dea8060c632f37"
+        }
+      ],
+      "ruleId": "S2T003.TIME.WINDOW_ORDER"
+    }
+  ],
+  "two-person-missing-care-budget": [
+    {
+      "candidates": [],
+      "code": "CONFLICT",
+      "fieldPath": "participants[0].budgetCapCents",
+      "itemId": "ci_b983118a64a4445f",
+      "participantId": "10000000-0000-4000-8000-000000000001",
+      "reason": "成员预算上限低于共享预算，不能静默收紧",
+      "relatedParticipantIds": [],
+      "relaxations": [
+        {
+          "action": "LOWER_SHARED_BUDGET",
+          "actorScope": "ORGANIZER",
+          "fieldPath": "trip.budgetCents",
+          "label": "由组织者降低共享预算",
+          "participantId": null,
+          "proposedValue": 50000,
+          "relaxationId": "rx_ff92e9a5c44b6f4d"
+        },
+        {
+          "action": "RAISE_MEMBER_BUDGET_CAP",
+          "actorScope": "PARTICIPANT",
+          "fieldPath": "participants[0].budgetCapCents",
+          "label": "由该成员提高个人预算上限",
+          "participantId": "10000000-0000-4000-8000-000000000001",
+          "proposedValue": 90000,
+          "relaxationId": "rx_af0db90249f1122b"
+        }
+      ],
+      "ruleId": "S2T003.BUDGET.CAP_BELOW_SHARED"
+    },
+    {
+      "candidates": [],
+      "code": "INVALID",
+      "fieldPath": "participants[0].careDraft.assistanceTypeHint",
+      "itemId": "ci_957b44aab54ed279",
+      "participantId": "10000000-0000-4000-8000-000000000001",
+      "reason": "成员必须明确确认关怀模式",
+      "relatedParticipantIds": [],
+      "relaxations": [],
+      "ruleId": "S2T003.CARE.PROFILE_INVALID"
+    },
+    {
+      "candidates": [],
+      "code": "CONFLICT",
+      "fieldPath": "participants[1].budgetCapCents",
+      "itemId": "ci_c17fcbd70bfec6a7",
+      "participantId": "10000000-0000-4000-8000-000000000002",
+      "reason": "成员预算上限低于共享预算，不能静默收紧",
+      "relatedParticipantIds": [],
+      "relaxations": [
+        {
+          "action": "LOWER_SHARED_BUDGET",
+          "actorScope": "ORGANIZER",
+          "fieldPath": "trip.budgetCents",
+          "label": "由组织者降低共享预算",
+          "participantId": null,
+          "proposedValue": 40000,
+          "relaxationId": "rx_5aa33dc01c4b9ead"
+        },
+        {
+          "action": "RAISE_MEMBER_BUDGET_CAP",
+          "actorScope": "PARTICIPANT",
+          "fieldPath": "participants[1].budgetCapCents",
+          "label": "由该成员提高个人预算上限",
+          "participantId": "10000000-0000-4000-8000-000000000002",
+          "proposedValue": 90000,
+          "relaxationId": "rx_0ddc9e00653e6b75"
+        }
+      ],
+      "ruleId": "S2T003.BUDGET.CAP_BELOW_SHARED"
+    },
+    {
+      "candidates": [],
+      "code": "INVALID",
+      "fieldPath": "participants[1].careDraft.assistanceTypeHint",
+      "itemId": "ci_11b543729608dd27",
+      "participantId": "10000000-0000-4000-8000-000000000002",
+      "reason": "成员必须明确确认关怀模式",
+      "relatedParticipantIds": [],
+      "relaxations": [],
+      "ruleId": "S2T003.CARE.PROFILE_INVALID"
+    },
+    {
+      "candidates": [],
+      "code": "MISSING",
+      "fieldPath": "participants[1].careDraft.assistanceTypeHint",
+      "itemId": "ci_f585464dcf8aa7fb",
+      "participantId": "10000000-0000-4000-8000-000000000002",
+      "reason": "字段缺失，需要完成问题 MEMBER_CARE_PRESET",
+      "relatedParticipantIds": [],
+      "relaxations": [],
+      "ruleId": "S2T003.FIELD.REQUIRED"
+    }
+  ]
+}

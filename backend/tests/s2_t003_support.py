@@ -7,7 +7,10 @@ from pathlib import Path
 from uuid import UUID
 
 from app.application.collaboration_ports import CanonicalRevisionPatch
+from app.domain.collaboration import CollaborationIssue
 from app.domain.collaboration import ConversationSubmission
+from app.domain.hard_conflicts import DeterministicHardConflictEvaluator
+from app.domain.trip_draft import CareDraft, CareNapWindow, CareWalkLimits
 from app.domain.trip_draft import TripUnderstandingProposal
 
 
@@ -134,3 +137,109 @@ def revision_with_places(
             update={"participants": participants}
         ),
     )
+
+
+def _care_for_case(
+    *,
+    assistance: str = "ORDINARY",
+    continuous: int | None = None,
+    transfers: int | None = None,
+    rest: int | None = None,
+    nap: tuple[str, str] | None = None,
+) -> CareDraft:
+    return CareDraft(
+        assistanceTypeHint=assistance,
+        childAge=None,
+        walkLimits=CareWalkLimits(
+            maxContinuousMeters=continuous,
+            maxDailyMeters=None,
+        ),
+        maxTransfers=transfers,
+        restIntervalMinutes=rest,
+        napWindow=(CareNapWindow(start=nap[0], end=nap[1]) if nap else None),
+        avoidStairs=False,
+    )
+
+
+def _replace_care(
+    revision: FakeRevision,
+    care_values: tuple[CareDraft, ...],
+    *,
+    clear_input_issues: bool,
+) -> FakeRevision:
+    participants = [
+        item.model_copy(update={"care_draft": care})
+        for item, care in zip(
+            revision.understanding.participants,
+            care_values,
+            strict=True,
+        )
+    ]
+    update: dict[str, object] = {"participants": participants}
+    if clear_input_issues:
+        update |= {
+            "missing_fields": [],
+            "ambiguities": [],
+            "confirmation_questions": [],
+        }
+    return replace(
+        revision,
+        understanding=revision.understanding.model_copy(update=update),
+    )
+
+
+def evaluate_fixture_case(case: dict[str, str]) -> tuple[CollaborationIssue, ...]:
+    revision = load_revision(Path(case["baseFixture"]).name)
+    mutation = case["mutation"]
+    if mutation == "NORMALIZE_READY":
+        cap = min(
+            item.budget_cap_cents
+            for item in revision.understanding.participants
+            if item.budget_cap_cents is not None
+        )
+        revision = revision_with_trip_budget(revision, cap)
+        care_values = tuple(
+            item.care_draft or _care_for_case()
+            for item in revision.understanding.participants
+        )
+        revision = _replace_care(revision, care_values, clear_input_issues=True)
+    elif mutation == "NFKC_MUST_AVOID":
+        revision = revision_with_places(
+            revision,
+            must_visit=[" 锛达綀锝呫€€锛綍锝庯絼 "],
+            avoid_places=["the bund"],
+        )
+    elif mutation == "REVERSE_TIME":
+        revision = revision_with_times(revision, "20:00", "08:30")
+    elif mutation == "NAP_COVERS_TRIP":
+        revision = revision_with_times(revision, "13:00", "14:00")
+        care_values = tuple(
+            _care_for_case(assistance="LOW_STAMINA", nap=("13:00", "14:00"))
+            for _ in revision.understanding.participants
+        )
+        revision = _replace_care(revision, care_values, clear_input_issues=True)
+    elif mutation == "NUMERIC_CARE_LIMITS":
+        care_values = (
+            _care_for_case(
+                assistance="LOW_STAMINA", continuous=500, transfers=0, rest=60
+            ),
+            _care_for_case(
+                assistance="LOW_STAMINA", continuous=1000, transfers=2, rest=90
+            ),
+        )
+        revision = _replace_care(revision, care_values, clear_input_issues=True)
+    elif mutation != "NONE":
+        raise AssertionError(f"unknown fixture mutation: {mutation}")
+    return DeterministicHardConflictEvaluator().evaluate(
+        revision,
+        organizer_participant_id=revision.member_bindings["member-1"],
+    )
+
+
+def serialize_issues(
+    issues: tuple[CollaborationIssue, ...],
+) -> list[dict[str, object]]:
+    return [
+        item.model_dump(mode="json", by_alias=True)
+        for item in issues
+    ]

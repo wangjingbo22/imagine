@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0",
+  "cases": [
+    {"name":"one-person-ready","baseFixture":"trip_understanding/one_participant.json","mutation":"NORMALIZE_READY"},
+    {"name":"two-person-missing-care-budget","baseFixture":"trip_understanding/two_participants.json","mutation":"NONE"},
+    {"name":"three-person-ready","baseFixture":"trip_understanding/three_participants.json","mutation":"NORMALIZE_READY"},
+    {"name":"must-avoid-nfkc","baseFixture":"trip_understanding/two_participants.json","mutation":"NFKC_MUST_AVOID"},
+    {"name":"time-window-reversed","baseFixture":"trip_understanding/two_participants.json","mutation":"REVERSE_TIME"},
+    {"name":"nap-blocks-all-day","baseFixture":"trip_understanding/two_participants.json","mutation":"NAP_COVERS_TRIP"},
+    {"name":"strictest-numeric-care","baseFixture":"trip_understanding/two_participants.json","mutation":"NUMERIC_CARE_LIMITS"}
+  ]
+}
