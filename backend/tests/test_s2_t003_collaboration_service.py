@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 
 import pytest
 
@@ -303,3 +304,72 @@ def test_resolution_retries_audit_after_revision_advance(tmp_path, monkeypatch) 
         assert connection.execute(
             "SELECT COUNT(*) FROM collaboration_resolution_audit"
         ).fetchone()[0] == 1
+
+
+def test_expired_member_session_uses_required_error_code(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    invitation = harness.repository.create_invitation(
+        trip_id=harness.revision.trip_id,
+        participant_id=harness.revision.member_bindings["member-2"],
+        organizer_token=harness.organizer_token,
+        expected_version=3,
+        idempotency_key="expired-session-invite",
+    )
+    redeemed = harness.repository.redeem_invitation(
+        invitation.invitation_url.split("=", 1)[1],
+        "expired-session-redeem",
+    )
+    assert redeemed.participant_session_token is not None
+    with harness.repository._connect() as connection:
+        connection.execute(
+            "UPDATE collaboration_actor_sessions SET expires_at=? WHERE token_hash=?",
+            (
+                datetime(2020, 1, 1, tzinfo=UTC).isoformat(),
+                harness.repository._token_hash(redeemed.participant_session_token),
+            ),
+        )
+
+    with pytest.raises(AppError) as captured:
+        harness.service.member_view(redeemed.participant_session_token)
+
+    assert captured.value.code == "PARTICIPANT_SESSION_REQUIRED"
+
+
+def test_member_cannot_use_organizer_relaxation(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    conflict = revision_with_trip_budget(harness.revision, 45_000)
+    harness.revisions.current = conflict
+    state = harness.service.organizer_state(harness.revision.trip_id, harness.organizer_token)
+    issue = next(item for item in state.confirmation_items if item.code is IssueCode.CONFLICT)
+    organizer_option = next(
+        item for item in issue.relaxations if item.actor_scope.value == "ORGANIZER"
+    )
+    invitation = harness.repository.create_invitation(
+        trip_id=harness.revision.trip_id,
+        participant_id=harness.revision.member_bindings["member-2"],
+        organizer_token=harness.organizer_token,
+        expected_version=3,
+        idempotency_key="scope-invite-0001",
+    )
+    redeemed = harness.repository.redeem_invitation(
+        invitation.invitation_url.split("=", 1)[1],
+        "scope-redeem-0001",
+    )
+    assert redeemed.participant_session_token is not None
+
+    request = ResolveConfirmationItemRequest(
+        schemaVersion="1.0",
+        baseRevision=1,
+        expectedVersion=4,
+        relaxationId=organizer_option.relaxation_id,
+    )
+    with pytest.raises(AppError) as captured:
+        harness.service.resolve_member_issue(
+            session_token=redeemed.participant_session_token,
+            item_id=issue.item_id,
+            request=request,
+            idempotency_key="scope-resolution-0001",
+        )
+
+    assert captured.value.code == "RELAXATION_PERMISSION_DENIED"
+    assert harness.revisions.relaxation_calls == 0

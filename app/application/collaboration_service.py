@@ -68,6 +68,8 @@ class CollaborationService:
     @staticmethod
     def _store_error(error: CollaborationStoreError) -> AppError:
         code = str(error)
+        if code == "PARTICIPANT_SESSION_EXPIRED":
+            code = "PARTICIPANT_SESSION_REQUIRED"
         if code in {"ORGANIZER_PERMISSION_REQUIRED", "ORGANIZER_SELF_INVITE_FORBIDDEN"}:
             status = 403
         elif code in {
@@ -564,9 +566,9 @@ class CollaborationService:
             raise AppError("RELAXATION_OPTION_INVALID", "放宽选项无效", 422, False)
         if organizer:
             if option.actor_scope is not ActorScope.ORGANIZER:
-                raise AppError("ACTOR_SCOPE_FORBIDDEN", "该放宽选项不属于组织者", 403, False)
+                raise AppError("RELAXATION_PERMISSION_DENIED", "该放宽选项不属于组织者", 403, False)
         elif option.actor_scope is not ActorScope.PARTICIPANT or option.participant_id != actor.participant_id:
-            raise AppError("ACTOR_SCOPE_FORBIDDEN", "该放宽选项不属于当前成员", 403, False)
+            raise AppError("RELAXATION_PERMISSION_DENIED", "该放宽选项不属于当前成员", 403, False)
         try:
             revised = self.revisions.apply_relaxation(
                 trip_id=trip_id,
