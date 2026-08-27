@@ -11,7 +11,6 @@ from app.application.collaboration_ports import TripDraftRevisionUnavailable
 from app.application.collaboration_readiness import SqliteCollaborationReadinessGuard
 from app.application.trip_draft_revision_service import TripDraftRevisionService
 from app.core.config import Settings
-from app.core.errors import AppError
 from app.domain.collaboration import OrganizerConversationRequest, QUESTION_IDS
 from app.main import create_app
 from app.domain.collaboration import published_collaboration_schema
@@ -47,9 +46,14 @@ async def test_default_runtime_uses_concrete_revision_port_with_unavailable_gate
             for question_id in QUESTION_IDS
         ],
     )
-    with pytest.raises(AppError) as captured:
-        await creator.create_initial(request, idempotency_key="runtime-default-0001")
-    assert captured.value.code == "TRIP_UNDERSTANDING_UNAVAILABLE"
+    outcome = await creator.create_initial(
+        request,
+        idempotency_key="runtime-default-0001",
+    )
+    assert outcome.recognition.failure_code == "LLM_NOT_CONFIGURED"
+    assert outcome.recognition.call_count == 0
+    assert outcome.understanding is None
+    assert outcome.can_plan is False
     assert isinstance(
         app.state.collaboration_readiness_guard,
         SqliteCollaborationReadinessGuard,

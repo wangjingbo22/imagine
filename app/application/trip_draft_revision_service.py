@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Protocol
+from typing import Literal
 from uuid import UUID, uuid4
 
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
+from app.application.llm_gateway import (
+    TripUnderstandingGateway,
+    UnavailableTripUnderstandingGateway,
+)
 from app.application.collaboration_ports import (
     CanonicalRevisionPatch,
     TripDraftRevisionPort,
@@ -17,14 +20,21 @@ from app.application.collaboration_ports import (
 )
 from app.core.errors import AppError
 from app.domain.collaboration import (
+    CollaborationModel,
+    ConversationAnswer,
     ConversationSubmission,
+    FixedQuestionFallback,
     OrganizerConversationRequest,
     RelaxationAction,
+    fixed_question_fallback,
 )
 from app.domain.collaboration_digest import canonical_sha256
 from app.domain.trip_draft import (
     TripDraftRevision,
     TripUnderstandingExplicitFields,
+    TripUnderstandingExtraction,
+    TripUnderstandingFailureCode,
+    TripUnderstandingGatewayResult,
     TripUnderstandingProposal,
     TripUnderstandingRequest,
     validate_trip_understanding,
@@ -41,42 +51,24 @@ from app.infrastructure.trip_draft_revision_store import (
 from app.schemas.validation_error import TripSchemaError
 
 
-class TripUnderstandingGateway(Protocol):
-    async def understand(
-        self,
-        request: TripUnderstandingRequest,
-    ) -> TripUnderstandingGatewayResult: ...
-
-
-class TripUnderstandingGatewayResult(Protocol):
-    decision: str
-    proposal: TripUnderstandingProposal | None
-    failure_code: str | None
-    call_count: int
+class TripUnderstandingRecognition(CollaborationModel):
+    source: Literal["FIXED_QUESTIONS"] = "FIXED_QUESTIONS"
     model: str | None
+    failure_code: TripUnderstandingFailureCode
+    call_count: int = Field(ge=0, le=2)
 
 
-@dataclass(frozen=True, slots=True)
-class _UnavailableGatewayResult:
-    decision: str
-    proposal: TripUnderstandingProposal | None
-    failure_code: str | None
-    call_count: int
-    model: str | None
+class TripUnderstandingFallbackResponse(CollaborationModel):
+    answer_revision: int = Field(ge=1)
+    natural_language_request: str = Field(min_length=1, max_length=1000)
+    answers: list[ConversationAnswer] = Field(min_length=6, max_length=6)
+    recognition: TripUnderstandingRecognition
+    understanding: None = None
+    fallback: FixedQuestionFallback
+    can_plan: Literal[False] = False
 
 
-class UnavailableTripUnderstandingGateway:
-    async def understand(
-        self,
-        request: TripUnderstandingRequest,
-    ) -> TripUnderstandingGatewayResult:
-        return _UnavailableGatewayResult(
-            decision="FIXED_QUESTIONS",
-            proposal=None,
-            failure_code="LLM_NOT_CONFIGURED",
-            call_count=0,
-            model=None,
-        )
+TripUnderstandingOutcome = TripDraftRevision | TripUnderstandingFallbackResponse
 
 
 class TripDraftRevisionService(TripDraftRevisionPort):
@@ -116,6 +108,8 @@ class TripDraftRevisionService(TripDraftRevisionPort):
 
     @classmethod
     def _store_error(cls, error: TripDraftRevisionStoreError) -> AppError:
+        if error.code == "IDEMPOTENCY_KEY_REUSED":
+            return cls._app_error("ANSWER_REVISION_STALE")
         return cls._app_error(error.code)
 
     @classmethod
@@ -130,25 +124,23 @@ class TripDraftRevisionService(TripDraftRevisionPort):
             return cls._app_error("TRIP_UNDERSTANDING_INVALID")
         return cls._app_error("TRIP_UNDERSTANDING_UNAVAILABLE")
 
-    @classmethod
-    def _fixed_failure_code(cls, result: TripUnderstandingGatewayResult) -> str:
-        code = result.failure_code
-        if code in {
-            "TRIP_UNDERSTANDING_UNAVAILABLE",
-            "LLM_NOT_CONFIGURED",
-            "LLM_UNAVAILABLE",
-            "LLM_TIMEOUT",
-        }:
-            return "TRIP_UNDERSTANDING_UNAVAILABLE"
-        return "TRIP_UNDERSTANDING_INVALID"
-
     @staticmethod
-    def _claim_result(claim: object) -> TripDraftRevision | None:
+    def _claim_result(
+        claim: object,
+    ) -> TripUnderstandingOutcome | None:
         if isinstance(claim, CompletedCommand):
             return claim.revision
         if isinstance(claim, CommandInProgress):
             raise TripDraftRevisionService._app_error("DRAFT_PARSE_IN_PROGRESS")
         if isinstance(claim, FailedCommand):
+            if claim.outcome_json:
+                try:
+                    return TripUnderstandingFallbackResponse.model_validate_json(
+                        claim.outcome_json,
+                        strict=True,
+                    )
+                except ValidationError:
+                    pass
             raise TripDraftRevisionService._saved_failure_to_app_error(claim.code)
         if isinstance(claim, ClaimedCommand):
             return None
@@ -189,11 +181,37 @@ class TripDraftRevisionService(TripDraftRevisionPort):
         request: TripUnderstandingRequest,
     ) -> TripUnderstandingGatewayResult:
         result = await self.gateway.understand(request)
-        if result.decision != "MODEL_PROPOSAL":
-            raise self._app_error(self._fixed_failure_code(result))
-        if result.proposal is None:
+        if result.decision == "FIXED_QUESTIONS":
+            if result.failure_code is None or result.proposal is not None:
+                raise self._app_error("TRIP_UNDERSTANDING_INVALID")
+            return result
+        if result.decision != "MODEL_PROPOSAL" or result.proposal is None:
             raise self._app_error("TRIP_UNDERSTANDING_INVALID")
         return result
+
+    @staticmethod
+    def _fallback_response(
+        *,
+        submission: ConversationSubmission,
+        answer_revision: int,
+        result: TripUnderstandingGatewayResult,
+    ) -> TripUnderstandingFallbackResponse:
+        if result.failure_code is None:
+            raise TripDraftRevisionService._app_error("TRIP_UNDERSTANDING_INVALID")
+        return TripUnderstandingFallbackResponse(
+            answerRevision=answer_revision,
+            naturalLanguageRequest=submission.natural_language_request,
+            answers=submission.answers,
+            recognition=TripUnderstandingRecognition(
+                source="FIXED_QUESTIONS",
+                model=result.model,
+                failureCode=result.failure_code,
+                callCount=result.call_count,
+            ),
+            understanding=None,
+            fallback=fixed_question_fallback(submission),
+            canPlan=False,
+        )
 
     @staticmethod
     def _build_revision(
@@ -232,7 +250,7 @@ class TripDraftRevisionService(TripDraftRevisionPort):
         payload: OrganizerConversationRequest,
         *,
         idempotency_key: str,
-    ) -> TripDraftRevision:
+    ) -> TripUnderstandingOutcome:
         request_digest = self._request_digest(
             payload.model_dump(mode="json", by_alias=True)
         )
@@ -259,6 +277,19 @@ class TripDraftRevisionService(TripDraftRevisionPort):
         request = self._understanding_request(payload, payload.reference_date)
         try:
             extraction = await self._understand(request)
+            if extraction.decision == "FIXED_QUESTIONS":
+                outcome = self._fallback_response(
+                    submission=payload,
+                    answer_revision=claim.target_revision,
+                    result=extraction,
+                )
+                self.repository.fail(
+                    claim,
+                    code=extraction.failure_code or "TRIP_UNDERSTANDING_INVALID",
+                    outcome_json=outcome.model_dump_json(by_alias=True),
+                )
+                return outcome
+            assert extraction.proposal is not None
             proposal = validate_trip_understanding(request, extraction.proposal)
             bindings = {
                 participant.member_key: uuid4()
@@ -330,7 +361,7 @@ class TripDraftRevisionService(TripDraftRevisionPort):
         base_revision: int,
         submission: ConversationSubmission,
         idempotency_key: str,
-    ) -> TripDraftRevisionView:
+    ) -> TripDraftRevisionView | TripUnderstandingFallbackResponse:
         current = self.get_current(trip_id)
         request_digest = self._request_digest(
             {
@@ -364,6 +395,19 @@ class TripDraftRevisionService(TripDraftRevisionPort):
         request = self._understanding_request(submission, reference_date)
         try:
             extraction = await self._understand(request)
+            if extraction.decision == "FIXED_QUESTIONS":
+                outcome = self._fallback_response(
+                    submission=submission,
+                    answer_revision=claim.target_revision,
+                    result=extraction,
+                )
+                self.repository.fail(
+                    claim,
+                    code=extraction.failure_code or "TRIP_UNDERSTANDING_INVALID",
+                    outcome_json=outcome.model_dump_json(by_alias=True),
+                )
+                return outcome
+            assert extraction.proposal is not None
             proposal = validate_trip_understanding(request, extraction.proposal)
             candidate = self._merge_member_scope(
                 current=current,
@@ -558,12 +602,12 @@ class TripDraftRevisionService(TripDraftRevisionPort):
         assert isinstance(claim, ClaimedCommand)
         try:
             candidate = self._apply_patch(current, patch)
-            extraction = _UnavailableGatewayResult(
-                decision="MODEL_PROPOSAL",
+            extraction = TripUnderstandingExtraction(
                 proposal=candidate,
-                failure_code=None,
-                call_count=0,
-                model=None,
+                recognitionSource="RELAXATION",
+                recognitionModel=None,
+                degradedReason=None,
+                llmCallCount=0,
             )
             revision = self._build_revision(
                 claim=claim,
@@ -584,7 +628,10 @@ class TripDraftRevisionService(TripDraftRevisionPort):
 
 __all__ = [
     "TripDraftRevisionService",
+    "TripUnderstandingFallbackResponse",
     "TripUnderstandingGateway",
+    "TripUnderstandingOutcome",
+    "TripUnderstandingRecognition",
     "TripUnderstandingGatewayResult",
     "UnavailableTripUnderstandingGateway",
 ]

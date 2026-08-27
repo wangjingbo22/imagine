@@ -194,8 +194,18 @@ async def test_conversations_without_t004_gateway_fails_closed(tmp_path: Path) -
         "t002-http-unavailable-0001",
     )
 
-    assert response.status_code == 503
-    assert response.json()["code"] == "TRIP_UNDERSTANDING_UNAVAILABLE"
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    data = response.json()["data"]
+    assert data["recognition"] == {
+        "source": "FIXED_QUESTIONS",
+        "model": None,
+        "failureCode": "LLM_NOT_CONFIGURED",
+        "callCount": 0,
+    }
+    assert data["understanding"] is None
+    assert data["canPlan"] is False
+    assert len(data["fallback"]["items"]) == 6
     with sqlite3.connect(tmp_path / "planning.sqlite3") as connection:
         assert connection.execute(
             "SELECT COUNT(*) FROM trip_draft_revisions"
@@ -204,18 +214,16 @@ async def test_conversations_without_t004_gateway_fails_closed(tmp_path: Path) -
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("failure_code", "status_code", "expected_code"),
+    "failure_code",
     [
-        ("LLM_TIMEOUT", 503, "TRIP_UNDERSTANDING_UNAVAILABLE"),
-        ("LLM_INVALID_JSON", 502, "TRIP_UNDERSTANDING_INVALID"),
-        ("LLM_SCHEMA_INVALID", 502, "TRIP_UNDERSTANDING_INVALID"),
+        "LLM_TIMEOUT",
+        "LLM_INVALID_JSON",
+        "LLM_SCHEMA_INVALID",
     ],
 )
 async def test_conversations_fixed_question_fallback_has_no_authoritative_revision(
     tmp_path: Path,
     failure_code: str,
-    status_code: int,
-    expected_code: str,
 ) -> None:
     gateway = CountingGateway(None, failure_code=failure_code, call_count=2)
     app = _app(tmp_path, gateway)
@@ -232,8 +240,15 @@ async def test_conversations_fixed_question_fallback_has_no_authoritative_revisi
         f"t002-http-fallback-{failure_code}",
     )
 
-    assert response.status_code == replay.status_code == status_code
-    assert response.json()["code"] == replay.json()["code"] == expected_code
+    assert response.status_code == replay.status_code == 200
+    assert response.headers["Cache-Control"] == replay.headers["Cache-Control"] == "no-store"
+    data = response.json()["data"]
+    assert data == replay.json()["data"]
+    assert data["recognition"]["source"] == "FIXED_QUESTIONS"
+    assert data["recognition"]["failureCode"] == failure_code
+    assert data["understanding"] is None
+    assert data["canPlan"] is False
+    assert len(data["fallback"]["items"]) == 6
     assert gateway.calls == 1
     with sqlite3.connect(tmp_path / "planning.sqlite3") as connection:
         assert connection.execute(

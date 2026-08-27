@@ -314,10 +314,11 @@ async def test_fixed_questions_persists_failure_and_replay_does_not_call_gateway
     service, repository = _service(tmp_path, gateway)
     request = _organizer_request()
 
-    for _ in range(2):
-        with pytest.raises(AppError) as caught:
-            await service.create_initial(request, idempotency_key="fixed-key-0001")
-        assert caught.value.code == "TRIP_UNDERSTANDING_INVALID"
+    first = await service.create_initial(request, idempotency_key="fixed-key-0001")
+    replay = await service.create_initial(request, idempotency_key="fixed-key-0001")
 
+    assert replay == first
+    assert first.recognition.failure_code == "LLM_CONTENT_INVALID"
+    assert first.understanding is None
     assert gateway.calls == 1
     assert _revision_count(repository) == 0

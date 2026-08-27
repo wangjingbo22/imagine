@@ -469,6 +469,7 @@ def create_app(
     )
     app.state.collaboration_service = collaboration_service
     app.state.trip_draft_revision_creator = trip_draft_revision_creator
+    app.state.trip_understanding_gateway = trip_understanding_gateway
     app.state.collaboration_readiness_guard = resolved_readiness_guard
     app.state.plan_version_service = plan_service
     app.state.workflow_service = workflow_service

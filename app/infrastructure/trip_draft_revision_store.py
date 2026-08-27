@@ -52,6 +52,7 @@ class CommandInProgress:
 @dataclass(frozen=True, slots=True)
 class FailedCommand:
     code: str
+    outcome_json: str | None = None
 
 
 CommandClaim = ClaimedCommand | CompletedCommand | CommandInProgress | FailedCommand
@@ -149,11 +150,22 @@ class SqliteTripDraftRevisionRepository:
                     target_revision INTEGER NOT NULL,
                     status TEXT NOT NULL CHECK (status IN ('CLAIMED', 'COMPLETED', 'FAILED')),
                     failure_code TEXT,
+                    outcome_json TEXT,
                     claimed_at TEXT NOT NULL,
                     completed_at TEXT,
                     PRIMARY KEY (actor_scope, actor_id, operation, idempotency_key)
                 )"""
             )
+            command_columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(trip_draft_commands)"
+                ).fetchall()
+            }
+            if "outcome_json" not in command_columns:
+                connection.execute(
+                    "ALTER TABLE trip_draft_commands ADD COLUMN outcome_json TEXT"
+                )
 
     @staticmethod
     def _find_command(
@@ -178,7 +190,10 @@ class SqliteTripDraftRevisionRepository:
         if status == "CLAIMED":
             return CommandInProgress(target_revision=prior["target_revision"])
         if status == "FAILED":
-            return FailedCommand(code=prior["failure_code"] or "TRIP_DRAFT_REVISION_UNAVAILABLE")
+            return FailedCommand(
+                code=prior["failure_code"] or "TRIP_DRAFT_REVISION_UNAVAILABLE",
+                outcome_json=prior["outcome_json"],
+            )
         if status == "COMPLETED":
             revision = self._load_revision(
                 connection,
@@ -485,7 +500,13 @@ class SqliteTripDraftRevisionRepository:
             if updated != 1:
                 raise TripDraftRevisionStoreError("TRIP_DRAFT_REVISION_UNAVAILABLE")
 
-    def fail(self, claim: ClaimedCommand, *, code: str) -> None:
+    def fail(
+        self,
+        claim: ClaimedCommand,
+        *,
+        code: str,
+        outcome_json: str | None = None,
+    ) -> None:
         with self._immediate_transaction() as connection:
             prior = self._find_command(connection, claim.command)
             if prior is None or prior["request_digest"] != claim.command.request_digest:
@@ -503,11 +524,12 @@ class SqliteTripDraftRevisionRepository:
                 raise TripDraftRevisionStoreError("DRAFT_REVISION_STALE")
             updated = connection.execute(
                 """UPDATE trip_draft_commands
-                   SET status='FAILED', failure_code=?, completed_at=?
+                   SET status='FAILED', failure_code=?, outcome_json=?, completed_at=?
                    WHERE actor_scope=? AND actor_id=? AND operation=?
                      AND idempotency_key=? AND status='CLAIMED'""",
                 (
                     code,
+                    outcome_json,
                     self._clock().isoformat(),
                     *claim.command.identity,
                 ),

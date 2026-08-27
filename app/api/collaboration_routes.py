@@ -5,6 +5,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.application.collaboration_service import CollaborationService
+from app.application.trip_draft_revision_service import (
+    TripUnderstandingFallbackResponse,
+)
 from app.core.errors import AppError
 from app.domain.collaboration import (
     InvitationCreateRequest,
@@ -59,13 +62,16 @@ async def create_conversation(
     request: Request,
     response: Response,
     current: CollaborationService = Depends(service),
-) -> ApiResponse[OrganizerConversationCreated]:
+) -> ApiResponse:
     response.headers["Cache-Control"] = "no-store"
     idempotency_key = require_idempotency_key(request)
-    revision = await request.app.state.trip_draft_revision_creator.create_initial(
+    outcome = await request.app.state.trip_draft_revision_creator.create_initial(
         payload,
         idempotency_key=idempotency_key,
     )
+    if isinstance(outcome, TripUnderstandingFallbackResponse):
+        return ApiResponse(data=outcome)
+    revision = outcome
     organizer_access = current.bootstrap(
         revision=revision,
         idempotency_key=idempotency_key,
