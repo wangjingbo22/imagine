@@ -21,8 +21,12 @@ from app.domain.collaboration import (
     TripFlowKind,
 )
 from app.domain.collaboration_digest import canonical_sha256
-from app.infrastructure.trip_flow_store import ensure_trip_flow_schema
-from app.infrastructure.trip_flow_store import register_trip_flow
+from app.infrastructure.trip_flow_store import (
+    backfill_confirmed_single_flows,
+    ensure_trip_flow_schema,
+    mark_legacy_collaboration_rows,
+    register_trip_flow,
+)
 
 
 class CollaborationStoreError(RuntimeError):
@@ -230,6 +234,8 @@ class SqliteCollaborationRepository:
                 PRIMARY KEY (trip_id, conflict_id)
             )""")
             ensure_trip_flow_schema(connection)
+            mark_legacy_collaboration_rows(connection)
+            backfill_confirmed_single_flows(connection)
 
     @staticmethod
     def _assert_mutation_allowed_connection(
@@ -909,12 +915,14 @@ class SqliteCollaborationRepository:
     def get_stored(self, trip_id: UUID) -> StoredCollaboration:
         with self._connect() as connection:
             session = connection.execute(
-                "SELECT trip_id, organizer_participant_id, current_revision, version, policy_version "
+                "SELECT trip_id, organizer_participant_id, status, current_revision, version, policy_version "
                 "FROM collaboration_sessions WHERE trip_id=?",
                 (str(trip_id),),
             ).fetchone()
             if session is None:
                 raise CollaborationStoreError("COLLABORATION_NOT_FOUND")
+            if session["status"] == "MIGRATION_REQUIRED":
+                raise CollaborationStoreError("TRIP_DRAFT_REVISION_UNAVAILABLE")
             rows = connection.execute(
                 "SELECT participant_id, confirmed_revision, confirmed_source_digest, "
                 "confirmed_shared_digest, "

@@ -35,6 +35,7 @@ class CollaborationModel(BaseModel):
 
 
 class CollaborationStatus(StrEnum):
+    MIGRATION_REQUIRED = "MIGRATION_REQUIRED"
     DRAFT_CONVERSATION = "DRAFT_CONVERSATION"
     INVITING = "INVITING"
     COLLECTING_MEMBERS = "COLLECTING_MEMBERS"

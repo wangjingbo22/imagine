@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 from uuid import UUID, uuid4
 
 import pytest
@@ -9,9 +10,17 @@ from app.domain.collaboration import (
     CollaborationStatus,
     ConversationAnswer,
     ConversationSubmission,
+    TripFlowKind,
 )
-from app.infrastructure.collaboration_store import SqliteCollaborationRepository
+from app.infrastructure.collaboration_store import (
+    CollaborationStoreError,
+    SqliteCollaborationRepository,
+)
 from app.infrastructure.trip_flow_store import SqliteTripFlowRegistry
+from app.schemas.trip import CreateSingleDayTrip
+
+
+LEGACY_TRIP_ID = UUID("30000000-0000-4000-8000-000000000001")
 
 
 def create_baseline_collaboration_schema(path) -> None:
@@ -110,3 +119,104 @@ def test_current_baseline_database_migrates_without_losing_rows(tmp_path) -> Non
 def test_unknown_flow_never_defaults_to_legacy(tmp_path) -> None:
     registry = SqliteTripFlowRegistry(tmp_path / "flow.sqlite3")
     assert registry.get(uuid4()) is None
+
+
+def test_migration_backfills_strict_confirmed_singles_only(tmp_path) -> None:
+    path = tmp_path / "workflow.sqlite3"
+    single = CreateSingleDayTrip(
+        schemaVersion="1.0",
+        tripId=UUID("30000000-0000-4000-8000-000000000002"),
+        mode="SINGLE",
+        status="DRAFT",
+        cityContext={
+            "countryCode": "CN",
+            "cityCode": "SHA",
+            "cityName": "Shanghai",
+            "center": {"longitude": 121.47, "latitude": 31.23},
+            "providerConfig": {"provider": "AMAP", "coordinateSystem": "GCJ02"},
+        },
+        startDate=date(2026, 8, 27),
+        endDate=date(2026, 8, 27),
+        currency="CNY",
+        totalBudgetCents=10000,
+        participants=[
+            {
+                "participantId": UUID("10000000-0000-4000-8000-000000000002"),
+                "nickname": "legacy",
+                "budgetCapCents": 10000,
+                "preferences": [],
+                "assistanceProfile": None,
+            }
+        ],
+        days=[
+            {
+                "dayIndex": 0,
+                "date": date(2026, 8, 27),
+                "dailyBudgetCents": 10000,
+                "startLocationText": "Shanghai",
+                "endLocationText": "Shanghai",
+                "timeWindow": {"start": "08:00:00", "end": "20:00:00"},
+            }
+        ],
+    )
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """CREATE TABLE confirmed_trip_inputs (
+            trip_id TEXT PRIMARY KEY,
+            trip_json TEXT NOT NULL,
+            semantic_json TEXT NOT NULL,
+            confirmed_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
+        """INSERT INTO confirmed_trip_inputs
+        (trip_id, trip_json, semantic_json, confirmed_at)
+        VALUES (?, ?, '{}', '2026-08-27T00:00:00+00:00')""",
+        (str(single.trip_id), single.model_dump_json(by_alias=True)),
+    )
+    connection.execute(
+        """INSERT INTO confirmed_trip_inputs
+        (trip_id, trip_json, semantic_json, confirmed_at)
+        VALUES (?, ?, '{}', '2026-08-27T00:00:00+00:00')""",
+        (
+            "30000000-0000-4000-8000-000000000003",
+            '{"mode":"GROUP","participants":[{},{}]}',
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    SqliteCollaborationRepository(path)
+    registry = SqliteTripFlowRegistry(path)
+
+    assert registry.get(UUID("30000000-0000-4000-8000-000000000002")) is TripFlowKind.LEGACY_SINGLE
+    assert registry.get(UUID("30000000-0000-4000-8000-000000000003")) is None
+
+
+def test_legacy_collaboration_rows_are_marked_migration_required(tmp_path) -> None:
+    path = tmp_path / "legacy-collaboration.sqlite3"
+    create_baseline_collaboration_schema(path)
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """INSERT INTO collaboration_sessions
+        (trip_id, organizer_participant_id, status, expected_participants,
+         organizer_token_hash, created_at)
+        VALUES (?, ?, 'CONFIRMED', 1, NULL, ?)""",
+        (
+            str(LEGACY_TRIP_ID),
+            "10000000-0000-4000-8000-000000000001",
+            "2026-08-27T00:00:00+00:00",
+        ),
+    )
+    connection.commit()
+    connection.close()
+    repository = SqliteCollaborationRepository(path)
+
+    with repository._connect() as connection:
+        row = connection.execute(
+            "SELECT status FROM collaboration_sessions WHERE trip_id=?",
+            (str(LEGACY_TRIP_ID),),
+        ).fetchone()
+    assert row["status"] == "MIGRATION_REQUIRED"
+    with pytest.raises(CollaborationStoreError, match="TRIP_DRAFT_REVISION_UNAVAILABLE"):
+        repository.get_stored(LEGACY_TRIP_ID)

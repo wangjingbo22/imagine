@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
 from app.domain.collaboration import TripFlowKind
+from app.schemas.trip import CreateSingleDayTrip
 
 
 class TripFlowStoreError(RuntimeError):
@@ -34,6 +36,47 @@ def register_trip_flow(
     connection.execute(
         "INSERT OR IGNORE INTO trip_flow_registry VALUES (?, ?, ?)",
         (str(trip_id), kind.value, datetime.now(UTC).isoformat()),
+    )
+
+
+def backfill_confirmed_single_flows(connection: sqlite3.Connection) -> None:
+    """Register only strict legacy single-trip confirmations.
+
+    The old confirmed-input table is an input to migration, never a source
+    for a collaboration revision. Invalid, group, and otherwise ambiguous
+    rows remain unregistered so the readiness guard fails closed.
+    """
+
+    table = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='confirmed_trip_inputs'"
+    ).fetchone()
+    if table is None:
+        return
+    rows = connection.execute(
+        "SELECT trip_id, trip_json FROM confirmed_trip_inputs"
+    ).fetchall()
+    for row in rows:
+        try:
+            trip = CreateSingleDayTrip.model_validate_json(row[1], strict=True)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if trip.mode != "SINGLE" or len(trip.participants) != 1:
+            continue
+        register_trip_flow(connection, trip.trip_id, TripFlowKind.LEGACY_SINGLE)
+
+
+def mark_legacy_collaboration_rows(connection: sqlite3.Connection) -> None:
+    """Prevent baseline collaboration rows from masquerading as revisions."""
+
+    columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(collaboration_sessions)")
+    }
+    if "draft_id" not in columns:
+        return
+    connection.execute(
+        "UPDATE collaboration_sessions SET status='MIGRATION_REQUIRED' "
+        "WHERE draft_id IS NULL AND status <> 'MIGRATION_REQUIRED'"
     )
 
 
@@ -106,6 +149,8 @@ class SqliteTripFlowRegistry:
 __all__ = [
     "SqliteTripFlowRegistry",
     "TripFlowStoreError",
+    "backfill_confirmed_single_flows",
     "ensure_trip_flow_schema",
+    "mark_legacy_collaboration_rows",
     "register_trip_flow",
 ]
