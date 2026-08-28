@@ -160,10 +160,19 @@ def test_collaboration_permit_binds_exact_ready_revision(tmp_path) -> None:
 
     with guard.operation(access) as permit:
         assert permit.current_revision == harness.revision.revision
+        assert permit.revision is harness.revision
         assert permit.readiness_digest == harness.service.require_ready(
             access.trip_id,
             access.organizer_capability,
         )
+
+
+def test_legacy_permit_does_not_carry_collaboration_revision() -> None:
+    guard, registry, _ = _guard(TripFlowKind.LEGACY_SINGLE)
+    registry.strict_single = True
+
+    with guard.operation(_access()) as permit:
+        assert permit.revision is None
 
 
 def test_source_digest_change_invalidates_ready_guard_before_body(tmp_path) -> None:

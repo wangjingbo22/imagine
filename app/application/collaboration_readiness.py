@@ -109,6 +109,7 @@ class SqliteCollaborationReadinessGuard:
                 permit,
                 readiness_digest=leased_digest,
                 current_revision=leased_revision.revision,
+                revision=leased_revision,
             )
         finally:
             self.repository.complete_lease(permit.operation_id)

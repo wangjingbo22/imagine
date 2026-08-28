@@ -144,6 +144,7 @@ class ReadinessPermit:
     flow_kind: TripFlowKind
     expires_at: datetime
     current_revision: int | None = None
+    revision: TripDraftRevisionView | None = None
 
 
 class CollaborationReadinessGuard(Protocol):
