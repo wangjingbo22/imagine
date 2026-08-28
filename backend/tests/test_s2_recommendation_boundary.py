@@ -1,4 +1,7 @@
+import json
 from datetime import UTC, datetime
+
+import pytest
 
 from app.application.recommendation_service import MemberPreference, TrustedRecommendationService
 from app.domain.models import Place, PriceFact, Provenance, SourceStatus
@@ -48,6 +51,59 @@ def test_non_json_or_extra_llm_fields_do_not_get_repaired_or_retried() -> None:
     result = service.rank_from_llm_json(candidates, '{"recommendations":[{"placeId":"a","reason":"x","price":1}]}')
     assert result.used_deterministic_fallback is True
     assert service.rank_from_llm_json(candidates, "not-json").used_deterministic_fallback is True
+
+
+@pytest.mark.parametrize(
+    "forbidden_reason",
+    [
+        "价格已经核验", "路线最短", "满意度最高", "PASS", "计划状态为 CURRENT",
+        "PlanVersion 已创建",
+    ],
+)
+def test_t031_forbidden_model_claims_fall_back_without_semantic_repair(
+    forbidden_reason: str,
+) -> None:
+    service = TrustedRecommendationService()
+    candidates = service.issue_candidates(
+        [_fact("a", "故宫"), _fact("b", "国博")],
+        interests=[],
+        must_visit=[],
+        avoid_places=[],
+    )
+    raw = json.dumps({
+        "recommendations": [{"placeId": "a", "reason": forbidden_reason}],
+    }, ensure_ascii=False)
+
+    result = service.rank_from_llm_json(candidates, raw)
+
+    assert result.used_deterministic_fallback is True
+    assert [item.place_id for item in result.recommendations] == ["a", "b"]
+
+
+@pytest.mark.parametrize(
+    "recommendations",
+    [
+        [{"placeId": "a", "reason": "室内体验"}, {"placeId": "a", "reason": "重复"}],
+        [{"placeId": "forged", "reason": "伪造地点"}],
+    ],
+)
+def test_t031_duplicate_or_out_of_allowlist_ids_fall_back(
+    recommendations: list[dict[str, str]],
+) -> None:
+    service = TrustedRecommendationService()
+    candidates = service.issue_candidates(
+        [_fact("a", "故宫"), _fact("b", "国博")],
+        interests=[],
+        must_visit=[],
+        avoid_places=[],
+    )
+
+    result = service.rank_from_llm_json(
+        candidates,
+        json.dumps({"recommendations": recommendations}, ensure_ascii=False),
+    )
+
+    assert result.used_deterministic_fallback is True
 
 
 def test_single_plan_exposes_member_scores_and_unknown_provider_facts() -> None:

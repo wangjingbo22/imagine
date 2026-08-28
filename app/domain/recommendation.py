@@ -6,8 +6,9 @@ an LLM can never authorise planning facts or workflow state.
 from __future__ import annotations
 
 from datetime import datetime
+from unicodedata import normalize
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from app.domain.collaboration import CollaborationModel
 from app.domain.models import Place, SourceStatus
@@ -28,6 +29,30 @@ class CandidatePlace(CollaborationModel):
 class CandidateRecommendation(CollaborationModel):
     place_id: str
     reason: str = Field(min_length=1, max_length=80)
+
+    @field_validator("reason")
+    @classmethod
+    def reject_model_claims_outside_ranking_boundary(cls, value: str) -> str:
+        """Keep the legacy JSON ranking path inside the same T031 boundary.
+
+        The model may choose an already-issued place ID and give a short,
+        non-authoritative reason.  Facts, validation results and workflow state
+        are owned by deterministic server code and must never be smuggled back
+        through a natural-language reason.
+        """
+        normalized = normalize("NFKC", value).casefold()
+        forbidden_terms = (
+            "price", "cost", "amount", "route", "score", "satisfaction",
+            "pass", "planversion", "plan version", "planid", "plan state",
+            "status", "current", "价格", "费用", "预算", "路线", "评分",
+            "分数", "满意度", "通过", "合格", "计划状态", "状态", "当前版本",
+            "计划版本",
+        )
+        if any(term in normalized for term in forbidden_terms):
+            raise ValueError(
+                "model reason cannot assert price, route, satisfaction, PASS or plan state"
+            )
+        return value
 
 
 class CandidateFactProvenance(CollaborationModel):
