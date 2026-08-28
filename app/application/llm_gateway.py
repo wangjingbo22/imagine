@@ -8,6 +8,14 @@ from unicodedata import normalize
 
 from pydantic import ValidationError
 
+from app.domain.trip_draft import (
+    TripUnderstandingFailureCode,
+    TripUnderstandingGatewayResult,
+    TripUnderstandingProposal,
+    TripUnderstandingRequest,
+    validate_trip_understanding,
+)
+from app.schemas.validation_error import TripSchemaError
 from app.schemas.llm import (
     CandidateSelectionFailureCode,
     CandidateSelectionGatewayResult,
@@ -155,6 +163,157 @@ class StrictCandidateSelectionGateway:
         )
 
 
+class TripUnderstandingTransportError(RuntimeError):
+    """Sanitized infrastructure failure for trip understanding transport."""
+
+    def __init__(
+        self,
+        code: TripUnderstandingFailureCode,
+        *,
+        retryable: bool,
+    ) -> None:
+        super().__init__(code)
+        self.code = code
+        self.retryable = retryable
+
+
+class TripUnderstandingModelClient(Protocol):
+    model: str
+
+    async def propose_trip_understanding(
+        self,
+        request: TripUnderstandingRequest,
+    ) -> str: ...
+
+
+class TripUnderstandingGateway(Protocol):
+    async def understand(
+        self,
+        request: TripUnderstandingRequest,
+    ) -> TripUnderstandingGatewayResult: ...
+
+
+class StrictTripUnderstandingGateway:
+    """Validate one model understanding proposal or return fixed-question fallback."""
+
+    def __init__(
+        self,
+        client: TripUnderstandingModelClient,
+        *,
+        max_transport_attempts: int = 2,
+    ) -> None:
+        if max_transport_attempts not in {1, 2}:
+            raise ValueError("maxTransportAttempts must be 1 or 2")
+        self._client = client
+        self._max_transport_attempts = max_transport_attempts
+
+    async def understand(
+        self,
+        request: TripUnderstandingRequest,
+    ) -> TripUnderstandingGatewayResult:
+        trusted_request = _strict_understanding_request(request)
+        call_count = 0
+
+        while call_count < self._max_transport_attempts:
+            call_count += 1
+            try:
+                raw = await self._client.propose_trip_understanding(
+                    trusted_request
+                )
+            except TripUnderstandingTransportError as error:
+                if error.retryable and call_count < self._max_transport_attempts:
+                    continue
+                return _understanding_fallback(
+                    error.code,
+                    call_count,
+                    self._client.model,
+                )
+            except Exception as error:
+                logger.warning(
+                    "trip understanding client failed with %s",
+                    type(error).__name__,
+                )
+                return _understanding_fallback(
+                    "LLM_UNAVAILABLE",
+                    call_count,
+                    self._client.model,
+                )
+
+            try:
+                proposal = TripUnderstandingProposal.model_validate_json(
+                    raw,
+                    strict=True,
+                )
+            except ValidationError as error:
+                failure_code: TripUnderstandingFailureCode = (
+                    "LLM_INVALID_JSON"
+                    if any(item["type"] == "json_invalid" for item in error.errors())
+                    else "LLM_SCHEMA_INVALID"
+                )
+                return _understanding_fallback(
+                    failure_code,
+                    call_count,
+                    self._client.model,
+                )
+
+            try:
+                proposal = validate_trip_understanding(trusted_request, proposal)
+            except TripSchemaError:
+                return _understanding_fallback(
+                    "LLM_CONTENT_INVALID",
+                    call_count,
+                    self._client.model,
+                )
+            return TripUnderstandingGatewayResult(
+                decision="MODEL_PROPOSAL",
+                proposal=proposal,
+                failure_code=None,
+                call_count=call_count,
+                model=self._client.model,
+            )
+
+        raise AssertionError("trip understanding loop must return")
+
+
+class UnavailableTripUnderstandingGateway:
+    """Stable no-Key boundary for trip understanding."""
+
+    async def understand(
+        self,
+        request: TripUnderstandingRequest,
+    ) -> TripUnderstandingGatewayResult:
+        trusted_request = _strict_understanding_request(request)
+        del trusted_request
+        return _understanding_fallback(
+            "LLM_NOT_CONFIGURED",
+            0,
+            None,
+        )
+
+
+def _strict_understanding_request(
+    request: TripUnderstandingRequest,
+) -> TripUnderstandingRequest:
+    return TripUnderstandingRequest.model_validate_json(
+        request.model_dump_json(by_alias=True),
+        strict=True,
+    )
+
+
+def _understanding_fallback(
+    failure_code: TripUnderstandingFailureCode,
+    call_count: int,
+    model: str | None,
+) -> TripUnderstandingGatewayResult:
+    return TripUnderstandingGatewayResult(
+        decision="FIXED_QUESTIONS",
+        proposal=None,
+        failure_code=failure_code,
+        call_count=call_count,
+        model=model,
+    )
+
+
 class UnavailableLlmGateway:
     """Stable no-Key boundary used by S2-T009 to choose deterministic enumeration."""
 
@@ -257,6 +416,11 @@ __all__ = [
     "CandidateSelectionGateway",
     "CandidateSelectionModelClient",
     "CandidateSelectionTransportError",
+    "StrictTripUnderstandingGateway",
     "StrictCandidateSelectionGateway",
+    "TripUnderstandingGateway",
+    "TripUnderstandingModelClient",
+    "TripUnderstandingTransportError",
     "UnavailableLlmGateway",
+    "UnavailableTripUnderstandingGateway",
 ]

@@ -34,12 +34,27 @@ class CanonicalRevisionPatch:
     value: JsonValue
 
 
+@dataclass(frozen=True, slots=True)
+class UnresolvedAnswerAttempt:
+    actor_scope: str
+    actor_id: str
+    target_revision: int
+    failure_code: str
+
+
 class TripDraftRevisionUnavailable(RuntimeError):
     pass
 
 
 class TripDraftRevisionPort(Protocol):
     def get_current(self, trip_id: UUID) -> TripDraftRevisionView: ...
+
+    def unresolved_failed_answer_attempts(
+        self,
+        *,
+        trip_id: UUID,
+        current_revision: int,
+    ) -> tuple[UnresolvedAnswerAttempt, ...]: ...
 
     async def submit_participant_conversation(
         self,
@@ -67,6 +82,15 @@ class UnavailableTripDraftRevisionPort:
         raise TripDraftRevisionUnavailable("TRIP_DRAFT_REVISION_UNAVAILABLE")
 
     def get_current(self, trip_id: UUID) -> TripDraftRevisionView:
+        self._raise()
+        raise AssertionError("unreachable")
+
+    def unresolved_failed_answer_attempts(
+        self,
+        *,
+        trip_id: UUID,
+        current_revision: int,
+    ) -> tuple[UnresolvedAnswerAttempt, ...]:
         self._raise()
         raise AssertionError("unreachable")
 
@@ -135,5 +159,6 @@ __all__ = [
     "TripDraftRevisionPort",
     "TripDraftRevisionUnavailable",
     "TripDraftRevisionView",
+    "UnresolvedAnswerAttempt",
     "UnavailableTripDraftRevisionPort",
 ]

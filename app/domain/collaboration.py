@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
 from uuid import UUID
@@ -19,6 +19,7 @@ from app.domain.trip_draft import (
     CanonicalFieldPath,
     ParticipantUnderstanding,
     TripUnderstandingTrip,
+    TripDraftRevision,
 )
 
 
@@ -135,6 +136,47 @@ class ConversationSubmission(CollaborationModel):
         return 1
 
 
+class OrganizerConversationRequest(ConversationSubmission):
+    schema_version: Literal["1.0"]
+    reference_date: date
+
+
+class FixedQuestionReviewItem(CollaborationModel):
+    question_id: str = Field(min_length=1, max_length=40)
+    answer: str = Field(min_length=1, max_length=1000)
+    code: Literal["REVIEW_REQUIRED"] = "REVIEW_REQUIRED"
+    message: Literal[
+        "模型未能生成可校验提案，请核对或修改此答案"
+    ] = "模型未能生成可校验提案，请核对或修改此答案"
+
+
+class FixedQuestionFallback(CollaborationModel):
+    mode: Literal["FIXED_QUESTIONS"] = "FIXED_QUESTIONS"
+    items: list[FixedQuestionReviewItem] = Field(min_length=6, max_length=6)
+
+    @model_validator(mode="after")
+    def require_fixed_question_order(self) -> "FixedQuestionFallback":
+        if tuple(item.question_id for item in self.items) != QUESTION_IDS:
+            raise ValueError(
+                "fallback items must contain the six fixed questions in order"
+            )
+        return self
+
+
+def fixed_question_fallback(
+    submission: ConversationSubmission,
+) -> FixedQuestionFallback:
+    return FixedQuestionFallback(
+        items=[
+            FixedQuestionReviewItem(
+                questionId=item.question_id,
+                answer=item.answer,
+            )
+            for item in submission.answers
+        ]
+    )
+
+
 class RelaxationOption(CollaborationModel):
     relaxation_id: str = Field(pattern=r"^rx_[a-f0-9]{16}$")
     action: RelaxationAction
@@ -221,6 +263,11 @@ class OrganizerBootstrapResult(CollaborationModel):
     organizer_token: str | None
     organizer_token_available: bool
     collaboration_version: int = Field(ge=1)
+
+
+class OrganizerConversationCreated(CollaborationModel):
+    revision: TripDraftRevision
+    organizer_access: OrganizerBootstrapResult
 
 
 class InvitationRedeemed(CollaborationModel):
@@ -316,6 +363,8 @@ __all__ = [
     "CollaborationStatus",
     "ConversationAnswer",
     "ConversationSubmission",
+    "FixedQuestionFallback",
+    "FixedQuestionReviewItem",
     "InvitationCreateRequest",
     "InvitationCreated",
     "InvitationRedeemRequest",
@@ -324,6 +373,8 @@ __all__ = [
     "JsonValue",
     "MemberSessionView",
     "OrganizerBootstrapResult",
+    "OrganizerConversationCreated",
+    "OrganizerConversationRequest",
     "ParticipantAccessStatus",
     "ParticipantConfirmationStatus",
     "ParticipantConversationRequest",
@@ -335,4 +386,5 @@ __all__ = [
     "RelaxationOption",
     "ResolveConfirmationItemRequest",
     "TripFlowKind",
+    "fixed_question_fallback",
 ]
