@@ -275,6 +275,14 @@ export const tripApi = {
     })
   },
 
+  saveArrivalEvidence(tripId: string, input: Record<string, unknown>) {
+    return request<any>(`/api/v1/trips/${tripId}/arrival-evidence`, { method: 'POST', body: JSON.stringify(input) })
+  },
+
+  decideArrival(tripId: string, input: Record<string, unknown>) {
+    return request<any>(`/api/v1/trips/${tripId}/arrival-decision`, { method: 'POST', body: JSON.stringify(input) })
+  },
+
   getSummary(tripId: string) {
     return request<TripSummary>(`/api/v1/trips/${tripId}/summary`)
   },

@@ -262,6 +262,8 @@ export function WorkspacePage() {
   const [isWritingEvent, setIsWritingEvent] = useState(false)
   const [planLifecycleError, setPlanLifecycleError] = useState('')
   const [actualCost, setActualCost] = useState('0')
+  const [arrivalMessage, setArrivalMessage] = useState('')
+  const [isLocating, setIsLocating] = useState(false)
   const [currentTaskIndex, setCurrentTaskIndex] = useState(0)
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>([])
   const [skippedTaskIds, setSkippedTaskIds] = useState<string[]>([])
@@ -686,6 +688,27 @@ export function WorkspacePage() {
       return
     }
     await recordExecutionEvent(plan.planId, task.taskId, 'START')
+  }
+
+  async function checkArrival() {
+    const target = candidateRequest?.taskFacts.find((item) => item.taskId === currentTask?.id)?.place.location
+    if (!tripId || !currentTask || !target || !navigator.geolocation) {
+      setArrivalMessage('当前任务缺少可信目的地坐标，暂不能自动定位；你仍可手动完成任务。')
+      return
+    }
+    setIsLocating(true); setArrivalMessage('正在进行一次定位…')
+    const attempt = await new Promise<GeolocationPosition | null>((resolve) => navigator.geolocation.getCurrentPosition(resolve, () => resolve(null), { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 }))
+    try {
+      if (!attempt) {
+        const decision = await tripApi.decideArrival(tripId, { schemaVersion: '1.0', taskId: currentTask.id, targetLocation: target, attemptOutcome: 'PERMISSION_DENIED', source: 'WEB_GEOLOCATION' })
+        setArrivalMessage(decision.data.message)
+        return
+      }
+      const evidence = await tripApi.saveArrivalEvidence(tripId, { schemaVersion: '1.0', taskId: currentTask.id, locationEvidence: { longitude: attempt.coords.longitude, latitude: attempt.coords.latitude, accuracy: attempt.coords.accuracy, capturedAt: new Date(attempt.timestamp).toISOString(), source: 'WEB_GEOLOCATION' }, idempotencyKey: `arrival-${crypto.randomUUID()}` })
+      const decision = await tripApi.decideArrival(tripId, { schemaVersion: '1.0', taskId: currentTask.id, targetLocation: target, attemptOutcome: 'EVIDENCE', source: 'WEB_GEOLOCATION', arrivalEvidenceId: evidence.data.evidenceId })
+      setArrivalMessage(decision.data.message)
+    } catch (error) { setArrivalMessage(error instanceof Error ? error.message : '定位判断失败，可改为手动确认。') }
+    finally { setIsLocating(false) }
   }
 
   async function handleAcceptPlan() {
@@ -1520,6 +1543,12 @@ export function WorkspacePage() {
                 <div className="execution-form-card__head">
                   <div><ReceiptText size={20} /><span><strong>完成任务并记录消费</strong><small>实际金额会用于计算剩余预算</small></span></div>
                   <span>自动保存</span>
+                </div>
+                <div className="planner-actions">
+                  <button className="button button--soft" disabled={isLocating || isWritingEvent} onClick={() => void checkArrival()} type="button">
+                    <Navigation size={16} />{isLocating ? '正在定位…' : '一次定位确认到达'}
+                  </button>
+                  {arrivalMessage && <span className="save-state">{arrivalMessage}</span>}
                 </div>
                 <label className="web-expense-field">
                   <span>实际消费金额</span>
