@@ -8,7 +8,7 @@
       "participantId": "10000000-0000-4000-8000-000000000001",
       "reason": "成员预算上限低于共享预算，不能静默收紧",
       "relatedParticipantIds": [],
-      "relaxations": [
+      "allowedRelaxations": [
         {
           "action": "LOWER_SHARED_BUDGET",
           "actorScope": "ORGANIZER",
@@ -38,7 +38,7 @@
       "participantId": "10000000-0000-4000-8000-000000000001",
       "reason": "成员必须明确确认关怀模式",
       "relatedParticipantIds": [],
-      "relaxations": [],
+      "allowedRelaxations": [],
       "ruleId": "S2T003.CARE.PROFILE_INVALID"
     },
     {
@@ -49,7 +49,7 @@
       "participantId": "10000000-0000-4000-8000-000000000002",
       "reason": "成员预算上限低于共享预算，不能静默收紧",
       "relatedParticipantIds": [],
-      "relaxations": [
+      "allowedRelaxations": [
         {
           "action": "LOWER_SHARED_BUDGET",
           "actorScope": "ORGANIZER",
@@ -79,7 +79,7 @@
       "participantId": "10000000-0000-4000-8000-000000000002",
       "reason": "成员必须明确确认关怀模式",
       "relatedParticipantIds": [],
-      "relaxations": [],
+      "allowedRelaxations": [],
       "ruleId": "S2T003.CARE.PROFILE_INVALID"
     },
     {
@@ -90,7 +90,7 @@
       "participantId": "10000000-0000-4000-8000-000000000002",
       "reason": "字段缺失，需要完成问题 MEMBER_CARE_PRESET",
       "relatedParticipantIds": [],
-      "relaxations": [],
+      "allowedRelaxations": [],
       "ruleId": "S2T003.FIELD.REQUIRED"
     }
   ],
@@ -103,7 +103,7 @@
       "participantId": "10000000-0000-4000-8000-000000000001",
       "reason": "成员预算上限低于共享预算，不能静默收紧",
       "relatedParticipantIds": [],
-      "relaxations": [
+      "allowedRelaxations": [
         {
           "action": "LOWER_SHARED_BUDGET",
           "actorScope": "ORGANIZER",
@@ -133,7 +133,7 @@
       "participantId": "10000000-0000-4000-8000-000000000002",
       "reason": "成员预算上限低于共享预算，不能静默收紧",
       "relatedParticipantIds": [],
-      "relaxations": [
+      "allowedRelaxations": [
         {
           "action": "LOWER_SHARED_BUDGET",
           "actorScope": "ORGANIZER",
@@ -165,7 +165,7 @@
       "relatedParticipantIds": [
         "10000000-0000-4000-8000-000000000002"
       ],
-      "relaxations": [
+      "allowedRelaxations": [
         {
           "action": "EXTEND_SHARED_TIME",
           "actorScope": "ORGANIZER",
@@ -189,7 +189,7 @@
       "participantId": "10000000-0000-4000-8000-000000000001",
       "reason": "成员预算上限低于共享预算，不能静默收紧",
       "relatedParticipantIds": [],
-      "relaxations": [
+      "allowedRelaxations": [
         {
           "action": "LOWER_SHARED_BUDGET",
           "actorScope": "ORGANIZER",
@@ -219,7 +219,7 @@
       "participantId": "10000000-0000-4000-8000-000000000002",
       "reason": "成员预算上限低于共享预算，不能静默收紧",
       "relatedParticipantIds": [],
-      "relaxations": [
+      "allowedRelaxations": [
         {
           "action": "LOWER_SHARED_BUDGET",
           "actorScope": "ORGANIZER",
@@ -252,7 +252,7 @@
       "participantId": "10000000-0000-4000-8000-000000000001",
       "reason": "成员预算上限低于共享预算，不能静默收紧",
       "relatedParticipantIds": [],
-      "relaxations": [
+      "allowedRelaxations": [
         {
           "action": "LOWER_SHARED_BUDGET",
           "actorScope": "ORGANIZER",
@@ -282,7 +282,7 @@
       "participantId": "10000000-0000-4000-8000-000000000001",
       "reason": "成员必须明确确认关怀模式",
       "relatedParticipantIds": [],
-      "relaxations": [],
+      "allowedRelaxations": [],
       "ruleId": "S2T003.CARE.PROFILE_INVALID"
     },
     {
@@ -293,7 +293,7 @@
       "participantId": "10000000-0000-4000-8000-000000000002",
       "reason": "成员预算上限低于共享预算，不能静默收紧",
       "relatedParticipantIds": [],
-      "relaxations": [
+      "allowedRelaxations": [
         {
           "action": "LOWER_SHARED_BUDGET",
           "actorScope": "ORGANIZER",
@@ -323,7 +323,7 @@
       "participantId": "10000000-0000-4000-8000-000000000002",
       "reason": "成员必须明确确认关怀模式",
       "relatedParticipantIds": [],
-      "relaxations": [],
+      "allowedRelaxations": [],
       "ruleId": "S2T003.CARE.PROFILE_INVALID"
     },
     {
@@ -334,7 +334,7 @@
       "participantId": "10000000-0000-4000-8000-000000000002",
       "reason": "字段缺失，需要完成问题 MEMBER_CARE_PRESET",
       "relatedParticipantIds": [],
-      "relaxations": [],
+      "allowedRelaxations": [],
       "ruleId": "S2T003.FIELD.REQUIRED"
     },
     {
@@ -345,7 +345,7 @@
       "participantId": null,
       "reason": "结束时间必须晚于开始时间",
       "relatedParticipantIds": [],
-      "relaxations": [
+      "allowedRelaxations": [
         {
           "action": "SET_SHARED_FIELD",
           "actorScope": "ORGANIZER",
@@ -368,7 +368,7 @@
       "participantId": "10000000-0000-4000-8000-000000000001",
       "reason": "成员预算上限低于共享预算，不能静默收紧",
       "relatedParticipantIds": [],
-      "relaxations": [
+      "allowedRelaxations": [
         {
           "action": "LOWER_SHARED_BUDGET",
           "actorScope": "ORGANIZER",
@@ -398,7 +398,7 @@
       "participantId": "10000000-0000-4000-8000-000000000001",
       "reason": "成员必须明确确认关怀模式",
       "relatedParticipantIds": [],
-      "relaxations": [],
+      "allowedRelaxations": [],
       "ruleId": "S2T003.CARE.PROFILE_INVALID"
     },
     {
@@ -409,7 +409,7 @@
       "participantId": "10000000-0000-4000-8000-000000000002",
       "reason": "成员预算上限低于共享预算，不能静默收紧",
       "relatedParticipantIds": [],
-      "relaxations": [
+      "allowedRelaxations": [
         {
           "action": "LOWER_SHARED_BUDGET",
           "actorScope": "ORGANIZER",
@@ -439,7 +439,7 @@
       "participantId": "10000000-0000-4000-8000-000000000002",
       "reason": "成员必须明确确认关怀模式",
       "relatedParticipantIds": [],
-      "relaxations": [],
+      "allowedRelaxations": [],
       "ruleId": "S2T003.CARE.PROFILE_INVALID"
     },
     {
@@ -450,7 +450,7 @@
       "participantId": "10000000-0000-4000-8000-000000000002",
       "reason": "字段缺失，需要完成问题 MEMBER_CARE_PRESET",
       "relatedParticipantIds": [],
-      "relaxations": [],
+      "allowedRelaxations": [],
       "ruleId": "S2T003.FIELD.REQUIRED"
     }
   ]

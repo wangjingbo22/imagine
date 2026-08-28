@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from copy import deepcopy
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 import json
 import sqlite3
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any
 import httpx
 import pytest
 
+from app.application.collaboration_ports import ReadinessPermit
 from app.application.plan_service import PlanVersionService
 from app.application.workflow_service import WorkflowService
 from app.core.config import Settings
@@ -17,10 +19,14 @@ from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.infrastructure.trusted_planning_store import TrustedPlanningStoreError
 from app.infrastructure.workflow_store import SqliteWorkflowRepository
 from app.main import create_app
+from app.domain.collaboration import TripFlowKind
 from app.schemas.plan import PlanVersion
 from app.schemas.replan_explanation import ReplanDifferenceExplanation
 from app.schemas.trip import CreateSingleDayTrip
-from app.services.replanning import SuffixPlanningInput
+from app.services.replanning import (
+    DeterministicRetainedSuffixPlanner,
+    SuffixPlanningInput,
+)
 from backend.tests.plan_support import UnusedLocationService
 
 
@@ -132,6 +138,24 @@ class FailingExplainer:
         raise RuntimeError("provider failure must stay private")
 
 
+class MutableReadinessGuard:
+    def __init__(self) -> None:
+        self.readiness_digest = "a" * 64
+        self.current_revision = 1
+
+    @contextmanager
+    def operation(self, access):
+        yield ReadinessPermit(
+            trip_id=access.trip_id,
+            readiness_digest=self.readiness_digest,
+            operation_id=access.operation_id,
+            operation=access.operation,
+            flow_kind=TripFlowKind.COLLABORATION_V2,
+            expires_at=datetime.now(UTC) + timedelta(minutes=1),
+            current_revision=self.current_revision,
+        )
+
+
 _DEFAULT_TEST_SUFFIX = object()
 
 
@@ -140,6 +164,7 @@ def _app_and_db(
     *,
     suffix_planner: object | None = _DEFAULT_TEST_SUFFIX,
     explanation_gateway: object | None = None,
+    readiness_guard: object | None = None,
 ):
     database_path = tmp_path / "s2_t021_t022.sqlite3"
     workflow = WorkflowService(SqliteWorkflowRepository(database_path))
@@ -165,6 +190,7 @@ def _app_and_db(
             else suffix_planner
         ),
         replan_explanation_gateway=explanation_gateway,  # type: ignore[arg-type]
+        collaboration_readiness_guard=readiness_guard,  # type: ignore[arg-type]
     )
     return app, database_path
 
@@ -260,6 +286,28 @@ async def _preview(
         f"/api/v1/trips/{trip_id}/replans/from-adjustment",
         json=command,
     )
+
+
+async def _persist_adjustment(
+    client: httpx.AsyncClient,
+    *,
+    trip_id: str,
+    plan_id: str,
+    command: dict[str, Any],
+    key: str,
+) -> str:
+    adjustment = command["adjustment"]
+    response = await client.post(
+        f"/api/v1/execution-adjustments/trips/{trip_id}/events",
+        json={
+            **adjustment,
+            "planVersionId": plan_id,
+            "idempotencyKey": key,
+            "occurredAt": "2026-09-05T11:36:00+08:00",
+        },
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["data"]["eventId"]
 
 
 @pytest.mark.asyncio
@@ -543,6 +591,75 @@ async def test_decision_reuses_atomic_plan_version_state_machine(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["accept", "reject"])
+async def test_adjustment_v2_cannot_bypass_dedicated_decision_endpoint(
+    tmp_path: Path,
+    action: str,
+) -> None:
+    app, _ = _app_and_db(tmp_path)
+    trip_id = _planning_request()["trip"]["tripId"]
+    command = deepcopy(_cases()["lateFeasible"])
+    command["lockedTaskIds"] = []
+    command["adjustment"]["taskId"] = "task-museum"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        current = await _generate_current(client)
+        preview = await _preview(client, trip_id, command)
+        assert preview.status_code == 200, preview.text
+        candidate = preview.json()["data"]["candidatePlan"]
+        response = await client.post(
+            f"/api/v1/trips/{trip_id}/plan-versions/{candidate['planId']}/{action}"
+        )
+        state = (await client.get(f"/api/v1/trips/{trip_id}")).json()["data"]
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "S2_T022_DEDICATED_DECISION_REQUIRED"
+    assert state["currentPlan"]["planId"] == current["planId"]
+    assert [item["planId"] for item in state["proposedPlans"]] == [
+        candidate["planId"]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_readiness_change_after_preview_rejects_decision_without_state_change(
+    tmp_path: Path,
+) -> None:
+    readiness = MutableReadinessGuard()
+    app, database_path = _app_and_db(tmp_path, readiness_guard=readiness)
+    trip_id = _planning_request()["trip"]["tripId"]
+    command = deepcopy(_cases()["lateFeasible"])
+    command["lockedTaskIds"] = []
+    command["adjustment"]["taskId"] = "task-museum"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        current = await _generate_current(client)
+        preview = await _preview(client, trip_id, command)
+        assert preview.status_code == 200, preview.text
+        candidate = preview.json()["data"]["candidatePlan"]
+        readiness.readiness_digest = "b" * 64
+        readiness.current_revision = 2
+        decision = await client.post(
+            f"/api/v1/trips/{trip_id}/replans/{candidate['planId']}/decision",
+            json={"schemaVersion": "1.0", "decision": "ACCEPT"},
+        )
+        state = (await client.get(f"/api/v1/trips/{trip_id}")).json()["data"]
+
+    assert decision.status_code == 409
+    assert decision.json()["code"] == "S2_T022_READINESS_CHANGED"
+    assert state["currentPlan"]["planId"] == current["planId"]
+    assert state["proposedPlans"][0]["planId"] == candidate["planId"]
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute(
+            "SELECT status FROM plan_versions WHERE plan_id=?",
+            (candidate["planId"],),
+        ).fetchone()[0] == "PROPOSED"
+
+
+@pytest.mark.asyncio
 async def test_strict_command_rejects_client_candidates_before_v2_write(
     tmp_path: Path,
 ) -> None:
@@ -661,10 +778,72 @@ async def test_adjustment_task_requires_an_official_start_event(
 
 
 @pytest.mark.asyncio
-async def test_production_retained_suffix_fallback_cannot_issue_fake_adjustment(
+async def test_production_default_event_planner_reuses_trusted_provider_facts(
     tmp_path: Path,
 ) -> None:
     app, database_path = _app_and_db(tmp_path, suffix_planner=None)
+    trip_id = _planning_request()["trip"]["tripId"]
+    command = deepcopy(_cases()["fatigueFeasible"])
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        current = await _generate_current(client)
+        adjustment_event_id = await _persist_adjustment(
+            client,
+            trip_id=trip_id,
+            plan_id=current["planId"],
+            command=command,
+            key="default-planner-fatigue-001",
+        )
+        command["adjustmentEventId"] = adjustment_event_id
+        response = await _preview(client, trip_id, command)
+    assert response.status_code == 200, response.text
+    candidate = response.json()["data"]["candidatePlan"]
+    assert candidate["status"] == "PROPOSED"
+    assert candidate["reason"] == "FATIGUE"
+    with sqlite3.connect(database_path) as connection:
+        trusted = {
+            plan_id: json.loads(payload)
+            for plan_id, payload in connection.execute(
+                "SELECT plan_id,candidate_facts_json FROM trusted_plan_issuances "
+                "WHERE plan_id IN (?,?)",
+                (current["planId"], candidate["planId"]),
+            ).fetchall()
+        }
+        evidence = json.loads(
+            connection.execute(
+                "SELECT validation_json FROM trusted_plan_issuances "
+                "WHERE plan_id=? AND boundary_kind='V2'",
+                (candidate["planId"],),
+            ).fetchone()[0]
+        )
+    before_facts = trusted[current["planId"]]
+    after_facts = trusted[candidate["planId"]]
+    assert after_facts["startLocation"] == before_facts["startLocation"]
+    assert after_facts["endLocation"] == before_facts["endLocation"]
+    assert [item["place"] for item in after_facts["taskFacts"]] == [
+        item["place"] for item in before_facts["taskFacts"]
+    ]
+    assert [item["route"] for item in after_facts["taskFacts"]] == [
+        item["route"] for item in before_facts["taskFacts"]
+    ]
+    assert evidence["collaborationReadiness"] == {
+        "readinessDigest": "legacy",
+        "currentRevision": None,
+        "flowKind": "LEGACY_SINGLE",
+    }
+    assert evidence["confirmedAdjustmentEventId"] == adjustment_event_id
+
+
+@pytest.mark.asyncio
+async def test_explicit_retained_suffix_fallback_fails_closed_without_v2_write(
+    tmp_path: Path,
+) -> None:
+    app, database_path = _app_and_db(
+        tmp_path,
+        suffix_planner=DeterministicRetainedSuffixPlanner(),
+    )
     trip_id = _planning_request()["trip"]["tripId"]
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -680,6 +859,36 @@ async def test_production_retained_suffix_fallback_cannot_issue_fake_adjustment(
         ).fetchone()[0] == 0
         assert connection.execute(
             "SELECT COUNT(*) FROM trusted_plan_issuances WHERE boundary_kind='V2'"
+        ).fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_persisted_adjustment_event_rejects_tampered_inline_payload(
+    tmp_path: Path,
+) -> None:
+    app, database_path = _app_and_db(tmp_path, suffix_planner=None)
+    trip_id = _planning_request()["trip"]["tripId"]
+    command = deepcopy(_cases()["fatigueFeasible"])
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        current = await _generate_current(client)
+        command["adjustmentEventId"] = await _persist_adjustment(
+            client,
+            trip_id=trip_id,
+            plan_id=current["planId"],
+            command=command,
+            key="tamper-fatigue-001",
+        )
+        command["adjustment"]["fatigueLevel"] = "SEVERE"
+        response = await _preview(client, trip_id, command)
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "S2_T021_ADJUSTMENT_EVENT_PAYLOAD_MISMATCH"
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM plan_versions WHERE version=2"
         ).fetchone()[0] == 0
 
 

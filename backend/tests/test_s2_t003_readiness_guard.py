@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from dataclasses import replace
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -38,14 +39,22 @@ class FakeCollaboration:
     def require_ready(self, trip_id: UUID, organizer_capability: str | None) -> str:
         return "a" * 64
 
+    def ready_revision(self, trip_id: UUID, organizer_capability: str | None):
+        return SimpleNamespace(revision=1)
+
 
 class SequencedCollaboration:
     def __init__(self) -> None:
-        self.calls = 0
+        self.revision_calls = 0
+        self.digest_calls = 0
+
+    def ready_revision(self, trip_id: UUID, organizer_capability: str | None):
+        self.revision_calls += 1
+        return SimpleNamespace(revision=self.revision_calls)
 
     def require_ready(self, trip_id: UUID, organizer_capability: str | None) -> str:
-        self.calls += 1
-        return "a" * 64 if self.calls == 1 else "b" * 64
+        self.digest_calls += 1
+        return "a" * 64
 
 
 class FakeLeaseRepository:
@@ -134,6 +143,29 @@ def test_active_ready_lease_blocks_member_mutation(tmp_path) -> None:
     assert harness.repository.active_lease(access.trip_id) is None
 
 
+def test_collaboration_permit_binds_exact_ready_revision(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    guard = SqliteCollaborationReadinessGuard(
+        database_path=harness.repository._path,
+        repository=harness.repository,
+        collaboration=harness.service,
+        flow_registry=SqliteTripFlowRegistry(harness.repository._path),
+    )
+    access = PlanningAccess(
+        trip_id=harness.revision.trip_id,
+        organizer_capability=harness.organizer_token,
+        operation_id="revision-binding-0001",
+        operation=PlanningOperation.GENERATE_V2,
+    )
+
+    with guard.operation(access) as permit:
+        assert permit.current_revision == harness.revision.revision
+        assert permit.readiness_digest == harness.service.require_ready(
+            access.trip_id,
+            access.organizer_capability,
+        )
+
+
 def test_source_digest_change_invalidates_ready_guard_before_body(tmp_path) -> None:
     harness = _ready_harness(tmp_path)
     guard = SqliteCollaborationReadinessGuard(
@@ -174,9 +206,10 @@ def test_revision_change_between_ready_check_and_lease_never_enters_body() -> No
         with guard.operation(_access()):
             calls += 1
 
-    assert captured.value.code == "COLLABORATION_OPERATION_STALE"
+    assert captured.value.code == "COLLABORATION_READY_CONTEXT_STALE"
     assert calls == 0
-    assert collaboration.calls == 2
+    assert collaboration.revision_calls == 2
+    assert collaboration.digest_calls == 2
     assert repository.leases == {}
 
 
@@ -206,8 +239,16 @@ def test_same_operation_lease_retry_is_stable_and_digest_reuse_is_stale(tmp_path
         )
 
     repository.complete_lease(access.operation_id)
-    assert repository.acquire_lease(
+    assert repository.active_lease(access.trip_id) is None
+    reopened = repository.acquire_lease(
         access=access,
         readiness_digest="a" * 64,
         ttl=timedelta(minutes=1),
-    ) == first
+    )
+    assert reopened.operation_id == first.operation_id
+    assert repository.active_lease(access.trip_id) is not None
+    with pytest.raises(
+        CollaborationStoreError,
+        match="COLLABORATION_OPERATION_IN_PROGRESS",
+    ):
+        repository.assert_mutation_allowed(access.trip_id)

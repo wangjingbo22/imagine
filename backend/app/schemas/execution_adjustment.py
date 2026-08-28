@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from typing import Annotated, Literal
 
-from pydantic import BeforeValidator, Field, model_validator
+from pydantic import BeforeValidator, ConfigDict, Field, UUID4, model_validator
 
 from .constraint import Constraint
 from .trip import ContractModel
@@ -149,6 +150,40 @@ class ConfirmedExecutionAdjustment(ContractModel):
         return self
 
 
+class CreateConfirmedExecutionAdjustmentEvent(ConfirmedExecutionAdjustment):
+    """One user-confirmed adjustment ready for idempotent persistence."""
+
+    # This DTO is accepted directly from JSON.  The shared ContractModel is
+    # strict for internal contracts, so opt this HTTP input into normal JSON
+    # coercion just like CreateExecutionEvent does (UUID/datetime arrive as
+    # strings on the wire).
+    model_config = ConfigDict(
+        alias_generator=ContractModel.model_config["alias_generator"],
+        populate_by_name=True,
+        extra="forbid",
+        strict=False,
+        str_strip_whitespace=True,
+        loc_by_alias=True,
+    )
+
+    plan_version_id: UUID4
+    idempotency_key: Annotated[str, Field(min_length=1, max_length=160)]
+    occurred_at: datetime
+
+    @model_validator(mode="after")
+    def occurred_at_must_be_aware(self) -> "CreateConfirmedExecutionAdjustmentEvent":
+        if self.occurred_at.tzinfo is None:
+            raise ValueError("occurredAt must include a timezone")
+        return self
+
+
+class ConfirmedExecutionAdjustmentEvent(CreateConfirmedExecutionAdjustmentEvent):
+    """Server-issued LATE/FATIGUE event created only after confirmation."""
+
+    event_id: UUID4
+    trip_id: UUID4
+
+
 class RemainingConstraintContext(ContractModel):
     remaining_time_minutes: Annotated[int | None, Field(ge=0)] = None
     remaining_walk_budget_meters: Annotated[int | None, Field(ge=0)] = None
@@ -211,6 +246,8 @@ __all__ = [
     "ClarificationQuestion",
     "ClarificationQuestionKey",
     "ConfirmedExecutionAdjustment",
+    "ConfirmedExecutionAdjustmentEvent",
+    "CreateConfirmedExecutionAdjustmentEvent",
     "CurrentTaskContext",
     "EventConstraintSet",
     "ExecutionAdjustmentReason",

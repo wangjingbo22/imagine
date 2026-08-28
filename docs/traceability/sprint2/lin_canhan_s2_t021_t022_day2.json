@@ -3,37 +3,37 @@
   "sprint": "Sprint2",
   "deliveryDay": "Day2",
   "owner": "林粲涵",
-  "verifiedAgainstMainCommit": "5e71d03b98cd80fd92ffbc442d369ec4aa29330a",
-  "deliveryBaseCommit": "5b846f35eafc51a3834701e9c0b729f22ae21223",
-  "latestMainMergeCommit": "3c1daa638363a531f43d07c6bdcdc52a31dd1694",
-  "implementationCommit": "d738b0a2ecde37f4fb9d76f420b73b645d7ed150",
+  "verifiedAgainstMainCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
+  "deliveryBaseCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
+  "implementationCommit": "f376574a5c8c5c577d6ed43efd200293023b3b32",
+  "eventContractHardeningCommit": "0856b745075156e3da5365e74852aaa192329325",
   "requirementsSource": [
     {
-      "file": "行知旅伴_V2.3_Sprint2待办列表_含负责人 (2).xlsx",
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
       "sheet": "SprintBacklog模板",
       "range": "A25:V26"
     },
     {
-      "file": "行知旅伴_V2.3_Sprint2待办列表_含负责人 (2).xlsx",
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
       "sheet": "PBI追溯",
       "range": "A11:J11"
     },
     {
-      "file": "行知旅伴_V2.3_Sprint2待办列表_含负责人 (2).xlsx",
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
       "sheet": "LLM接入设计",
-      "range": "A1:K44"
+      "range": "A7:K7"
     },
     {
-      "file": "行知旅伴_V2.3_Sprint2待办列表_含负责人 (2).xlsx",
-      "sheet": "LLM JSON契约",
-      "range": "A29:H36"
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
+      "sheet": "用户功能验收清单",
+      "range": "A12:J13"
     }
   ],
   "pbi": {
     "pbiId": "PBI-11-B",
     "acceptanceCriteriaId": "AC-11-B",
     "coverage": "S2-T021_AND_S2-T022_VERIFIED_WITH_EXPLICIT_UPSTREAM_BOUNDARIES",
-    "productAcceptance": "模型只把口语解析为事件草稿并解释；程序校验事件、转换约束、保留已完成/锁定任务并生成候选 V2；接受前不覆盖 CURRENT。"
+    "productAcceptance": "模型只把口语解析为事件草稿并解释；程序从 adjustmentEventId 恢复已确认事件，以事件感知确定性规划器收紧未完成后缀，绑定协作 readiness 后签发候选 V2；组织者专用决策前 CURRENT 不变。"
   },
   "tasks": [
     {
@@ -43,14 +43,15 @@
       "owner": "林粲涵",
       "deliveryDay": "Day2",
       "priority": "Must",
-      "estimateHours": 3,
+      "remainingHours": 0,
       "status": "VERIFIED",
       "dependsOn": ["S2-T005", "S2-T006", "S2-T019", "S2-T020"],
       "consumes": [
-        "S2-T019.ConfirmedExecutionAdjustment",
+        "S2-T019.ConfirmedExecutionAdjustmentEventById",
         "S2-T020.EventConstraintSet",
         "S2-T005.PlanVersionCURRENT",
-        "S2-T006.FactRefContract"
+        "S2-T006.ProviderFactRegistry",
+        "S2-T003.ReadinessPermit"
       ],
       "consumedBy": ["S2-T022", "S2-T023"],
       "moduleFiles": [
@@ -63,6 +64,8 @@
         "backend/app/services/planning/replanning_adapter.py",
         "app/application/planning_boundary_service.py",
         "app/application/execution_replan_service.py",
+        "app/application/collaboration_ports.py",
+        "app/application/collaboration_readiness.py",
         "app/api/execution_replan_routes.py",
         "app/infrastructure/trusted_planning_store.py",
         "app/main.py"
@@ -91,6 +94,9 @@
         "only-unfinished-suffix-may-change",
         "no-feasible-conflict-and-relaxations-with-zero-candidate-write",
         "different-adjustments-have-different-v2-identities",
+        "adjustment-event-id-restores-server-confirmed-event-and-rejects-inline-tampering",
+        "default-event-aware-planner-preserves-provider-place-route-price-and-facility-facts",
+        "candidate-identity-and-issued-evidence-bind-readiness-digest-and-current-revision",
         "issued-validation-evidence-is-immutable",
         "pre-execution-and-unstarted-task-fail-before-v2-write"
       ]
@@ -102,18 +108,21 @@
       "owner": "林粲涵",
       "deliveryDay": "Day2",
       "priority": "Must",
-      "estimateHours": 3,
+      "remainingHours": 0,
       "status": "VERIFIED",
       "dependsOn": ["S2-T005", "S2-T021"],
       "consumes": [
         "S2-T021.RegisteredExecutionAdjustmentReplan",
-        "S2-T005.PlanVersionDecisionTransaction"
+        "S2-T005.PlanVersionDecisionTransaction",
+        "S2-T003.ReadinessPermit"
       ],
       "consumedBy": ["S2-T018", "S2-T023"],
       "moduleFiles": [
         "backend/app/schemas/execution_replan.py",
         "backend/app/schemas/replan_explanation.py",
         "app/application/execution_replan_service.py",
+        "app/application/planning_boundary_service.py",
+        "app/application/collaboration_readiness.py",
         "app/api/execution_replan_routes.py",
         "app/infrastructure/bailian_replan_explanation.py",
         "app/infrastructure/trusted_planning_store.py",
@@ -148,7 +157,10 @@
         "accept-atomically-switches-current-and-reject-keeps-current",
         "explanation-cannot-change-task-amount-status-or-plan-identity",
         "explanation-failure-still-returns-complete-structured-result",
-        "decision-endpoint-rejects-non-t021-issued-v2"
+        "decision-endpoint-rejects-non-t021-issued-v2",
+        "readiness-change-after-preview-rejects-decision-without-state-change",
+        "delay-and-fatigue-cannot-bypass-dedicated-decision-through-generic-accept-or-reject",
+        "dedicated-validation-and-state-transition-share-one-readiness-lease"
       ]
     }
   ],
@@ -167,9 +179,10 @@
     {
       "from": "S2-T006",
       "to": "S2-T021",
-      "artifact": "server-owned provider FactRef bundle",
-      "status": "CONCRETE_REGISTRY_ABSENT_FAIL_CLOSED_SEAM_ONLY",
+      "artifact": "server-owned Provider FactRef registry and trusted planning facts",
+      "status": "REGISTRY_IMPLEMENTED_FORMAL_ONLINE_ROUTE_BUILDER_EXTERNAL_PENDING",
       "evidenceFiles": [
+        "app/infrastructure/provider_fact_registry.py",
         "app/domain/recommendation.py",
         "app/application/recommendation_service.py",
         "app/infrastructure/trusted_planning_store.py"
@@ -186,6 +199,18 @@
       ]
     },
     {
+      "from": "S2-T019",
+      "to": "S2-T021",
+      "artifact": "adjustmentEventId resolving an immutable server-confirmed LATE/FATIGUE event",
+      "status": "VERIFIED_WITH_INLINE_MISMATCH_FAIL_CLOSED",
+      "evidenceFiles": [
+        "backend/app/schemas/execution_replan.py",
+        "app/application/workflow_service.py",
+        "app/infrastructure/workflow_store.py",
+        "app/application/planning_boundary_service.py"
+      ]
+    },
+    {
       "from": "S2-T020",
       "to": "S2-T021",
       "artifact": "server-recompiled transient EventConstraintSet",
@@ -199,8 +224,8 @@
     {
       "from": "S2-T021",
       "to": "S2-T022",
-      "artifact": "PROPOSED PlanVersion plus full HARD validation report",
-      "status": "VERIFIED_BY_DAY2_TESTS",
+      "artifact": "readiness-bound PROPOSED PlanVersion plus full HARD validation report",
+      "status": "VERIFIED_WITH_READINESS_DRIFT_AND_GENERIC_BYPASS_TESTS",
       "evidenceFiles": [
         "app/application/planning_boundary_service.py",
         "app/application/execution_replan_service.py"
@@ -220,7 +245,7 @@
       "from": "S2-T022",
       "to": "S2-T023",
       "artifact": "candidate Diff explanation and accept/reject API",
-      "status": "BACKEND_CONTRACT_READY_UI_NOT_IMPLEMENTED_HERE",
+      "status": "BACKEND_CONTRACT_READY_T023_FRONTEND_PENDING",
       "evidenceFiles": [
         "app/api/execution_replan_routes.py",
         "frontend/src/api/API.md"
@@ -232,41 +257,50 @@
       "completed and locked tasks are preserved 100 percent",
       "only the unfinished suffix is adjusted",
       "all HARD rules are revalidated",
-      "no infeasible partial candidate is persisted"
+      "no infeasible partial candidate is persisted",
+      "persisted adjustmentEventId is restored server-side and inline tampering is rejected",
+      "Provider place route price and facility facts are never fabricated by the suffix planner"
     ],
     "S2-T022": [
       "CURRENT is unchanged until candidate acceptance",
       "accept switches CURRENT atomically and reject keeps the old CURRENT",
       "LLM explanation cannot add or remove tasks or change amount or status",
-      "explanation failure does not remove structured candidate or Diff"
+      "explanation failure does not remove structured candidate or Diff",
+      "candidate readiness digest and revision must still match at decision time",
+      "DELAY and FATIGUE decisions must use the dedicated decision endpoint"
     ]
   },
   "integrationBoundaries": {
     "llmAuthority": "EXPLANATION_ONLY_BEST_EFFORT_NO_PLAN_WRITE_AUTHORITY",
-    "clientFactAuthority": "CLIENT_MAY_SEND_CONFIRMED_EVENT_AND_LOCK_IDS_BUT_NOT_FACTS_OR_COMPILED_CONSTRAINTS",
+    "clientFactAuthority": "NEW_FLOW_SENDS_ADJUSTMENT_EVENT_ID; SERVER_RESTORES_CONFIRMED_EVENT; LEGACY_INLINE_MUST_MATCH_WHEN_ID_IS_PRESENT; CLIENT_CANNOT_SEND_FACTS_OR_COMPILED_CONSTRAINTS",
     "constraintLifetime": "S2_T020_EVENT_CONSTRAINTS_ARE_TRANSIENT_AND_NOT_APPENDED_TO_S1_T007_PROFILE",
     "candidateState": "PROPOSED_UNTIL_EXPLICIT_ACCEPT",
-    "defaultCandidateSource": "EVENT_AWARE_SUFFIX_PLANNER_REQUIRED_FAIL_CLOSED_WHEN_ABSENT",
-    "frontendScope": "NO_FRONTEND_IMPLEMENTED_BY_THIS_DELIVERY"
+    "defaultCandidateSource": "DETERMINISTIC_EVENT_AWARE_TRUSTED_SUFFIX_PLANNER_PRESERVES_PROVIDER_FACTS_AND_FAILS_CLOSED_WHEN_FACTS_CANNOT_SATISFY_HARD_RULES",
+    "readinessBinding": "V2_IDENTITY_AND_ISSUED_EVIDENCE_BIND_READINESS_DIGEST_AND_CURRENT_REVISION; DECISION_REVALIDATES_BOTH",
+    "decisionAuthority": "DELAY_AND_FATIGUE_USE_DEDICATED_ORGANIZER_DECISION; GENERIC_ACCEPT_REJECT_CANNOT_BYPASS_T021_EVIDENCE",
+    "frontendScope": "T023_FRONTEND_INTEGRATION_PENDING_OUTSIDE_THIS_DELIVERY"
   },
   "knownGaps": {
-    "s2T006ConcreteFactRefRegistry": "ABSENT_ON_BASELINE_MAIN_ONLY_CONTRACT_SEAM_AVAILABLE",
+    "s2T006ConcreteFactRefRegistry": "IMPLEMENTED",
+    "s2T006FormalOnlineRouteBuilder": "EXTERNAL_PENDING",
     "s2T005TwoThreePersonPlanVersionChain": "BLOCKED_BY_S2_T005_UPSTREAM_DELIVERY",
-    "s2T023Frontend": "MISSING_OUTSIDE_THIS_DELIVERY",
+    "s2T023Frontend": "PENDING_OUTSIDE_THIS_DELIVERY",
     "fatigueThresholds": "PO_CONFIRMATION_PENDING",
     "lateBeyondRemainingWindowPolicy": "PO_CONFIRMATION_PENDING",
     "onlineE2E": "NOT_CLAIMED"
   },
   "localVerification": {
     "status": "PASS",
-    "focusedCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_s2_t021_t022_execution_replan.py backend/tests/test_bailian_replan_explanation.py backend/tests/test_s2_lin_canhan_t021_t022_traceability.py",
-    "focusedResult": "43 passed in 5.32s",
+    "focusedCommand": "python -m pytest -q backend/tests/test_s1_t017_event_replan.py backend/tests/test_s2_t019_t020_http.py backend/tests/test_s2_t003_readiness_guard.py backend/tests/test_s2_t021_t022_execution_replan.py",
+    "focusedResult": "42 passed",
+    "boundaryCommand": "python -m pytest -q backend/tests/test_s2_t003_planning_readiness.py backend/tests/test_s2_lin_canhan_t021_t022_traceability.py backend/tests/test_planning_http_boundaries.py backend/tests/test_s1_t024_golden_path.py backend/tests/test_day2_traceability.py",
+    "boundaryResult": "43 passed",
     "backendCommand": "python -B -m pytest -p no:cacheprovider -q",
-    "backendResult": "366 passed in 26.95s",
+    "backendResult": "528 passed",
     "diffCheck": "PASS",
     "frontendTest": "32 passed",
     "frontendBuild": "PASS",
-    "frontendLint": "PASS_WITH_2_PREEXISTING_WARNINGS",
+    "frontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
     "onlineE2E": "NOT_RUN_NOT_CLAIMED"
   },
   "securityFix": {
@@ -274,7 +308,7 @@
     "externalAction": "REVOKE_AND_ROTATE_EXPOSED_KEY_AND_COORDINATE_HISTORY_CLEANUP"
   },
   "externalAcceptanceStillNeeded": [
-    "S2-T006 concrete FactRef registry and persisted provider bundle must be delivered for real alternate online candidates",
+    "S2-T006 FactRef registry exists; the formal online Provider route builder still needs external delivery and public-network verification",
     "S2-T005 must deliver and verify the 2-person and 3-person PlanVersion chain",
     "S2-T023 must consume the preview Diff and decision contracts in the frontend",
     "PO must freeze fatigue thresholds and late-beyond-window behavior",

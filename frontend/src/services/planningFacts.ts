@@ -43,9 +43,9 @@ export function restoreDraftFromPlanningFacts(
     avoidPlaces: preferenceValues(request, 'AVOID_PLACE'),
     assistanceMode,
     assistanceProfile: {
-      maxSegmentWalkMeters: profile?.walkLimits.maxContinuousMeters ?? 500,
-      maxTransfers: profile?.maxTransfers ?? 2,
-      restIntervalMinutes: profile?.restInterval ?? 90,
+      maxSegmentWalkMeters: profile?.walkLimits.maxContinuousMeters ?? null,
+      maxTransfers: profile?.maxTransfers ?? null,
+      restIntervalMinutes: profile?.restInterval ?? null,
     },
     naturalLanguageRequest: '从服务端签发的规划事实恢复',
   }

@@ -8,6 +8,7 @@ from app.application.collaboration_ports import (
     TripDraftRevisionPort,
     TripDraftRevisionUnavailable,
     TripDraftRevisionView,
+    UnresolvedAnswerAttempt,
 )
 from app.application.trip_draft_revision_service import (
     TripUnderstandingFallbackResponse,
@@ -188,7 +189,13 @@ class CollaborationService:
             return CollaborationStatus.READY_TO_PLAN
         if issues:
             return CollaborationStatus.CONFLICT_REVIEW
-        if any(item.confirmation_status is ParticipantConfirmationStatus.CONFIRMED for item in progress):
+        if any(
+            item.confirmation_status in {
+                ParticipantConfirmationStatus.CONFIRMED,
+                ParticipantConfirmationStatus.NEEDS_RECONFIRMATION,
+            }
+            for item in progress
+        ):
             return CollaborationStatus.COLLECTING_MEMBERS
         return CollaborationStatus.DRAFT_CONVERSATION
 
@@ -213,6 +220,7 @@ class CollaborationService:
         member_key: str,
         participant_id: UUID,
         issues: tuple[CollaborationIssue, ...],
+        failed_attempts: tuple[UnresolvedAnswerAttempt, ...],
     ) -> ParticipantProgress:
         confirmation = stored.confirmations.get(participant_id)
         current_member = member_digest(revision, member_key)
@@ -221,6 +229,11 @@ class CollaborationService:
             or issue.participant_id == participant_id
             or participant_id in issue.related_participant_ids
             for issue in issues
+        )
+        relevant_failed_attempt = any(
+            attempt.actor_scope != "PARTICIPANT"
+            or attempt.actor_id == str(participant_id)
+            for attempt in failed_attempts
         )
         access_status = self._access_status(
             stored=stored,
@@ -232,6 +245,7 @@ class CollaborationService:
             and confirmation.confirmed_shared_digest == shared_digest(revision)
             and confirmation.confirmed_member_digest == current_member
             and not relevant_issue
+            and not relevant_failed_attempt
         )
         confirmation_status = (
             ParticipantConfirmationStatus.CONFIRMED
@@ -290,6 +304,19 @@ class CollaborationService:
             revision,
             organizer_participant_id=stored.organizer_participant_id,
         )
+        reader = getattr(self.revisions, "unresolved_failed_answer_attempts", None)
+        if reader is None:
+            failed_attempts: tuple[UnresolvedAnswerAttempt, ...] = ()
+        else:
+            try:
+                failed_attempts = tuple(
+                    reader(
+                        trip_id=revision.trip_id,
+                        current_revision=revision.revision,
+                    )
+                )
+            except TripDraftRevisionUnavailable as error:
+                raise self._revision_error(error) from error
         progress = [
             self._progress(
                 stored=stored,
@@ -297,6 +324,7 @@ class CollaborationService:
                 member_key=member_key,
                 participant_id=revision.member_bindings[member_key],
                 issues=issues,
+                failed_attempts=failed_attempts,
             )
             for member_key in sorted(revision.member_bindings)
         ]

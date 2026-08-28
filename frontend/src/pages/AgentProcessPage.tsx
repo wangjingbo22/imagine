@@ -122,7 +122,9 @@ export function AgentProcessPage() {
     [completedSteps],
   )
   const routeConstraintDetail = draft?.assistanceMode === 'low-mobility'
-    ? `逐段检查步行距离、换乘次数与休息间隔。已确认单段步行上限 ${draft.assistanceProfile.maxSegmentWalkMeters} 米。`
+    ? draft.assistanceProfile.maxSegmentWalkMeters === null
+      ? '逐段检查步行距离、换乘次数与休息间隔；当前未冻结单段步行上限。'
+      : `逐段检查步行距离、换乘次数与休息间隔。已确认单段步行上限 ${draft.assistanceProfile.maxSegmentWalkMeters} 米。`
     : draft?.assistanceMode === 'family'
       ? '逐段检查路线来源，并按已确认的午休时段和亲子返程规则排程。'
       : draft?.assistanceMode === 'assisted'

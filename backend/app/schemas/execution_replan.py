@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from enum import Enum
+import re
 from typing import Annotated, Literal
 from pydantic import Field, UUID4, model_validator
 
+from app.domain.collaboration import TripFlowKind
 from app.schemas.execution_adjustment import (
     ConfirmedExecutionAdjustment,
     EventConstraintSet,
@@ -22,6 +24,7 @@ class ExecutionAdjustmentReplanRequest(ContractModel):
     """Strict S2-T021 command; all planning facts stay server-owned."""
 
     schema_version: Literal["1.0"]
+    adjustment_event_id: UUID4 | None = None
     adjustment: ConfirmedExecutionAdjustment
     locked_task_ids: tuple[
         Annotated[str, Field(min_length=1, max_length=64)], ...
@@ -43,6 +46,28 @@ class RegisteredExecutionAdjustmentReplan(ContractModel):
     replan: RegisteredReplan
     event_constraints: EventConstraintSet
     derived_context: RemainingConstraintContext
+
+
+class ExecutionReplanReadinessBinding(ContractModel):
+    """Immutable collaboration snapshot bound to an issued adjustment V2."""
+
+    readiness_digest: Annotated[str, Field(min_length=6, max_length=64)]
+    current_revision: Annotated[int | None, Field(ge=1)] = None
+    flow_kind: TripFlowKind
+
+    @model_validator(mode="after")
+    def validate_flow_binding(self) -> "ExecutionReplanReadinessBinding":
+        if self.flow_kind is TripFlowKind.LEGACY_SINGLE:
+            if self.readiness_digest != "legacy" or self.current_revision is not None:
+                raise ValueError("legacy readiness must use digest=legacy and no revision")
+        elif (
+            self.current_revision is None
+            or re.fullmatch(r"[0-9a-f]{64}", self.readiness_digest) is None
+        ):
+            raise ValueError(
+                "collaboration readiness requires a revision and SHA-256 digest"
+            )
+        return self
 
 
 class DifferenceExplanationStatus(str, Enum):
@@ -105,6 +130,7 @@ __all__ = [
     "ExecutionAdjustmentDecisionRequest",
     "ExecutionAdjustmentDecisionView",
     "ExecutionAdjustmentReplanPreview",
+    "ExecutionReplanReadinessBinding",
     "DifferenceExplanationStatus",
     "DifferenceExplanationView",
     "RegisteredExecutionAdjustmentReplan",

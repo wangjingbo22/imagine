@@ -211,6 +211,44 @@ async def test_end_to_end_deadline_stops_a_slow_streaming_extractor() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_unexpected_non_cancellation_failure_degrades_to_fixed_form() -> None:
+    class FailingExtractor:
+        model = "failing-test-model"
+        calls = 0
+
+        async def extract(self, **_: str):
+            self.calls += 1
+            raise RuntimeError("unexpected provider failure")
+
+    extractor = FailingExtractor()
+    outcome = await ExecutionEventDraftService(extractor).parse(
+        _request("我迟到了")
+    )
+
+    assert extractor.calls == 1
+    assert outcome.recognition_source == "DEGRADED_FORM"
+    assert outcome.degraded_reason == "BAILIAN_EXECUTION_FAILED"
+    assert outcome.draft.event_type == "LATE"
+    assert outcome.draft.clarification_questions[0].question_key == (
+        "LATE_MINUTES_REQUIRED"
+    )
+
+
+@pytest.mark.asyncio
+async def test_cancellation_is_not_converted_into_a_form_response() -> None:
+    class CancelledExtractor:
+        model = "cancelled-test-model"
+
+        async def extract(self, **_: str):
+            raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await ExecutionEventDraftService(CancelledExtractor()).parse(
+            _request("我迟到了")
+        )
+
+
 def test_request_task_mismatch_and_draft_schema_fail_closed() -> None:
     with pytest.raises(ValueError, match="currentTask.taskId"):
         ExecutionEventParseRequest(

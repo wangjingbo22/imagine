@@ -7,6 +7,10 @@ from pydantic import Field, JsonValue, model_validator
 
 from app.domain.models import SourceStatus
 from app.schemas.constraint import Constraint
+from app.schemas.llm import (
+    ProviderCandidateSelectionProposal,
+    ProviderCandidateSelectionRequest,
+)
 from app.schemas.trip import ContractModel, Trip
 from app.services.fairness import FairRecommendationDecision
 from app.services.planning.models import (
@@ -28,6 +32,11 @@ class ProviderCandidateFactView(ContractModel):
     category: Annotated[str, Field(min_length=1, max_length=80)]
     source_status: SourceStatus
     known_attributes: dict[str, JsonValue] = Field(default_factory=dict)
+    # T006 snapshots now carry the payload digest needed to build T008's
+    # opaque FactRef identity.  ``None`` preserves compatibility with older
+    # in-memory fixtures; the application adapter derives a scoped digest for
+    # those fixtures without exposing Provider payloads to the model.
+    fact_digest: Digest | None = None
 
 
 class ProviderFactBundle(ContractModel):
@@ -74,42 +83,6 @@ class ProviderFactBundle(ContractModel):
         return self
 
 
-class ProviderCandidateSelectionRequest(ContractModel):
-    """Strict T008 input assembled only from a server-restored fact bundle."""
-
-    schema_version: Literal["1.0"] = "1.0"
-    trace_id: OpaqueId
-    provider_fact_digest: Digest
-    confirmed_trip_summary: dict[str, JsonValue]
-    candidate_facts: tuple[ProviderCandidateFactView, ...] = Field(
-        min_length=6,
-        max_length=8,
-    )
-    allowed_task_count: tuple[Literal[3], Literal[4]] = (3, 4)
-
-
-class ProviderCandidateSelectionProposal(ContractModel):
-    """The only LLM-owned fields: allowlisted IDs, wording and risk notes."""
-
-    schema_version: Literal["1.0"] = "1.0"
-    selected_place_fact_ids: tuple[OpaqueId, ...] = Field(
-        min_length=2,
-        max_length=3,
-    )
-    selection_rationale: Annotated[str, Field(min_length=1, max_length=240)]
-    risk_notes: tuple[
-        Annotated[str, Field(min_length=1, max_length=240)], ...
-    ] = Field(max_length=8)
-
-    @model_validator(mode="after")
-    def validate_unique_ids(self) -> "ProviderCandidateSelectionProposal":
-        if len(set(self.selected_place_fact_ids)) != len(
-            self.selected_place_fact_ids
-        ):
-            raise ValueError("selectedPlaceFactIds must be unique")
-        return self
-
-
 class RecommendationOrchestrationRequest(ContractModel):
     """Public request: clients may select a signed set, never facts or scores."""
 
@@ -130,8 +103,13 @@ class BuiltRouteCandidate(ContractModel):
 
 
 FallbackReason = Literal[
+    "LLM_NOT_CONFIGURED",
     "LLM_UNAVAILABLE",
     "LLM_TIMEOUT",
+    "LLM_AUTH_FAILED",
+    "LLM_INVALID_JSON",
+    "LLM_SCHEMA_INVALID",
+    "LLM_OUT_OF_ALLOWLIST",
     "LLM_FORMAT_INVALID",
     "LLM_DIGEST_MISMATCH",
     "LLM_ALLOWLIST_VIOLATION",

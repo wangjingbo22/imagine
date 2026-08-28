@@ -627,8 +627,11 @@ export function WorkspacePage() {
       interests.unshift('特色餐饮')
     }
     try {
+      const currentWalkLimit = planningTrip.participants[0]
+        .assistanceProfile?.walkLimits.maxContinuousMeters ??
+        planningDraft.assistanceProfile.maxSegmentWalkMeters
       const preferredMaxWalkMeters = selectedFeedbackOptions.includes('想少走路')
-        ? Math.max(100, Math.round(planningDraft.assistanceProfile.maxSegmentWalkMeters * 0.7))
+        ? Math.max(100, Math.round((currentWalkLimit ?? 500) * 0.7))
         : undefined
       const result = await loadAmapPlan(tripId, {
         ...planningDraft,

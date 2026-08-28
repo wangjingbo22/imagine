@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable
 from uuid import UUID
 
+from app.application.collaboration_ports import UnresolvedAnswerAttempt
 from app.domain.trip_draft import TripDraftRevision, TripUnderstandingExtraction
 
 
@@ -519,8 +520,25 @@ class SqliteTripDraftRevisionRepository:
             if (
                 head is None
                 or head["trip_id"] != str(claim.trip_id)
+                or head["current_revision"] != prior["base_revision"]
                 or head["pending_revision"] != claim.target_revision
             ):
+                raise TripDraftRevisionStoreError("DRAFT_REVISION_STALE")
+            now = self._clock().isoformat()
+            released = connection.execute(
+                """UPDATE trip_draft_heads
+                   SET pending_revision=NULL, updated_at=?
+                   WHERE draft_id=? AND trip_id=? AND current_revision=?
+                     AND pending_revision=?""",
+                (
+                    now,
+                    str(claim.draft_id),
+                    str(claim.trip_id),
+                    prior["base_revision"],
+                    claim.target_revision,
+                ),
+            ).rowcount
+            if released != 1:
                 raise TripDraftRevisionStoreError("DRAFT_REVISION_STALE")
             updated = connection.execute(
                 """UPDATE trip_draft_commands
@@ -530,7 +548,7 @@ class SqliteTripDraftRevisionRepository:
                 (
                     code,
                     outcome_json,
-                    self._clock().isoformat(),
+                    now,
                     *claim.command.identity,
                 ),
             ).rowcount
@@ -554,6 +572,51 @@ class SqliteTripDraftRevisionRepository:
                 draft_id=UUID(head["draft_id"]),
                 revision=head["current_revision"],
             )
+
+    def unresolved_failed_answer_attempts(
+        self,
+        *,
+        trip_id: UUID,
+        current_revision: int,
+    ) -> tuple[UnresolvedAnswerAttempt, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT command.actor_scope, command.actor_id,
+                          command.target_revision, command.failure_code
+                   FROM trip_draft_commands AS command
+                   JOIN trip_draft_heads AS head
+                     ON head.draft_id = command.draft_id
+                   WHERE head.trip_id=?
+                     AND command.operation IN (
+                         'INITIAL_ANSWER', 'MEMBER_ANSWER', 'ORGANIZER_ANSWER'
+                     )
+                     AND command.status='FAILED'
+                     AND (
+                         command.target_revision>?
+                         OR NOT EXISTS (
+                             SELECT 1
+                             FROM trip_draft_commands AS successor
+                             WHERE successor.draft_id = command.draft_id
+                               AND successor.actor_scope = command.actor_scope
+                               AND successor.actor_id = command.actor_id
+                               AND successor.operation = command.operation
+                               AND successor.status = 'COMPLETED'
+                               AND successor.rowid > command.rowid
+                               AND successor.target_revision >= command.target_revision
+                         )
+                     )
+                   ORDER BY command.target_revision, command.rowid""",
+                (str(trip_id), current_revision),
+            ).fetchall()
+        return tuple(
+            UnresolvedAnswerAttempt(
+                actor_scope=row["actor_scope"],
+                actor_id=row["actor_id"],
+                target_revision=int(row["target_revision"]),
+                failure_code=row["failure_code"] or "TRIP_UNDERSTANDING_UNAVAILABLE",
+            )
+            for row in rows
+        )
 
 
 __all__ = [

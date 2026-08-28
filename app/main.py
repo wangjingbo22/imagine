@@ -25,6 +25,9 @@ from app.application.arrival_decision_service import ArrivalDecisionService
 from app.application.arrival_evidence_service import ArrivalEvidenceService
 from app.application.arrival_execution_service import ArrivalExecutionService
 from app.application.collaboration_service import CollaborationService
+from app.application.collaboration_planning_bridge import (
+    SingleCollaborationPlanningBridge,
+)
 from app.application.collaboration_ports import CollaborationReadinessGuard
 from app.application.collaboration_readiness import SqliteCollaborationReadinessGuard
 from app.application.collaboration_ports import (
@@ -46,7 +49,10 @@ from app.application.execution_replan_service import (
 )
 from app.application.planning_boundary_service import PlanningBoundaryService
 from app.application.plan_service import PlanVersionService
-from app.application.recommendation_service import RecommendationOrchestrationService
+from app.application.recommendation_service import (
+    RecommendationOrchestrationService,
+    RouteCandidateBuilderPort,
+)
 from app.application.trip_draft_service import TripDraftParserService
 from app.application.workflow_service import WorkflowService
 from app.core.config import Settings, get_settings
@@ -180,6 +186,7 @@ def create_app(
     planning_boundary_service: PlanningBoundaryService | None = None,
     recommendation_service: RecommendationOrchestrationService | None = None,
     provider_fact_registry: SqliteProviderFactRegistry | None = None,
+    route_candidate_builder: RouteCandidateBuilderPort | None = None,
     suffix_planner: SuffixPlanner | None = None,
     candidate_selection_gateway: CandidateSelectionGateway | None = None,
     execution_event_draft_service: ExecutionEventDraftService | None = None,
@@ -299,6 +306,9 @@ def create_app(
         revisions=resolved_revision_port,
         evaluator=DeterministicHardConflictEvaluator(),
     )
+    collaboration_planning_bridge = SingleCollaborationPlanningBridge(
+        workflow_service
+    )
     resolved_readiness_guard = (
         collaboration_readiness_guard
         or SqliteCollaborationReadinessGuard(
@@ -309,6 +319,18 @@ def create_app(
             candidate_timeout_seconds=resolved_settings.bailian_candidate_timeout_seconds,
         )
     )
+    resolved_provider_fact_registry = (
+        provider_fact_registry
+        or SqliteProviderFactRegistry(resolved_settings.plan_version_db_path)
+    )
+
+    if recommendation_service is None:
+        recommendation_service = RecommendationOrchestrationService(
+            fact_registry=resolved_provider_fact_registry,
+            route_builder=route_candidate_builder,
+            readiness_guard=resolved_readiness_guard,
+            candidate_selection_gateway=candidate_selection_gateway,
+        )
 
     if planning_boundary_service is None and isinstance(
         plan_service,
@@ -477,6 +499,7 @@ def create_app(
         workflow_service,
     )
     app.state.collaboration_service = collaboration_service
+    app.state.collaboration_planning_bridge = collaboration_planning_bridge
     app.state.trip_draft_revision_creator = trip_draft_revision_creator
     app.state.trip_understanding_gateway = trip_understanding_gateway
     app.state.collaboration_readiness_guard = resolved_readiness_guard
@@ -490,10 +513,7 @@ def create_app(
         ),
     )
     app.state.planning_boundary_service = planning_boundary_service
-    app.state.provider_fact_registry = (
-        provider_fact_registry
-        or SqliteProviderFactRegistry(resolved_settings.plan_version_db_path)
-    )
+    app.state.provider_fact_registry = resolved_provider_fact_registry
     app.state.recommendation_service = recommendation_service
     app.include_router(arrival_decision_router)
     app.include_router(arrival_evidence_router)
@@ -568,7 +588,11 @@ def create_app(
                 location = location[1:]
             normalized_errors.append({**item, "loc": location})
         body = TripSchemaError(issues_from_pydantic(normalized_errors)).as_dict()
-        return JSONResponse(status_code=422, content=body)
+        return JSONResponse(
+            status_code=422,
+            content=body,
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.exception_handler(TripSchemaError)
     async def handle_trip_schema_error(

@@ -131,6 +131,7 @@ class ProviderFactSnapshot(ContractModel):
                 name=places_by_id[reference.provider_object_id].name,
                 category=places_by_id[reference.provider_object_id].category or "PLACE",
                 source_status=reference.source_status,
+                fact_digest=reference.payload_digest,
                 known_attributes={
                     "cityCode": places_by_id[reference.provider_object_id].cityCode,
                     "fetchedAt": reference.fetched_at.isoformat(),

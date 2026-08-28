@@ -19,6 +19,7 @@ from app.application.recommendation_service import (
     RecommendationOrchestrationService,
     RouteCandidateBuildError,
 )
+from app.application.llm_gateway import StrictCandidateSelectionGateway
 from app.application.collaboration_ports import (
     PlanningAccess,
     PlanningOperation,
@@ -140,7 +141,13 @@ def _fact_bundle() -> ProviderFactBundle:
             name=label,
             category="TEST",
             source_status=SourceStatus.ONLINE,
-            known_attributes={"cityCode": request.trip.city_context.city_code},
+            known_attributes={
+                "cityCode": request.trip.city_context.city_code,
+                "priceAmountCents": 12_300,
+                "route": {"distanceMeters": 500},
+                "score": 99,
+                "PASS": True,
+            },
         )
         for index, (provider_id, label) in enumerate(
             zip(provider_ids, labels),
@@ -198,6 +205,20 @@ class StubProposalGateway:
         )
 
 
+class RecordingModelClient:
+    model = "qwen-t008-t009-fixture"
+
+    def __init__(self, payload: dict[str, Any] | str) -> None:
+        self.payload = payload
+        self.requests = []
+
+    async def propose_candidate_selection(self, request) -> str:
+        self.requests.append(request)
+        if isinstance(self.payload, str):
+            return self.payload
+        return json.dumps(self.payload, ensure_ascii=False)
+
+
 class StubRouteBuilder:
     LABELS = {
         "fact-1": "MUSEUM",
@@ -241,19 +262,20 @@ class StubRouteBuilder:
 def _proposal_payload(
     selected: list[str] | None = None,
     *,
-    rationale: str = "兼顾两位成员的兴趣，并交由程序核验路线与公平性。",
+    rationale: str = "兼顾两位成员的已确认兴趣，并保留服务端核验。",
 ) -> dict[str, Any]:
     return {
         "schemaVersion": "1.0",
         "selectedPlaceFactIds": selected or ["fact-1", "fact-2", "fact-3"],
         "selectionRationale": rationale,
-        "riskNotes": ["价格与路线以服务端事实为准。"],
+        "riskNotes": [],
     }
 
 
 def _service(
     *,
     gateway: StubProposalGateway | None = None,
+    candidate_selection_gateway=None,
 ) -> tuple[
     RecommendationOrchestrationService,
     StubFactRegistry,
@@ -266,7 +288,10 @@ def _service(
     builder = StubRouteBuilder()
     service = RecommendationOrchestrationService(
         fact_registry=registry,
-        proposal_gateway=resolved_gateway,
+        proposal_gateway=(
+            None if candidate_selection_gateway is not None else resolved_gateway
+        ),
+        candidate_selection_gateway=candidate_selection_gateway,
         route_builder=builder,
         readiness_guard=AllowingReadinessGuard(),
     )
@@ -301,6 +326,67 @@ async def test_valid_qwen_proposal_builds_routes_and_returns_one_fair_plan() -> 
     assert len(gateway.requests[0].candidate_facts) == 6
     assert gateway.requests[0].allowed_task_count == (3, 4)
     assert builder.orders[0] == ("fact-1", "fact-2", "fact-3")
+
+
+@pytest.mark.asyncio
+async def test_t008_gateway_consumes_only_safe_t006_projection() -> None:
+    model_client = RecordingModelClient(
+        _proposal_payload(
+            rationale="MUSEUM、FOOD 与 PARK 覆盖已确认兴趣。",
+        )
+    )
+    strict_gateway = StrictCandidateSelectionGateway(model_client)
+    service, registry, _, builder = _service(
+        candidate_selection_gateway=strict_gateway,
+    )
+
+    result = await service.recommend(
+        trip_id=registry.facts.trip.trip_id,
+        request=_command(),
+        access=_access(registry.facts.trip.trip_id),
+    )
+
+    assert result.strategy == "LLM_PROPOSAL"
+    assert len(model_client.requests) == 1
+    assert builder.orders[0] == ("fact-1", "fact-2", "fact-3")
+    model_request = model_client.requests[0]
+    assert all(
+        item.fact_digest.startswith("sha256:")
+        for item in model_request.candidate_facts
+    )
+    serialized = model_request.model_dump_json(by_alias=True).casefold()
+    for forbidden in (
+        "price",
+        "route",
+        "score",
+        "pass",
+        "amountcents",
+        "distancemeters",
+    ):
+        assert forbidden not in serialized
+
+
+@pytest.mark.asyncio
+async def test_missing_production_route_builder_fails_before_model_call() -> None:
+    model_client = RecordingModelClient(_proposal_payload())
+    registry = StubFactRegistry(_fact_bundle())
+    service = RecommendationOrchestrationService(
+        fact_registry=registry,
+        route_builder=None,
+        readiness_guard=AllowingReadinessGuard(),
+        candidate_selection_gateway=StrictCandidateSelectionGateway(model_client),
+    )
+
+    with pytest.raises(RecommendationOrchestrationError) as captured:
+        await service.recommend(
+            trip_id=registry.facts.trip.trip_id,
+            request=_command(),
+            access=_access(registry.facts.trip.trip_id),
+        )
+
+    assert captured.value.code == "ROUTE_CANDIDATE_BUILDER_UNAVAILABLE"
+    assert captured.value.http_status == 503
+    assert model_client.requests == []
 
 
 @pytest.mark.parametrize(
@@ -349,6 +435,33 @@ async def test_forbidden_model_cost_field_is_strictly_rejected_and_falls_back() 
     payload["cost"] = 1
     gateway = StubProposalGateway(payload)
     service, registry, _, _ = _service(gateway=gateway)
+
+    result = await service.recommend(
+        trip_id=registry.facts.trip.trip_id,
+        request=_command(),
+        access=_access(registry.facts.trip.trip_id),
+    )
+
+    assert result.strategy == "DETERMINISTIC_FALLBACK"
+    assert result.fallback_reason == "LLM_FORMAT_INVALID"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("selectionRationale", "价格和路线已经通过检查。"),
+        ("selectionRationale", "满意度评分为 100。"),
+        ("riskNotes", ["PlanVersion 已经是 CURRENT，待确认"]),
+    ],
+)
+async def test_forbidden_model_claims_use_deterministic_fallback(
+    field: str,
+    value: object,
+) -> None:
+    payload = _proposal_payload()
+    payload[field] = value
+    service, registry, _, _ = _service(gateway=StubProposalGateway(payload))
 
     result = await service.recommend(
         trip_id=registry.facts.trip.trip_id,

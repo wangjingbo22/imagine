@@ -17,6 +17,7 @@ from app.application.collaboration_ports import (
     TripDraftRevisionPort,
     TripDraftRevisionUnavailable,
     TripDraftRevisionView,
+    UnresolvedAnswerAttempt,
 )
 from app.core.errors import AppError
 from app.domain.collaboration import (
@@ -315,6 +316,20 @@ class TripDraftRevisionService(TripDraftRevisionPort):
     def get_current(self, trip_id: UUID) -> TripDraftRevisionView:
         try:
             return self.repository.get_current(trip_id)
+        except TripDraftRevisionStoreError as error:
+            raise TripDraftRevisionUnavailable(error.code) from error
+
+    def unresolved_failed_answer_attempts(
+        self,
+        *,
+        trip_id: UUID,
+        current_revision: int,
+    ) -> tuple[UnresolvedAnswerAttempt, ...]:
+        try:
+            return self.repository.unresolved_failed_answer_attempts(
+                trip_id=trip_id,
+                current_revision=current_revision,
+            )
         except TripDraftRevisionStoreError as error:
             raise TripDraftRevisionUnavailable(error.code) from error
 

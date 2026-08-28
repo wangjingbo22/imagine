@@ -269,7 +269,7 @@ class SqliteCollaborationRepository:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 existing = connection.execute(
-                    "SELECT trip_id, readiness_digest, operation, expires_at "
+                    "SELECT trip_id, readiness_digest, operation, expires_at, completed_at "
                     "FROM collaboration_operation_leases WHERE operation_id=?",
                     (access.operation_id,),
                 ).fetchone()
@@ -280,6 +280,29 @@ class SqliteCollaborationRepository:
                         or existing["operation"] != access.operation.value
                     ):
                         raise CollaborationStoreError("COLLABORATION_OPERATION_STALE")
+                    existing_expires_at = datetime.fromisoformat(
+                        existing["expires_at"]
+                    )
+                    if (
+                        existing["completed_at"] is not None
+                        or existing_expires_at <= now
+                    ):
+                        # A completed/expired operation id may be retried with
+                        # the same immutable readiness context.  Re-open its
+                        # lease before returning so collaboration mutations
+                        # remain blocked for the entire retried operation.
+                        self._assert_mutation_allowed_connection(
+                            connection,
+                            access.trip_id,
+                            now,
+                        )
+                        connection.execute(
+                            "UPDATE collaboration_operation_leases "
+                            "SET expires_at=?, completed_at=NULL "
+                            "WHERE operation_id=?",
+                            (expires_at.isoformat(), access.operation_id),
+                        )
+                        existing_expires_at = expires_at
                     connection.execute("COMMIT")
                     return ReadinessPermit(
                         trip_id=UUID(existing["trip_id"]),
@@ -287,7 +310,7 @@ class SqliteCollaborationRepository:
                         operation_id=access.operation_id,
                         operation=PlanningOperation(existing["operation"]),
                         flow_kind=TripFlowKind.COLLABORATION_V2,
-                        expires_at=datetime.fromisoformat(existing["expires_at"]),
+                        expires_at=existing_expires_at,
                     )
                 self._assert_mutation_allowed_connection(connection, access.trip_id, now)
                 connection.execute(

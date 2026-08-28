@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from itertools import combinations
 from typing import Literal, Protocol
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import ValidationError
 
@@ -15,6 +15,7 @@ from app.application.collaboration_ports import (
     PlanningAccess,
     PlanningOperation,
 )
+from app.application.llm_gateway import CandidateSelectionGateway
 from app.core.errors import AppError
 from app.domain.recommendation import (
     CandidatePlace,
@@ -40,10 +41,16 @@ from app.services.recommendation import (
     FallbackReason,
     ProviderCandidateSelectionProposal,
     ProviderCandidateSelectionRequest,
+    ProviderCandidateFactView,
     ProviderFactBundle,
     RecommendationOrchestrationRequest,
     RecommendationOrchestrationResult,
 )
+from app.schemas.llm import (
+    ConfirmedTripSummary,
+    ProviderCandidateFact,
+)
+from app.schemas.trip import PreferenceType
 
 
 class RecommendationOrchestrationError(ValueError):
@@ -124,15 +131,19 @@ class RecommendationOrchestrationService:
         self,
         *,
         fact_registry: ProviderFactRegistryPort,
-        proposal_gateway: CandidateProposalGatewayPort,
-        route_builder: RouteCandidateBuilderPort,
+        route_builder: RouteCandidateBuilderPort | None,
         readiness_guard: CollaborationReadinessGuard,
+        proposal_gateway: CandidateProposalGatewayPort | None = None,
+        candidate_selection_gateway: CandidateSelectionGateway | None = None,
         planner: DeterministicCandidatePlanner | None = None,
         fairness: DeterministicFairRecommendationService | None = None,
     ) -> None:
+        if proposal_gateway is None and candidate_selection_gateway is None:
+            raise ValueError("a candidate selection gateway is required")
         self._readiness_guard = readiness_guard
         self._fact_registry = fact_registry
         self._proposal_gateway = proposal_gateway
+        self._candidate_selection_gateway = candidate_selection_gateway
         self._route_builder = route_builder
         self._planner = planner or DeterministicCandidatePlanner()
         self._fairness = fairness or DeterministicFairRecommendationService()
@@ -140,6 +151,12 @@ class RecommendationOrchestrationService:
     @property
     def readiness_guard(self) -> CollaborationReadinessGuard:
         return self._readiness_guard
+
+    @property
+    def candidate_selection_gateway(self) -> CandidateSelectionGateway | None:
+        """Expose the canonical T008 seam for runtime composition checks."""
+
+        return self._candidate_selection_gateway
 
     async def recommend(
         self,
@@ -167,37 +184,59 @@ class RecommendationOrchestrationService:
         trip_id: UUID,
         request: RecommendationOrchestrationRequest,
     ) -> RecommendationOrchestrationResult:
+        if self._route_builder is None:
+            # The conversation preview can use the strict T008 gateway without
+            # a route builder.  The signed T006 -> T009 endpoint must instead
+            # fail before any model call until the Provider-owned builder is
+            # explicitly composed.
+            raise RecommendationOrchestrationError(
+                "ROUTE_CANDIDATE_BUILDER_UNAVAILABLE",
+                "可信路线候选构建器尚未配置",
+                http_status=503,
+            )
         facts = self._restore_facts(trip_id, request)
         trace_id = _trace_id(trip_id, facts)
-        llm_request = ProviderCandidateSelectionRequest(
-            trace_id=trace_id,
-            provider_fact_digest=facts.provider_fact_digest,
-            confirmed_trip_summary=facts.confirmed_trip_summary,
-            candidate_facts=facts.candidate_facts,
-        )
 
         proposal: ProviderCandidateSelectionProposal | None = None
         fallback_reason: FallbackReason | None = None
         try:
-            raw = await self._proposal_gateway.propose(llm_request)
-            if raw.provider_fact_digest != facts.provider_fact_digest:
-                fallback_reason = "LLM_DIGEST_MISMATCH"
+            llm_request = _strict_candidate_request(trace_id, facts)
+        except (ValidationError, ValueError, TypeError):
+            # User/provider text that cannot be safely projected must never be
+            # sent to a model.  Deterministic enumeration remains available.
+            llm_request = None
+            fallback_reason = "LLM_SCHEMA_INVALID"
+
+        if llm_request is not None and self._candidate_selection_gateway is not None:
+            gateway_result = await self._candidate_selection_gateway.select(llm_request)
+            if gateway_result.decision == "MODEL_PROPOSAL":
+                proposal = gateway_result.proposal
             else:
-                try:
-                    proposal = ProviderCandidateSelectionProposal.model_validate_json(
-                        raw.payload,
-                        strict=True,
-                    )
-                except (ValidationError, ValueError, TypeError):
-                    fallback_reason = "LLM_FORMAT_INVALID"
-                if proposal is not None and not self._inside_allowlist(
-                    proposal,
-                    facts,
-                ):
-                    proposal = None
-                    fallback_reason = "LLM_ALLOWLIST_VIOLATION"
-        except CandidateProposalGatewayError as error:
-            fallback_reason = error.code
+                fallback_reason = gateway_result.failure_code or "LLM_UNAVAILABLE"
+        elif llm_request is not None and self._proposal_gateway is not None:
+            # Compatibility bridge for the earlier T009 raw-payload port.  It
+            # now receives the same redacted T008 request and its response is
+            # parsed by the one canonical strict proposal schema.
+            try:
+                raw = await self._proposal_gateway.propose(llm_request)
+                if raw.provider_fact_digest != facts.provider_fact_digest:
+                    fallback_reason = "LLM_DIGEST_MISMATCH"
+                else:
+                    try:
+                        proposal = ProviderCandidateSelectionProposal.model_validate_json(
+                            raw.payload,
+                            strict=True,
+                        )
+                    except (ValidationError, ValueError, TypeError):
+                        fallback_reason = "LLM_FORMAT_INVALID"
+                    if proposal is not None and not self._inside_allowlist(
+                        proposal,
+                        facts,
+                    ):
+                        proposal = None
+                        fallback_reason = "LLM_ALLOWLIST_VIOLATION"
+            except CandidateProposalGatewayError as error:
+                fallback_reason = error.code
 
         if proposal is not None:
             built = await self._build_candidates(
@@ -208,7 +247,7 @@ class RecommendationOrchestrationService:
             if decision is not None:
                 return self._result(
                     facts=facts,
-                    trace_id=trace_id,
+                    trace_id=str(trace_id),
                     built=built,
                     decision=decision,
                     strategy="LLM_PROPOSAL",
@@ -234,7 +273,7 @@ class RecommendationOrchestrationService:
             )
         return self._result(
             facts=facts,
-            trace_id=trace_id,
+            trace_id=str(trace_id),
             built=built,
             decision=decision,
             strategy="DETERMINISTIC_FALLBACK",
@@ -244,6 +283,97 @@ class RecommendationOrchestrationService:
                 "已使用确定性枚举；地点、路线、费用和来源均从服务端事实恢复。",
             ),
         )
+
+    async def recommend_preview_from_provider_facts(
+        self,
+        *,
+        trip_id: UUID,
+        facts: Sequence[FactRef],
+        city_code: str,
+        interests: Sequence[str],
+        must_visit: Sequence[str],
+        avoid_places: Sequence[str],
+        care_need_labels: Sequence[str],
+        members: Sequence["MemberPreference"],
+    ) -> RecommendationBundle:
+        """Serve the collaboration UI through the same T008 gateway.
+
+        The v2 conversation flow does not yet own a planning ``Trip`` at this
+        screen, so it cannot invoke the route-backed v1 decision method.  It
+        nevertheless reuses this orchestration object and the identical strict
+        model boundary for its provider-backed preview; final routing and HARD
+        validation remain in the v1 flow.
+        """
+
+        trusted = TrustedRecommendationService()
+        candidates = trusted.issue_candidates(
+            facts,
+            interests=interests,
+            must_visit=must_visit,
+            avoid_places=avoid_places,
+        )
+        if not candidates:
+            raise RecommendationOrchestrationError(
+                "NO_RECOMMENDATION",
+                "服务端没有可用于推荐的可信地点事实",
+            )
+
+        ranking: LlmRanking | None = None
+        gateway = self._candidate_selection_gateway
+        if gateway is not None and 6 <= len(candidates) <= 8:
+            facts_by_ref = {item.fact_ref_id: item for item in facts}
+            try:
+                request = ProviderCandidateSelectionRequest(
+                    schema_version="1.0",
+                    trace_id=uuid5(
+                        NAMESPACE_URL,
+                        "xingzhi:recommendation-preview:"
+                        + str(trip_id)
+                        + ":"
+                        + ",".join(item.fact_ref_id for item in candidates),
+                    ),
+                    confirmed_trip_summary=ConfirmedTripSummary(
+                        city_code=city_code,
+                        participant_count=len(members),
+                        interest_tags=_stable_unique_text(interests, limit=12),
+                        must_visit_labels=_stable_unique_text(must_visit, limit=8),
+                        avoid_labels=_stable_unique_text(avoid_places, limit=8),
+                        care_need_labels=_stable_unique_text(
+                            care_need_labels,
+                            limit=8,
+                        ),
+                    ),
+                    candidate_facts=tuple(
+                        _safe_preview_candidate_fact(
+                            facts_by_ref[item.fact_ref_id]
+                        )
+                        for item in candidates
+                    ),
+                    allowed_task_count=(3, 4),
+                )
+                gateway_result = await gateway.select(request)
+                if (
+                    gateway_result.decision == "MODEL_PROPOSAL"
+                    and gateway_result.proposal is not None
+                ):
+                    by_ref = {item.fact_ref_id: item for item in candidates}
+                    proposal = gateway_result.proposal
+                    ranking = LlmRanking(
+                        recommendations=[
+                            CandidateRecommendation(
+                                place_id=by_ref[fact_id].place_id,
+                                reason=proposal.selection_rationale[:80],
+                            )
+                            for fact_id in proposal.selected_place_fact_ids
+                        ]
+                    )
+            except (ValidationError, ValueError, TypeError, KeyError):
+                # Unsafe projection or an unusable model result must not make
+                # the preview unavailable; deterministic ranking is canonical.
+                ranking = None
+
+        bundle = trusted.rank(candidates, ranking)
+        return trusted.choose_single_plan(bundle, facts, members)
 
     def _restore_facts(
         self,
@@ -291,6 +421,12 @@ class RecommendationOrchestrationService:
         facts: ProviderFactBundle,
         orders: Sequence[tuple[str, ...]],
     ) -> _BuiltCandidates:
+        if self._route_builder is None:
+            raise RecommendationOrchestrationError(
+                "ROUTE_CANDIDATE_BUILDER_UNAVAILABLE",
+                "可信路线候选构建器尚未配置",
+                http_status=503,
+            )
         candidates: list[FairRecommendationCandidate] = []
         selected_ids_by_candidate: dict[str, tuple[str, ...]] = {}
         for order in orders:
@@ -392,9 +528,131 @@ class RecommendationOrchestrationService:
         )
 
 
-def _trace_id(trip_id: UUID, facts: ProviderFactBundle) -> str:
+def _trace_id(trip_id: UUID, facts: ProviderFactBundle) -> UUID:
     seed = f"{trip_id}:{facts.fact_set_id}:{facts.provider_fact_digest}"
-    return f"recommend-{sha256(seed.encode('utf-8')).hexdigest()[:24]}"
+    return uuid5(NAMESPACE_URL, f"xingzhi:recommendation:{seed}")
+
+
+def _strict_candidate_request(
+    trace_id: UUID,
+    facts: ProviderFactBundle,
+) -> ProviderCandidateSelectionRequest:
+    """Project a restored T006 bundle into T008's model-safe contract.
+
+    The source view intentionally retains Provider facts needed by deterministic
+    routing and pricing.  Only a fixed, non-authoritative subset crosses this
+    adapter: opaque FactRef identity, display/category labels, source class and
+    an optional stale-cache risk marker.  Arbitrary ``knownAttributes`` values,
+    coordinates, prices, routes, scores and workflow state never cross it.
+    """
+
+    trip = facts.trip
+    interests: list[str] = []
+    must_visit: list[str] = []
+    avoid: list[str] = []
+    care: list[str] = []
+    for participant in trip.participants:
+        for preference in participant.preferences:
+            target = (
+                interests
+                if preference.type is PreferenceType.INTEREST
+                else must_visit
+                if preference.type is PreferenceType.MUST_VISIT
+                else avoid
+            )
+            target.append(preference.value)
+        profile = participant.assistance_profile
+        if profile is not None:
+            care.append(profile.type.value)
+            if profile.avoid_stairs:
+                care.append("避开楼梯")
+
+    summary = ConfirmedTripSummary(
+        city_code=trip.city_context.city_code,
+        participant_count=len(trip.participants),
+        interest_tags=_stable_unique_text(interests, limit=12),
+        must_visit_labels=_stable_unique_text(must_visit, limit=8),
+        avoid_labels=_stable_unique_text(avoid, limit=8),
+        care_need_labels=_stable_unique_text(care, limit=8),
+    )
+    candidate_facts = tuple(
+        _safe_candidate_fact(item, facts.provider_fact_digest)
+        for item in facts.candidate_facts
+    )
+    return ProviderCandidateSelectionRequest(
+        schema_version="1.0",
+        trace_id=trace_id,
+        confirmed_trip_summary=summary,
+        candidate_facts=candidate_facts,
+        allowed_task_count=(3, 4),
+    )
+
+
+def _safe_candidate_fact(
+    fact: ProviderCandidateFactView,
+    provider_fact_digest: str,
+) -> ProviderCandidateFact:
+    digest = fact.fact_digest or sha256(
+        (
+            f"{provider_fact_digest}:{fact.place_fact_id}:"
+            f"{fact.provider_place_id}:{fact.name}:{fact.category}:"
+            f"{fact.source_status.value}"
+        ).encode("utf-8")
+    ).hexdigest()
+    source_label = {
+        "ONLINE": "在线来源已核验",
+        "VERIFIED_CACHE": "缓存来源已核验",
+        "USER_CONFIRMED": "用户来源已确认",
+    }.get(fact.source_status.value, "来源待确认")
+    risk_flags = (
+        ("缓存时效待确认",)
+        if fact.known_attributes.get("isStale") is True
+        else ()
+    )
+    return ProviderCandidateFact(
+        place_fact_id=fact.place_fact_id,
+        fact_digest=f"sha256:{digest}",
+        display_name=fact.name,
+        category_tags=(fact.category,),
+        known_attributes=(source_label,),
+        risk_flags=risk_flags,
+    )
+
+
+def _safe_preview_candidate_fact(fact: FactRef) -> ProviderCandidateFact:
+    place = fact.place
+    digest = sha256(place.model_dump_json().encode("utf-8")).hexdigest()
+    source_label = {
+        "ONLINE": "在线来源已核验",
+        "VERIFIED_CACHE": "缓存来源已核验",
+        "USER_CONFIRMED": "用户来源已确认",
+    }.get(place.provenance.sourceStatus.value, "来源待确认")
+    return ProviderCandidateFact(
+        place_fact_id=fact.fact_ref_id,
+        fact_digest=f"sha256:{digest}",
+        display_name=place.name,
+        category_tags=((place.category,) if place.category else ()),
+        known_attributes=(source_label,),
+        risk_flags=(
+            ("缓存时效待确认",)
+            if place.provenance.isStale
+            else ()
+        ),
+    )
+
+
+def _stable_unique_text(values: Sequence[str], *, limit: int) -> tuple[str, ...]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        normalized = value.strip().casefold()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(value.strip())
+        if len(result) == limit:
+            break
+    return tuple(result)
 
 
 def _proposal_orders(selected: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:

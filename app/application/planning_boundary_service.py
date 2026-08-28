@@ -26,15 +26,19 @@ from app.infrastructure.trusted_planning_store import (
 )
 from app.schemas.execution import ExecutionEvent, ExecutionEventType
 from app.schemas.execution_adjustment import (
+    ConfirmedExecutionAdjustment,
     EventConstraintSet,
     ExecutionAdjustmentType,
     ExecutionConstraintCompileRequest,
 )
 from app.schemas.execution_replan import (
+    ExecutionAdjustmentDecision,
     ExecutionAdjustmentReplanRequest,
+    ExecutionReplanReadinessBinding,
     RegisteredExecutionAdjustmentReplan,
 )
 from app.schemas.plan import (
+    PlanV2DecisionResult,
     PlanVersion,
     PlanVersionReason,
     PlanVersionStatus,
@@ -69,8 +73,10 @@ from app.services.execution_replanning import (
     project_execution_adjustment,
 )
 from app.services.replanning import (
+    DeterministicEventAwareSuffixPlanner,
     DeterministicRetainedSuffixPlanner,
     SuffixPlanner,
+    SuffixPlanningError,
     SuffixPlanningInput,
 )
 from app.services.replanning.models import (
@@ -112,7 +118,7 @@ class PlanningBoundaryService:
         self.workflow_service = workflow_service
         self.trust_repository = trust_repository
         self.readiness_guard = readiness_guard
-        self.suffix_planner = suffix_planner or DeterministicRetainedSuffixPlanner()
+        self.suffix_planner = suffix_planner or DeterministicEventAwareSuffixPlanner()
         if not isinstance(self.suffix_planner, SuffixPlanner):
             raise TypeError("suffix_planner must implement SuffixPlanner")
 
@@ -131,6 +137,73 @@ class PlanningBoundaryService:
                 False,
             )
         return self.readiness_guard.operation(access)
+
+    @staticmethod
+    def _readiness_binding(
+        permit: ReadinessPermit,
+    ) -> ExecutionReplanReadinessBinding:
+        return ExecutionReplanReadinessBinding(
+            readiness_digest=permit.readiness_digest,
+            current_revision=permit.current_revision,
+            flow_kind=permit.flow_kind,
+        )
+
+    @staticmethod
+    def _adjustment_identity_digest(
+        event_constraints: EventConstraintSet,
+        readiness: ExecutionReplanReadinessBinding,
+        adjustment_event_id: UUID | None,
+    ) -> str:
+        identity: dict[str, Any] = {
+            "eventConstraintDigest": event_constraints.input_digest,
+            "collaborationReadiness": readiness.model_dump(
+                mode="json",
+                by_alias=True,
+            ),
+        }
+        if adjustment_event_id is not None:
+            identity["confirmedAdjustmentEventId"] = str(adjustment_event_id)
+        canonical = json.dumps(
+            identity,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return sha256(canonical).hexdigest()
+
+    def _restore_confirmed_adjustment(
+        self,
+        *,
+        trip_id: UUID,
+        current_plan_id: UUID | None,
+        event_id: UUID,
+        inline: ConfirmedExecutionAdjustment,
+    ) -> ConfirmedExecutionAdjustment:
+        event = self.workflow_service.get_adjustment_event(trip_id, event_id)
+        if current_plan_id is None or event.plan_version_id != current_plan_id:
+            raise AppError(
+                code="S2_T021_ADJUSTMENT_EVENT_PLAN_MISMATCH",
+                message="The confirmed adjustment event must belong to CURRENT.",
+                http_status=409,
+                retryable=False,
+            )
+        persisted = ConfirmedExecutionAdjustment(
+            event_type=event.event_type,
+            task_id=event.task_id,
+            late_minutes=event.late_minutes,
+            fatigue_level=event.fatigue_level,
+        )
+        if persisted != inline:
+            raise AppError(
+                code="S2_T021_ADJUSTMENT_EVENT_PAYLOAD_MISMATCH",
+                message=(
+                    "Inline adjustment must exactly match the server-confirmed "
+                    "adjustment event."
+                ),
+                http_status=409,
+                retryable=False,
+            )
+        return persisted
 
     @staticmethod
     def _require_trip_id(trip_id: UUID, request: CandidatePlanRequest) -> None:
@@ -716,13 +789,19 @@ class PlanningBoundaryService:
             trip_id=trip_id,
             access=access,
             expected=PlanningOperation.GENERATE_V2,
-        ):
-            return self._generate_v2_from_adjustment_ready(trip_id, request)
+        ) as permit:
+            return self._generate_v2_from_adjustment_ready(
+                trip_id,
+                request,
+                readiness=self._readiness_binding(permit),
+            )
 
     def _generate_v2_from_adjustment_ready(
         self,
         trip_id: UUID,
         request: ExecutionAdjustmentReplanRequest,
+        *,
+        readiness: ExecutionReplanReadinessBinding,
     ) -> RegisteredExecutionAdjustmentReplan:
         """S2-T021: replan a trusted suffix under a transient T020 overlay."""
 
@@ -739,12 +818,20 @@ class PlanningBoundaryService:
             )
         current, events = self._load_current_v1_context(trip_id)
         current_request = self._load_current_candidate_request(trip_id, current)
+        adjustment = request.adjustment
+        if request.adjustment_event_id is not None:
+            adjustment = self._restore_confirmed_adjustment(
+                trip_id=trip_id,
+                current_plan_id=current.plan_id,
+                event_id=request.adjustment_event_id,
+                inline=request.adjustment,
+            )
         try:
             projection = project_execution_adjustment(
                 current_plan=current,
                 current_request=current_request,
                 events=events,
-                adjustment=request.adjustment,
+                adjustment=adjustment,
                 locked_task_ids=request.locked_task_ids,
             )
         except ExecutionReplanContextError as error:
@@ -758,7 +845,7 @@ class PlanningBoundaryService:
 
         event_constraints = compile_execution_constraints(
             ExecutionConstraintCompileRequest(
-                event=request.adjustment,
+                event=adjustment,
                 current_constraints=projection.remaining_context,
             )
         )
@@ -770,7 +857,10 @@ class PlanningBoundaryService:
                 frozen_task_ids=projection.frozen_task_ids,
                 actual_spent_cents=projection.actual_spent_cents,
                 event_constraints=event_constraints,
-                source_event_task_id=request.adjustment.task_id,
+                source_event_task_id=adjustment.task_id,
+                anchor_end_at=current_request.task_facts[
+                    prefix_length - 1
+                ].end_at,
             ),
             original_suffix=original_suffix,
             start_order=prefix_length + 1,
@@ -798,7 +888,7 @@ class PlanningBoundaryService:
 
         reason = (
             PlanVersionReason.DELAY
-            if request.adjustment.event_type is ExecutionAdjustmentType.LATE
+            if adjustment.event_type is ExecutionAdjustmentType.LATE
             else PlanVersionReason.FATIGUE
         )
         registered = self._select_and_register_v2(
@@ -809,6 +899,8 @@ class PlanningBoundaryService:
             locked_task_ids=projection.frozen_task_ids,
             candidate_inputs=((candidate_request, 0),),
             event_constraints=event_constraints,
+            readiness_binding=readiness,
+            adjustment_event_id=request.adjustment_event_id,
         )
         return RegisteredExecutionAdjustmentReplan(
             current_plan_id=current.plan_id,
@@ -1041,6 +1133,14 @@ class PlanningBoundaryService:
     ) -> tuple[CandidateTaskFact, ...]:
         try:
             planned = self.suffix_planner.plan_suffix(planning_input)
+        except SuffixPlanningError as error:
+            raise AppError(
+                code=error.code,
+                message=error.message,
+                http_status=422,
+                retryable=False,
+                errors=[error.as_dict()],
+            ) from error
         except Exception as error:
             raise AppError(
                 code="REPLAN_SUFFIX_PLANNER_FAILED",
@@ -1140,7 +1240,22 @@ class PlanningBoundaryService:
         locked_task_ids: Sequence[str],
         candidate_inputs: Sequence[tuple[CandidatePlanRequest, int]],
         event_constraints: EventConstraintSet | None = None,
+        readiness_binding: ExecutionReplanReadinessBinding | None = None,
+        adjustment_event_id: UUID | None = None,
     ) -> RegisteredReplan:
+        identity_digest = (
+            self._adjustment_identity_digest(
+                event_constraints,
+                readiness_binding,
+                adjustment_event_id,
+            )
+            if event_constraints is not None and readiness_binding is not None
+            else (
+                event_constraints.input_digest
+                if event_constraints is not None
+                else None
+            )
+        )
         candidates: list[ReplanCandidate] = []
         candidate_requests: dict[UUID, CandidatePlanRequest] = {}
         satisfaction_loss_by_plan_id: dict[UUID, int] = {}
@@ -1154,11 +1269,7 @@ class PlanningBoundaryService:
                     candidate_request,
                     current,
                     reason=reason,
-                    identity_digest=(
-                        event_constraints.input_digest
-                        if event_constraints is not None
-                        else None
-                    ),
+                    identity_digest=identity_digest,
                 )
             except CandidatePlanRejected as error:
                 generation_failures.append(
@@ -1241,10 +1352,10 @@ class PlanningBoundaryService:
             fact_source,
             identity_digest_by_plan_id=(
                 {
-                    plan_id: event_constraints.input_digest
+                    plan_id: identity_digest
                     for plan_id in candidate_requests
                 }
-                if event_constraints is not None
+                if identity_digest is not None
                 else None
             ),
         )
@@ -1331,6 +1442,14 @@ class PlanningBoundaryService:
         if event_constraints is not None:
             selection_validation["transientEventConstraints"] = (
                 event_constraints.model_dump(mode="json", by_alias=True)
+            )
+        if readiness_binding is not None:
+            selection_validation["collaborationReadiness"] = (
+                readiness_binding.model_dump(mode="json", by_alias=True)
+            )
+        if adjustment_event_id is not None:
+            selection_validation["confirmedAdjustmentEventId"] = str(
+                adjustment_event_id
             )
         try:
             self.trust_repository.stage_candidate(
@@ -1421,7 +1540,40 @@ class PlanningBoundaryService:
             self._require_v2_acceptance_ready(trip_id, plan_id)
 
     def _require_v2_acceptance_ready(self, trip_id: UUID, plan_id: UUID) -> None:
+        plan = self.plan_service.get_plan_version(trip_id, plan_id)
+        if plan.reason in {PlanVersionReason.DELAY, PlanVersionReason.FATIGUE}:
+            raise AppError(
+                code="S2_T022_DEDICATED_DECISION_REQUIRED",
+                message=(
+                    "LATE/FATIGUE candidates must use the adjustment decision endpoint "
+                    "so collaboration readiness and T021 evidence are revalidated."
+                ),
+                http_status=409,
+                retryable=False,
+            )
         self._require_issued(trip_id, plan_id, boundary_kind="V2")
+
+    def decide_v2(
+        self,
+        trip_id: UUID,
+        plan_id: UUID,
+        *,
+        accept: bool,
+        access: PlanningAccess,
+    ) -> PlanV2DecisionResult:
+        """Keep generic V2 validation and the state transition in one lease."""
+
+        with self._planning_operation(
+            trip_id=trip_id,
+            access=access,
+            expected=PlanningOperation.PLAN_DECISION,
+        ):
+            self._require_v2_acceptance_ready(trip_id, plan_id)
+            return (
+                self.plan_service.accept_v2(trip_id, plan_id)
+                if accept
+                else self.plan_service.reject_v2(trip_id, plan_id)
+            )
 
     def require_adjustment_v2_decision(
         self,
@@ -1434,13 +1586,45 @@ class PlanningBoundaryService:
             trip_id=trip_id,
             access=access,
             expected=PlanningOperation.PLAN_DECISION,
-        ):
-            self._require_adjustment_v2_decision_ready(trip_id, plan_id)
+        ) as permit:
+            self._require_adjustment_v2_decision_ready(
+                trip_id,
+                plan_id,
+                current_readiness=self._readiness_binding(permit),
+            )
+
+    def decide_adjustment_v2(
+        self,
+        trip_id: UUID,
+        plan_id: UUID,
+        *,
+        decision: ExecutionAdjustmentDecision,
+        access: PlanningAccess,
+    ) -> PlanV2DecisionResult:
+        """Revalidate T021 evidence and change state inside one readiness lease."""
+
+        with self._planning_operation(
+            trip_id=trip_id,
+            access=access,
+            expected=PlanningOperation.PLAN_DECISION,
+        ) as permit:
+            self._require_adjustment_v2_decision_ready(
+                trip_id,
+                plan_id,
+                current_readiness=self._readiness_binding(permit),
+            )
+            return (
+                self.plan_service.accept_v2(trip_id, plan_id)
+                if decision is ExecutionAdjustmentDecision.ACCEPT
+                else self.plan_service.reject_v2(trip_id, plan_id)
+            )
 
     def _require_adjustment_v2_decision_ready(
         self,
         trip_id: UUID,
         plan_id: UUID,
+        *,
+        current_readiness: ExecutionReplanReadinessBinding,
     ) -> None:
         """Require immutable T021 evidence, not merely any issued V2."""
 
@@ -1468,6 +1652,18 @@ class PlanningBoundaryService:
                 json.dumps(validation["validationReport"], ensure_ascii=False),
                 strict=True,
             )
+            issued_readiness = ExecutionReplanReadinessBinding.model_validate_json(
+                json.dumps(
+                    validation["collaborationReadiness"],
+                    ensure_ascii=False,
+                ),
+                strict=True,
+            )
+            adjustment_event_id = (
+                UUID(validation["confirmedAdjustmentEventId"])
+                if validation.get("confirmedAdjustmentEventId") is not None
+                else None
+            )
         except TrustedPlanningStoreError as error:
             raise self._trust_error(error) from error
         except (KeyError, TypeError, ValueError, ValidationError) as error:
@@ -1485,6 +1681,35 @@ class PlanningBoundaryService:
         hard_checks = tuple(
             check for check in report.checks if check.hardness == "HARD"
         )
+        if issued_readiness != current_readiness:
+            raise AppError(
+                code="S2_T022_READINESS_CHANGED",
+                message=(
+                    "Collaboration requirements changed after this V2 preview; "
+                    "generate a new adjustment candidate before deciding."
+                ),
+                http_status=409,
+                retryable=False,
+                errors=[
+                    {
+                        "issued": issued_readiness.model_dump(
+                            mode="json",
+                            by_alias=True,
+                        ),
+                        "current": current_readiness.model_dump(
+                            mode="json",
+                            by_alias=True,
+                        ),
+                    }
+                ],
+            )
+        if adjustment_event_id is not None:
+            self._restore_confirmed_adjustment(
+                trip_id=trip_id,
+                current_plan_id=plan.parent_plan_id,
+                event_id=adjustment_event_id,
+                inline=constraints.source_event,
+            )
         if (
             constraints.source_event.event_type is not expected_event
             or report.candidate_plan_id != plan.plan_id

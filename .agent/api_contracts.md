@@ -279,6 +279,9 @@ Schema 校验失败沿用人工确认结构：
 
 ### 13.2 已确认事件转换
 
+- `POST /api/v1/execution-adjustments/trips/{tripId}/events`：在用户确认后保存服务端 LATE/FATIGUE 事件。
+- `GET /api/v1/execution-adjustments/trips/{tripId}/events`：按真实发生时间恢复已确认事件。
+- 保存请求必须包含当前 `planVersionId`、稳定 `idempotencyKey` 和带时区 `occurredAt`；同键同内容返回原事件，同键不同内容返回 `EVENT_IDEMPOTENCY_CONFLICT`。
 - `POST /api/v1/execution-adjustments/compile`
 - 只接受 `confirmationStatus: CONFIRMED`。
 - `LATE` 只收紧 `remaining.timeBudgetMinutes`；`FATIGUE` 只收紧剩余总步行、单段步行和休息间隔。
@@ -289,8 +292,9 @@ Schema 校验失败沿用人工确认结构：
 ### 13.3 S2-T021 服务端后缀重规划
 
 - `POST /api/v1/trips/{tripId}/replans/from-adjustment`
-- 请求只能包含 `schemaVersion`、已确认 `adjustment`、唯一 `lockedTaskIds[]` 与 `explainDifferences`；禁止客户端提交候选、FactRef 内容、当前计划、编译后约束或校验结果。
+- 请求只能包含 `schemaVersion`、服务端签发的 `adjustmentEventId`、与该事件完全一致的已确认 `adjustment`、唯一 `lockedTaskIds[]` 与 `explainDifferences`；禁止客户端提交候选、FactRef 内容、当前计划、编译后约束或校验结果。无 `adjustmentEventId` 仅保留旧客户端兼容，不作为新版验收路径。
 - 服务端要求父版本是匹配 `ISSUED` 记录的唯一 `CURRENT V1`，恢复其可信 `CandidatePlanRequest` 与执行事件，并重新编译 S2-T020 瞬时约束。
+- 默认确定性后缀规划器只压缩可信路线之外的时间空隙或收紧派生休息计数；地点、路线、价格和设施事实不得改写。可信事实不足或 HARD 无法满足时直接无解，禁止伪造替代路线。
 - 已完成、已跳过、已开始、当前和显式锁定任务所覆盖的连续前缀必须逐对象保持不变；只允许调整剩余后缀。
 - 候选必须重新覆盖并通过 `BUDGET | TIME | ROUTE | CARE` 全部 HARD 以及本次瞬时 HARD。无解返回 `REPLAN_NO_FEASIBLE_CANDIDATE`、受影响规则与可放宽项，且不得登记 V2 或签发记录。
 - S2-T020 瞬时约束只写入本次校验与签发证据，不并入长期 S1-T007 约束。
@@ -299,4 +303,17 @@ Schema 校验失败沿用人工确认结构：
 
 - 成功预览返回 `candidatePlan`、`diff`、`eventConstraints`、`derivedContext`、`frozenTaskIds`、候选评估和完整校验报告；候选保持 `PROPOSED`，`currentPlanChanged` 固定为 `false`。
 - `POST /api/v1/trips/{tripId}/replans/{planId}/decision` 只接受 `ACCEPT | REJECT`。两种决策都要求候选具有服务端 `ISSUED V2` 记录，并复用既有 PlanVersion 原子事务。
+- 候选签发证据绑定生成时的 `readinessDigest/currentRevision`；决策时必须与当前协作版本一致。成员资料变化后，旧候选不能再接受。
+- `DELAY | FATIGUE` 候选禁止使用通用 `/plan-versions/{planId}/accept|reject`，必须走本节专用决策接口并复验瞬时 HARD 证据。
 - 百炼只读取服务端生成的脱敏 Diff 投影并返回一段展示文案；它不得修改任务、金额、状态或版本。未配置、超时或非法输出只令 `explanation.status=UNAVAILABLE`，结构化候选与 Diff 必须完整返回。
+
+## 14. PBI-15-A 多人硬冲突与组织者处理（S2-T029）
+
+- `GET /api/v2/trips/{tripId}/collaboration` 必须携带 `X-Organizer-Token`，返回当前 `collaborationVersion/currentRevision/status/canPlan/progress/confirmationItems`。
+- 每个 `confirmationItems[]` 必须包含 `participantId`、`relatedParticipantIds[]`、`ruleId`、`reason` 与 `allowedRelaxations[]`；旧字段名 `relaxations` 仅保留输入兼容，不作为公开响应字段。
+- `POST /api/v2/trips/{tripId}/confirmation-items/{itemId}/resolve` 必须携带 `X-Organizer-Token` 与 `Idempotency-Key`，请求固定为 `schemaVersion/baseRevision/expectedVersion/relaxationId`。
+- 组织者只能执行 `actorScope=ORGANIZER` 的放宽项。成员字段的 `PARTICIPANT` 放宽项必须由对应成员会话执行；组织者页面应显示责任成员，但不得代填或越权修改。
+- 任何未解决确认项都令 `status=CONFLICT_REVIEW`、`canPlan=false`、`readinessDigest=null`，Provider、推荐和规划边界必须在调用下游前拒绝。
+- 放宽会创建新的 T002 revision。旧确认随即变为 `NEEDS_RECONFIRMATION`，状态进入 `COLLECTING_MEMBERS`；只有所有成员在新 revision 重新确认且硬冲突为零，才可进入 `READY_TO_PLAN`。
+- `MemberSessionView` 返回 `collaborationVersion`，确保成员解决自己的确认项时能提交严格 `expectedVersion`。
+- 当前生产 `POST /api/v2/trips/conversations` 仍等待 T002 `TripDraftRevision` 接入并返回 503；S2-T029 不得伪造该上游能力。

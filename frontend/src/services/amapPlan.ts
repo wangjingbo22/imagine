@@ -2,6 +2,7 @@ import { tripApi } from '../api/tripApi'
 import { ApiError } from '../api/client'
 import type {
   AddressResolution,
+  AssistanceProfile,
   CandidateEndpointFact,
   CandidatePlanReview,
   CandidatePlanRequest,
@@ -397,12 +398,20 @@ async function selectRoute(
   city: CityResolution,
   origin: GeoPoint,
   destination: GeoPoint,
+  confirmedProfile: AssistanceProfile | null | undefined,
   preferredMaxWalkMeters?: number,
 ) {
-  const maxWalk = Math.max(
-    100,
-    preferredMaxWalkMeters ?? draft.assistanceProfile.maxSegmentWalkMeters,
-  )
+  const maxWalkLimit = preferredMaxWalkMeters !== undefined
+    ? preferredMaxWalkMeters
+    : confirmedProfile !== undefined
+      ? confirmedProfile?.walkLimits.maxContinuousMeters ?? null
+      : draft.assistanceProfile.maxSegmentWalkMeters
+  const maxTransfers = confirmedProfile !== undefined
+    ? confirmedProfile?.maxTransfers ?? null
+    : draft.assistanceProfile.maxTransfers
+  const maxWalk = maxWalkLimit === null
+    ? Number.POSITIVE_INFINITY
+    : Math.max(100, maxWalkLimit)
   const directDistance = directDistanceMeters(origin, destination)
   const preferred: TravelMode = directDistance <= maxWalk * 0.8 ? 'WALKING' : 'TRANSIT'
   const attempts: TravelMode[] = unique([
@@ -424,7 +433,9 @@ async function selectRoute(
       const transfers = route.transferCount ?? 0
       if (
         mode !== 'DRIVING' &&
-        (walkMeters > maxWalk || transfers > draft.assistanceProfile.maxTransfers)
+        (walkMeters > maxWalk || (
+          maxTransfers !== null && transfers > maxTransfers
+        ))
       ) {
         continue
       }
@@ -632,6 +643,7 @@ async function createAmapPlan(
       city,
       origins[index],
       place.location,
+      confirmedTrip.participants[0].assistanceProfile ?? null,
       options.preferredMaxWalkMeters,
     ))
     await delay(220)
@@ -768,6 +780,7 @@ export async function buildAmapReplanCandidate(
       city,
       origin,
       place.location,
+      baseRequest.trip.participants[0].assistanceProfile ?? null,
       options.preferredMaxWalkMeters,
     ))
     origin = place.location

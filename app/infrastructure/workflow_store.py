@@ -18,6 +18,12 @@ from app.schemas.execution import (
     ExecutionEvent,
     ExecutionEventType,
 )
+from app.schemas.execution_adjustment import (
+    ConfirmedExecutionAdjustmentEvent,
+    CreateConfirmedExecutionAdjustmentEvent,
+    ExecutionAdjustmentType,
+    FatigueLevel,
+)
 from app.schemas.plan import PlanVersion, PlanVersionStatus, ProposedPlanVersion
 from app.schemas.trip import (
     AssistanceProfile,
@@ -120,6 +126,29 @@ class SqliteWorkflowRepository:
                 ON execution_events (trip_id, task_id, event_type)
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS execution_adjustment_events (
+                    event_id TEXT PRIMARY KEY,
+                    trip_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    plan_version_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    late_minutes INTEGER,
+                    fatigue_level TEXT,
+                    idempotency_key TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE (trip_id, idempotency_key)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_adjustment_events_trip_time
+                ON execution_adjustment_events (trip_id, occurred_at, event_id)
+                """
+            )
 
     @staticmethod
     def _constraint_from_row(row: sqlite3.Row) -> ConstraintProfileState:
@@ -160,11 +189,41 @@ class SqliteWorkflowRepository:
         )
 
     @staticmethod
-    def _confirmed_trip_semantic_json(trip: CreateSingleDayTrip) -> str:
-        """Canonical comparison that ignores only the parser-owned participant UUID."""
+    def _adjustment_event_from_row(
+        row: sqlite3.Row,
+    ) -> ConfirmedExecutionAdjustmentEvent:
+        return ConfirmedExecutionAdjustmentEvent(
+            event_id=UUID(row["event_id"]),
+            trip_id=UUID(row["trip_id"]),
+            task_id=row["task_id"],
+            plan_version_id=UUID(row["plan_version_id"]),
+            event_type=ExecutionAdjustmentType(row["event_type"]),
+            late_minutes=row["late_minutes"],
+            fatigue_level=(
+                FatigueLevel(row["fatigue_level"])
+                if row["fatigue_level"] is not None
+                else None
+            ),
+            idempotency_key=row["idempotency_key"],
+            occurred_at=datetime.fromisoformat(row["occurred_at"]),
+        )
+
+    @staticmethod
+    def _confirmed_trip_semantic_json(
+        trip: CreateSingleDayTrip,
+        *,
+        ignore_participant_id: bool = True,
+    ) -> str:
+        """Canonical comparison for an immutable confirmed single-person Trip.
+
+        The legacy parser owned a retry-variant participant UUID, so its old
+        confirmation path keeps ignoring that one field.  Collaboration member
+        bindings are authoritative and must remain part of the semantic digest.
+        """
 
         payload = trip.model_dump(mode="json", by_alias=True)
-        payload["participants"][0].pop("participantId")
+        if ignore_participant_id:
+            payload["participants"][0].pop("participantId")
         return json.dumps(
             payload,
             ensure_ascii=False,
@@ -186,12 +245,21 @@ class SqliteWorkflowRepository:
             sort_keys=True,
         )
 
-    def confirm_trip(self, trip: CreateSingleDayTrip) -> CreateSingleDayTrip:
-        """Persist one authoritative Trip, with semantic retry idempotency."""
+    def _confirm_trip(
+        self,
+        trip: CreateSingleDayTrip,
+        *,
+        flow_kind: TripFlowKind,
+        ignore_participant_id: bool,
+    ) -> CreateSingleDayTrip:
+        """Persist one authoritative Trip without changing its registered flow."""
 
         trip_text = str(trip.trip_id)
         trip_json = trip.model_dump_json(by_alias=True)
-        semantic_json = self._confirmed_trip_semantic_json(trip)
+        semantic_json = self._confirmed_trip_semantic_json(
+            trip,
+            ignore_participant_id=ignore_participant_id,
+        )
         confirmed_at = datetime.now(UTC).isoformat()
         with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -218,7 +286,7 @@ class SqliteWorkflowRepository:
                         "CONFIRMED_TRIP_CONFLICT",
                         "同一 tripId 已确认过不同的 Trip 内容，不允许覆盖",
                     )
-                register_trip_flow(connection, trip.trip_id, TripFlowKind.LEGACY_SINGLE)
+                register_trip_flow(connection, trip.trip_id, flow_kind)
                 connection.execute("COMMIT")
             except Exception:
                 if connection.in_transaction:
@@ -229,6 +297,27 @@ class SqliteWorkflowRepository:
         return CreateSingleDayTrip.model_validate_json(
             row["trip_json"],
             strict=True,
+        )
+
+    def confirm_trip(self, trip: CreateSingleDayTrip) -> CreateSingleDayTrip:
+        """Persist the legacy parser-owned single-person Trip."""
+
+        return self._confirm_trip(
+            trip,
+            flow_kind=TripFlowKind.LEGACY_SINGLE,
+            ignore_participant_id=True,
+        )
+
+    def confirm_collaboration_trip(
+        self,
+        trip: CreateSingleDayTrip,
+    ) -> CreateSingleDayTrip:
+        """Project one READY collaboration revision into the existing planner store."""
+
+        return self._confirm_trip(
+            trip,
+            flow_kind=TripFlowKind.COLLABORATION_V2,
+            ignore_participant_id=False,
         )
 
     def require_confirmed_trip(
@@ -552,6 +641,161 @@ class SqliteWorkflowRepository:
                 (str(trip_id),),
             ).fetchall()
         return [self._event_from_row(row) for row in rows]
+
+    def create_adjustment_event(
+        self,
+        trip_id: UUID,
+        request: CreateConfirmedExecutionAdjustmentEvent,
+    ) -> ConfirmedExecutionAdjustmentEvent:
+        """Persist one confirmed LATE/FATIGUE event with legacy idempotency rules."""
+
+        trip_text = str(trip_id)
+        occurred_at = request.occurred_at.astimezone(UTC).isoformat()
+        created_at = datetime.now(UTC).isoformat()
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            duplicate = connection.execute(
+                """
+                SELECT * FROM execution_adjustment_events
+                WHERE trip_id = ? AND idempotency_key = ?
+                """,
+                (trip_text, request.idempotency_key),
+            ).fetchone()
+            if duplicate is not None:
+                event = self._adjustment_event_from_row(duplicate)
+                same_payload = (
+                    event.task_id == request.task_id
+                    and event.plan_version_id == request.plan_version_id
+                    and event.event_type is request.event_type
+                    and event.late_minutes == request.late_minutes
+                    and event.fatigue_level == request.fatigue_level
+                    and event.occurred_at.astimezone(UTC)
+                    == request.occurred_at.astimezone(UTC)
+                )
+                if not same_payload:
+                    connection.execute("ROLLBACK")
+                    raise PlanStoreError(
+                        "EVENT_IDEMPOTENCY_CONFLICT",
+                        "相同 idempotencyKey 已用于不同事件",
+                    )
+                connection.execute("COMMIT")
+                return event
+
+            trip = connection.execute(
+                "SELECT trip_status FROM trips WHERE trip_id = ?",
+                (trip_text,),
+            ).fetchone()
+            if trip is None:
+                connection.execute("ROLLBACK")
+                raise PlanStoreError("TRIP_NOT_FOUND", "未找到 Trip")
+            if TripStatus(trip["trip_status"]) is not TripStatus.EXECUTING:
+                connection.execute("ROLLBACK")
+                raise PlanStoreError(
+                    "EXECUTION_STATE_INVALID",
+                    "只有 EXECUTING 状态允许写入执行事件",
+                )
+
+            plan_row = connection.execute(
+                """
+                SELECT * FROM plan_versions
+                WHERE trip_id = ? AND status = 'CURRENT'
+                """,
+                (trip_text,),
+            ).fetchone()
+            if plan_row is None:
+                connection.execute("ROLLBACK")
+                raise PlanStoreError("PLAN_NOT_CONFIRMED", "未找到 CURRENT PlanVersion")
+            if plan_row["plan_id"] != str(request.plan_version_id):
+                connection.execute("ROLLBACK")
+                raise PlanStoreError(
+                    "EVENT_PLAN_NOT_CURRENT",
+                    "事件 planVersionId 必须指向当前 CURRENT",
+                )
+            plan = ProposedPlanVersion.model_validate_json(
+                plan_row["snapshot_json"],
+                strict=True,
+            )
+            if request.task_id not in {
+                task.task_id for task in plan.days[0].tasks
+            }:
+                connection.execute("ROLLBACK")
+                raise PlanStoreError(
+                    "EVENT_TASK_NOT_FOUND",
+                    "taskId 不属于当前 PlanVersion",
+                )
+
+            event_id = uuid4()
+            connection.execute(
+                """
+                INSERT INTO execution_adjustment_events (
+                    event_id, trip_id, task_id, plan_version_id, event_type,
+                    late_minutes, fatigue_level, idempotency_key,
+                    occurred_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(event_id),
+                    trip_text,
+                    request.task_id,
+                    str(request.plan_version_id),
+                    request.event_type.value,
+                    request.late_minutes,
+                    (
+                        request.fatigue_level.value
+                        if request.fatigue_level is not None
+                        else None
+                    ),
+                    request.idempotency_key,
+                    occurred_at,
+                    created_at,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM execution_adjustment_events WHERE event_id = ?",
+                (str(event_id),),
+            ).fetchone()
+            connection.execute("COMMIT")
+        assert row is not None
+        return self._adjustment_event_from_row(row)
+
+    def list_adjustment_events(
+        self,
+        trip_id: UUID,
+    ) -> list[ConfirmedExecutionAdjustmentEvent]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM execution_adjustment_events
+                WHERE trip_id = ?
+                ORDER BY occurred_at ASC, event_id ASC
+                """,
+                (str(trip_id),),
+            ).fetchall()
+        return [self._adjustment_event_from_row(row) for row in rows]
+
+    def get_adjustment_event(
+        self,
+        trip_id: UUID,
+        event_id: UUID,
+    ) -> ConfirmedExecutionAdjustmentEvent:
+        """Return a confirmed adjustment only from the requested Trip."""
+
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM execution_adjustment_events
+                WHERE trip_id = ? AND event_id = ?
+                """,
+                (str(trip_id), str(event_id)),
+            ).fetchone()
+        if row is None:
+            # Deliberately use the same response for a missing event and an
+            # event owned by another Trip so callers cannot cross Trip scope.
+            raise PlanStoreError(
+                "ADJUSTMENT_EVENT_NOT_FOUND",
+                "未找到已确认执行调整事件",
+            )
+        return self._adjustment_event_from_row(row)
 
     def get_budget_summary(self, trip_id: UUID) -> ActualBudgetSummary:
         trip_text = str(trip_id)

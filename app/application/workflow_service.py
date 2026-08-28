@@ -11,6 +11,10 @@ from app.schemas.execution import (
     CreateExecutionEvent,
     ExecutionEvent,
 )
+from app.schemas.execution_adjustment import (
+    ConfirmedExecutionAdjustmentEvent,
+    CreateConfirmedExecutionAdjustmentEvent,
+)
 from app.schemas.trip import AssistanceProfile, CreateSingleDayTrip, Trip
 from app.schemas.workflow import (
     ConstraintConfirmationResult,
@@ -29,6 +33,7 @@ class WorkflowService:
             "TRIP_NOT_FOUND",
             "CONSTRAINT_PROFILE_NOT_FOUND",
             "EVENT_TASK_NOT_FOUND",
+            "ADJUSTMENT_EVENT_NOT_FOUND",
         }:
             status = 404
         else:
@@ -53,6 +58,15 @@ class WorkflowService:
     def confirm_trip(self, trip: CreateSingleDayTrip) -> CreateSingleDayTrip:
         try:
             return self.repository.confirm_trip(trip)
+        except PlanStoreError as error:
+            raise self._as_app_error(error) from error
+
+    def confirm_collaboration_trip(
+        self,
+        trip: CreateSingleDayTrip,
+    ) -> CreateSingleDayTrip:
+        try:
+            return self.repository.confirm_collaboration_trip(trip)
         except PlanStoreError as error:
             raise self._as_app_error(error) from error
 
@@ -106,6 +120,32 @@ class WorkflowService:
 
     def list_events(self, trip_id: UUID) -> list[ExecutionEvent]:
         return self.repository.list_events(trip_id)
+
+    def create_adjustment_event(
+        self,
+        trip_id: UUID,
+        request: CreateConfirmedExecutionAdjustmentEvent,
+    ) -> ConfirmedExecutionAdjustmentEvent:
+        try:
+            return self.repository.create_adjustment_event(trip_id, request)
+        except PlanStoreError as error:
+            raise self._as_app_error(error) from error
+
+    def list_adjustment_events(
+        self,
+        trip_id: UUID,
+    ) -> list[ConfirmedExecutionAdjustmentEvent]:
+        return self.repository.list_adjustment_events(trip_id)
+
+    def get_adjustment_event(
+        self,
+        trip_id: UUID,
+        event_id: UUID,
+    ) -> ConfirmedExecutionAdjustmentEvent:
+        try:
+            return self.repository.get_adjustment_event(trip_id, event_id)
+        except PlanStoreError as error:
+            raise self._as_app_error(error) from error
 
     def get_budget_summary(self, trip_id: UUID) -> ActualBudgetSummary:
         try:

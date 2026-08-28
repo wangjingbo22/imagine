@@ -13,6 +13,7 @@ from app.application.llm_gateway import (
     StrictCandidateSelectionGateway,
     UnavailableLlmGateway,
 )
+from app.application.recommendation_service import RecommendationOrchestrationService
 from app.core.config import Settings
 from app.infrastructure.openai_compatible_llm import (
     OpenAiCompatibleCandidateSelectionClient,
@@ -481,7 +482,7 @@ async def test_ungrounded_explanation_falls_back_without_repair_call(
 
 
 @pytest.mark.asyncio
-async def test_retryable_timeout_stops_after_two_transport_attempts() -> None:
+async def test_retryable_timeout_falls_back_after_one_transport_attempt() -> None:
     timeout = CandidateSelectionTransportError("LLM_TIMEOUT", retryable=True)
     client = SequenceModelClient([timeout, timeout, _proposal_json()])
 
@@ -489,12 +490,12 @@ async def test_retryable_timeout_stops_after_two_transport_attempts() -> None:
 
     assert result.decision == "DETERMINISTIC_ENUMERATION"
     assert result.failure_code == "LLM_TIMEOUT"
-    assert result.call_count == 2
-    assert client.call_count == 2
+    assert result.call_count == 1
+    assert client.call_count == 1
 
 
 @pytest.mark.asyncio
-async def test_one_transport_retry_can_recover_without_a_third_call() -> None:
+async def test_transport_failure_never_starts_a_second_model_call() -> None:
     unavailable = CandidateSelectionTransportError(
         "LLM_UNAVAILABLE",
         retryable=True,
@@ -503,9 +504,10 @@ async def test_one_transport_retry_can_recover_without_a_third_call() -> None:
 
     result = await StrictCandidateSelectionGateway(client).select(_request())
 
-    assert result.decision == "MODEL_PROPOSAL"
-    assert result.call_count == 2
-    assert client.call_count == 2
+    assert result.decision == "DETERMINISTIC_ENUMERATION"
+    assert result.failure_code == "LLM_UNAVAILABLE"
+    assert result.call_count == 1
+    assert client.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -574,7 +576,7 @@ async def test_openai_client_sends_only_redacted_allowlisted_fact_projection() -
 
 
 @pytest.mark.asyncio
-async def test_http_read_timeout_maps_to_two_attempts_then_fallback() -> None:
+async def test_http_read_timeout_maps_to_one_attempt_then_fallback() -> None:
     calls = 0
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -596,8 +598,8 @@ async def test_http_read_timeout_maps_to_two_attempts_then_fallback() -> None:
 
     assert result.decision == "DETERMINISTIC_ENUMERATION"
     assert result.failure_code == "LLM_TIMEOUT"
-    assert result.call_count == 2
-    assert calls == 2
+    assert result.call_count == 1
+    assert calls == 1
 
 
 @pytest.mark.asyncio
@@ -605,11 +607,11 @@ async def test_http_read_timeout_maps_to_two_attempts_then_fallback() -> None:
     ("status_code", "failure_code", "expected_calls"),
     [
         (401, "LLM_AUTH_FAILED", 1),
-        (429, "LLM_UNAVAILABLE", 2),
-        (500, "LLM_UNAVAILABLE", 2),
+        (429, "LLM_UNAVAILABLE", 1),
+        (500, "LLM_UNAVAILABLE", 1),
     ],
 )
-async def test_http_failures_are_sanitized_and_retry_only_when_transient(
+async def test_http_failures_are_sanitized_and_never_retried(
     status_code: int,
     failure_code: str,
     expected_calls: int,
@@ -637,6 +639,14 @@ async def test_http_failures_are_sanitized_and_retry_only_when_transient(
     assert result.call_count == expected_calls
     assert calls == expected_calls
     assert "providerSecret" not in result.model_dump_json()
+
+
+def test_gateway_cannot_be_configured_to_retry_transport_failures() -> None:
+    with pytest.raises(ValueError, match="fixed to 1"):
+        StrictCandidateSelectionGateway(
+            SequenceModelClient([_proposal_json()]),
+            max_transport_attempts=2,
+        )
 
 
 def test_candidate_timeout_configuration_is_fixed_to_eight_through_twelve() -> None:
@@ -675,6 +685,11 @@ async def test_application_runtime_exposes_gateway_for_s2_t009(
     )
 
     assert isinstance(app.state.candidate_selection_gateway, expected_type)
+    assert isinstance(app.state.recommendation_service, RecommendationOrchestrationService)
+    assert (
+        app.state.recommendation_service.candidate_selection_gateway
+        is app.state.candidate_selection_gateway
+    )
     async with app.router.lifespan_context(app):
         pass
 

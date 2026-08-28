@@ -375,10 +375,27 @@ async def test_member_conversation_fallback_returns_200_without_advancing_collab
                 "answers": request.model_dump(mode="json", by_alias=True)["answers"],
             },
         )
+        replay = await client.put(
+            "/api/v2/member-session/conversation",
+            headers={
+                "X-Participant-Session": member_token,
+                "Idempotency-Key": "t004-member-fallback-01",
+            },
+            json={
+                "schemaVersion": "1.0",
+                "baseRevision": 1,
+                "expectedVersion": 2,
+                "naturalLanguageRequest": request.natural_language_request,
+                "answers": request.model_dump(mode="json", by_alias=True)["answers"],
+            },
+        )
 
     assert response.status_code == 200
+    assert replay.status_code == 200
     assert response.headers["Cache-Control"] == "no-store"
+    assert replay.headers["Cache-Control"] == "no-store"
     data = response.json()["data"]
+    assert replay.json()["data"] == data
     assert data["answerRevision"] == 2
     assert data["naturalLanguageRequest"] == request.natural_language_request
     assert data["answers"] == request.model_dump(mode="json", by_alias=True)["answers"]
@@ -405,3 +422,42 @@ async def test_member_conversation_fallback_returns_200_without_advancing_collab
             "SELECT COUNT(*) FROM collaboration_idempotency "
             "WHERE operation='ADVANCE_REVISION'"
         ).fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_member_revision_can_be_reclaimed_with_new_key_and_payload(
+    tmp_path: Path,
+) -> None:
+    gateway = CountingGateway(_result(proposal=_two_participant_proposal()))
+    service, repository = _service(tmp_path, gateway)
+    request = _request(fixture_path=FIXTURE.with_name("two_participants.json"))
+    initial = await service.create_initial(request, idempotency_key="t004-reclaim-create-01")
+    participant_id = initial.member_bindings["member-2"]
+
+    gateway.result = _result(failure_code="LLM_TIMEOUT")
+    fallback = await service.submit_participant_conversation(
+        trip_id=initial.trip_id,
+        participant_id=participant_id,
+        base_revision=1,
+        submission=request,
+        idempotency_key="t004-reclaim-fail-01",
+    )
+    assert fallback.answer_revision == 2
+    assert gateway.calls == 2
+
+    gateway.result = _result(proposal=_two_participant_proposal())
+    revised = await service.submit_participant_conversation(
+        trip_id=initial.trip_id,
+        participant_id=participant_id,
+        base_revision=1,
+        submission=_request(
+            "corrected answer",
+            fixture_path=FIXTURE.with_name("two_participants.json"),
+        ),
+        idempotency_key="t004-reclaim-retry-01",
+    )
+
+    assert isinstance(revised, TripDraftRevision)
+    assert revised.revision == 2
+    assert gateway.calls == 3
+    assert _revision_count(repository) == 2

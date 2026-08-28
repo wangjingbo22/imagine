@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.api.planning_access import build_planning_access
 from app.application.collaboration_ports import PlanningOperation
@@ -11,7 +11,6 @@ from app.application.recommendation_service import (
     ProviderFactRestoreError,
     RecommendationOrchestrationError,
     RecommendationOrchestrationService,
-    TrustedRecommendationService,
 )
 from app.core.errors import AppError
 from app.domain.models import ApiResponse
@@ -127,9 +126,20 @@ async def recommendations(trip_id: UUID, request: Request) -> ApiResponse:
     collaboration = request.app.state.collaboration_service
     with guard.operation(access):
         revision = collaboration.ready_revision(trip_id, organizer_token)
+        # Resolve the shared v1/v2 orchestrator only after the authoritative
+        # collaboration check, so an unavailable T002 revision still stops all
+        # Provider/model calls with its original error.
+        orchestration = get_recommendation_service(request)
         trip = revision.understanding.trip
         city = await request.app.state.location_service.resolve_city(
             trip.city_name or ""
+        )
+        # A READY one-person collaboration can reuse the existing trusted
+        # Trip/constraint/PlanVersion pipeline.  The projection is deterministic
+        # and idempotent; group projection remains owned by S2-T032.
+        request.app.state.collaboration_planning_bridge.materialize(
+            revision,
+            city.cityContext,
         )
         members = revision.understanding.participants
         interests = [interest for item in members for interest in item.interests]
@@ -146,28 +156,93 @@ async def recommendations(trip_id: UUID, request: Request) -> ApiResponse:
             FactRef(factRefId=f"AMAP:{place.placeId}", place=place)
             for place in places.places
         ]
-        service = TrustedRecommendationService()
-        candidates = service.issue_candidates(
-            facts,
-            interests=interests,
-            must_visit=must_visit,
-            avoid_places=avoid_places,
-        )
-        ranked = service.rank(candidates, None)
-        return ApiResponse(
-            data=service.choose_single_plan(
-                ranked,
-                facts,
-                [
-                    MemberPreference(
-                        participant_id=str(revision.member_bindings[item.member_key]),
-                        interests=tuple(item.interests),
-                        must_visit=tuple(item.must_visit),
-                    )
-                    for item in members
-                ],
+        member_preferences = [
+            MemberPreference(
+                participant_id=str(revision.member_bindings[item.member_key]),
+                interests=tuple(item.interests),
+                must_visit=tuple(item.must_visit),
             )
+            for item in members
+        ]
+        care_need_labels = [
+            label
+            for item in members
+            if item.care_draft is not None
+            for label in (
+                item.care_draft.assistance_type_hint,
+                "避开楼梯" if item.care_draft.avoid_stairs else None,
+            )
+            if label is not None
+        ]
+        try:
+            bundle = await orchestration.recommend_preview_from_provider_facts(
+                trip_id=trip_id,
+                facts=facts,
+                city_code=city.cityContext.city_code,
+                interests=interests,
+                must_visit=must_visit,
+                avoid_places=avoid_places,
+                care_need_labels=care_need_labels,
+                members=member_preferences,
+            )
+        except RecommendationOrchestrationError as error:
+            raise AppError(
+                code=error.code,
+                message=error.message,
+                http_status=error.http_status,
+            ) from error
+        return ApiResponse(data=bundle)
+
+
+@router.get("/api/v2/trips/{trip_id}/planning-trip")
+async def collaboration_planning_trip(
+    trip_id: UUID,
+    request: Request,
+    response: Response,
+) -> ApiResponse:
+    """Return the server-materialized Trip for the READY single flow.
+
+    The browser must not rebuild or reconfirm a collaboration-owned Trip.  The
+    same readiness lease used by recommendation/planning binds this response to
+    the current confirmed revision, while the bridge keeps persistence and
+    constraint confirmation deterministic and idempotent.
+    """
+
+    organizer_token = request.headers.get("X-Organizer-Token")
+    access = build_planning_access(
+        request,
+        trip_id,
+        PlanningOperation.GENERATE_V1,
+    )
+    guard = request.app.state.collaboration_readiness_guard
+    collaboration = request.app.state.collaboration_service
+    with guard.operation(access):
+        revision = collaboration.ready_revision(trip_id, organizer_token)
+        if len(revision.understanding.participants) != 1:
+            raise AppError(
+                code="COLLABORATION_SINGLE_PLANNING_UNAVAILABLE",
+                message="多人协作 Trip 的规划投影由 S2-T032 提供",
+                http_status=409,
+                retryable=False,
+            )
+        shared = revision.understanding.trip
+        city = await request.app.state.location_service.resolve_city(
+            shared.city_name or ""
         )
+        trip = request.app.state.collaboration_planning_bridge.materialize(
+            revision,
+            city.cityContext,
+        )
+        if trip is None:
+            raise AppError(
+                code="COLLABORATION_SINGLE_PLANNING_UNAVAILABLE",
+                message="当前协作 Trip 无法投影为单人规划输入",
+                http_status=409,
+                retryable=False,
+            )
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Vary"] = "X-Organizer-Token"
+        return ApiResponse(data=trip)
 
 
 __all__ = ["router"]

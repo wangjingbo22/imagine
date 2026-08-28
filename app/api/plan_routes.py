@@ -115,8 +115,14 @@ async def accept_plan_v2(
     planning: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
     access = build_planning_access(request, trip_id, PlanningOperation.PLAN_DECISION)
-    planning.require_v2_acceptance(trip_id, plan_id, access=access)
-    return ApiResponse(data=service.accept_v2(trip_id, plan_id))
+    return ApiResponse(
+        data=planning.decide_v2(
+            trip_id,
+            plan_id,
+            accept=True,
+            access=access,
+        )
+    )
 
 
 @router.post(
@@ -132,5 +138,11 @@ async def reject_plan_v2(
     planning: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
     access = build_planning_access(request, trip_id, PlanningOperation.PLAN_DECISION)
-    planning.require_v2_acceptance(trip_id, plan_id, access=access)
-    return ApiResponse(data=service.reject_v2(trip_id, plan_id))
+    return ApiResponse(
+        data=planning.decide_v2(
+            trip_id,
+            plan_id,
+            accept=False,
+            access=access,
+        )
+    )

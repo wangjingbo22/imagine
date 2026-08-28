@@ -1,9 +1,14 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Request, Response
 
 from app.application.execution_event_draft_service import (
     ExecutionEventDraftService,
 )
+from app.application.workflow_service import WorkflowService
+from app.domain.models import ApiResponse
 from app.schemas.execution_adjustment import (
+    CreateConfirmedExecutionAdjustmentEvent,
     EventConstraintSet,
     ExecutionConstraintCompileRequest,
     ExecutionEventDraft,
@@ -20,6 +25,10 @@ router = APIRouter(
 
 def get_execution_event_draft_service(request: Request) -> ExecutionEventDraftService:
     return request.app.state.execution_event_draft_service
+
+
+def get_workflow_service(request: Request) -> WorkflowService:
+    return request.app.state.workflow_service
 
 
 @router.post(
@@ -45,6 +54,33 @@ async def parse_execution_adjustment(
     if outcome.degraded_reason:
         response.headers["X-Degraded-Reason"] = outcome.degraded_reason
     return outcome.draft
+
+
+@router.post(
+    "/trips/{trip_id}/events",
+    summary="确认并保存迟到或疲劳执行事件",
+    description=(
+        "草稿解析保持零写入；只有用户确认后的 LATE/FATIGUE 才会保存。"
+        "同一 Trip 下相同 idempotencyKey 与相同内容返回原事件，不同内容返回冲突。"
+    ),
+)
+async def create_confirmed_execution_adjustment_event(
+    trip_id: UUID,
+    event: CreateConfirmedExecutionAdjustmentEvent,
+    service: WorkflowService = Depends(get_workflow_service),
+) -> ApiResponse:
+    return ApiResponse(data=service.create_adjustment_event(trip_id, event))
+
+
+@router.get(
+    "/trips/{trip_id}/events",
+    summary="查询已确认的迟到或疲劳执行事件",
+)
+async def list_confirmed_execution_adjustment_events(
+    trip_id: UUID,
+    service: WorkflowService = Depends(get_workflow_service),
+) -> ApiResponse:
+    return ApiResponse(data=service.list_adjustment_events(trip_id))
 
 
 @router.post(

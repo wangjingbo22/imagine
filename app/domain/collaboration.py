@@ -5,7 +5,14 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, alias_generators, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    alias_generators,
+    model_validator,
+)
 from typing_extensions import TypeAliasType
 
 from app.domain.trip_draft import (
@@ -189,7 +196,13 @@ class CollaborationIssue(CollaborationModel):
     code: IssueCode
     reason: str = Field(min_length=1, max_length=240)
     candidates: list[str] = Field(default_factory=list, max_length=5)
-    relaxations: list[RelaxationOption] = Field(default_factory=list)
+    # S2-T029 freezes the public response name as ``allowedRelaxations``.
+    # Keep the Python attribute name for the existing T003 evaluator/service,
+    # and continue accepting the former JSON name while callers migrate.
+    relaxations: list[RelaxationOption] = Field(
+        validation_alias=AliasChoices("allowedRelaxations", "relaxations"),
+        serialization_alias="allowedRelaxations",
+    )
 
 
 class ParticipantProgress(CollaborationModel):

@@ -1,0 +1,32 @@
+{
+  "itemId": "ci_1d62b8329f9a373b",
+  "fieldPath": "participants[1].avoidPlaces[0]",
+  "participantId": "10000000-0000-4000-8000-000000000002",
+  "relatedParticipantIds": [
+    "10000000-0000-4000-8000-000000000001"
+  ],
+  "ruleId": "S2T003.PLACE.MUST_AVOID",
+  "code": "CONFLICT",
+  "reason": "同一地点同时被设为必去和避开",
+  "candidates": [],
+  "allowedRelaxations": [
+    {
+      "relaxationId": "rx_434796f19a596b63",
+      "action": "REMOVE_MUST_VISIT",
+      "actorScope": "PARTICIPANT",
+      "participantId": "10000000-0000-4000-8000-000000000001",
+      "fieldPath": "participants[0].mustVisit[0]",
+      "proposedValue": null,
+      "label": "由字段所有者移除必去限制"
+    },
+    {
+      "relaxationId": "rx_fc7acd3121d19239",
+      "action": "REMOVE_AVOID_PLACE",
+      "actorScope": "PARTICIPANT",
+      "participantId": "10000000-0000-4000-8000-000000000002",
+      "fieldPath": "participants[1].avoidPlaces[0]",
+      "proposedValue": null,
+      "label": "由字段所有者移除避开限制"
+    }
+  ]
+}

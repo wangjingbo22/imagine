@@ -12,7 +12,6 @@ from app.infrastructure.bailian_replan_explanation import ReplanExplanationError
 from app.schemas.execution_replan import (
     DifferenceExplanationStatus,
     DifferenceExplanationView,
-    ExecutionAdjustmentDecision,
     ExecutionAdjustmentDecisionRequest,
     ExecutionAdjustmentDecisionView,
     ExecutionAdjustmentReplanPreview,
@@ -79,16 +78,13 @@ class ExecutionReplanService:
         *,
         access: PlanningAccess,
     ) -> ExecutionAdjustmentDecisionView:
-        # Both ACCEPT and REJECT require a server-issued V2.
-        self.planning_service.require_adjustment_v2_decision(
+        # Evidence revalidation and the state transition share one readiness
+        # lease, so requirements cannot change between the two operations.
+        result = self.planning_service.decide_adjustment_v2(
             trip_id,
             plan_id,
+            decision=request.decision,
             access=access,
-        )
-        result = (
-            self.plan_service.accept_v2(trip_id, plan_id)
-            if request.decision is ExecutionAdjustmentDecision.ACCEPT
-            else self.plan_service.reject_v2(trip_id, plan_id)
         )
         return ExecutionAdjustmentDecisionView(result=result)
 

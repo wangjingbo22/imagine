@@ -98,6 +98,12 @@ def test_issue_register_restore_and_idempotent_summary(tmp_path: Path) -> None:
     assert bundle.fact_set_id == first.fact_set_id
     assert bundle.provider_fact_digest == first.provider_fact_digest
     assert len(bundle.candidate_facts) == 6
+    place_digests = {
+        item.payload_digest
+        for item in first.references
+        if item.kind == "PLACE"
+    }
+    assert {item.fact_digest for item in bundle.candidate_facts} == place_digests
     assert _count(database_path, "provider_fact_sets") == 1
     assert _count(database_path, "provider_fact_refs") == 10
 
