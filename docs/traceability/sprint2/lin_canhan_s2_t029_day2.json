@@ -1,0 +1,164 @@
+{
+  "schemaVersion": "1.0",
+  "sprint": "Sprint2",
+  "deliveryDay": "Day2",
+  "owner": "林粲涵",
+  "verifiedAgainstMainCommit": "10d1742885675694ea0b13c5d20d2e498ef67608",
+  "deliveryBaseCommit": "10d1742885675694ea0b13c5d20d2e498ef67608",
+  "implementationCommit": "00f7ef692b5b3a5ef1b5d711af68456eeff41a66",
+  "requirementsSource": [
+    {
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
+      "sheet": "SprintBacklog模板",
+      "range": "A33:V33"
+    },
+    {
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
+      "sheet": "PBI追溯",
+      "range": "A15:J15"
+    },
+    {
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
+      "sheet": "用户功能验收清单",
+      "range": "A6:J6"
+    },
+    {
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
+      "sheet": "用户功能验收清单",
+      "range": "A8:J8"
+    }
+  ],
+  "pbi": {
+    "pbiId": "PBI-15-A",
+    "acceptanceCriteriaId": "AC-15-B",
+    "coverage": "S2-T029_IMPLEMENTED_WITH_T002_PRODUCTION_PORT_PENDING",
+    "productAcceptance": "多人硬冲突明确返回成员、规则、原因和允许放宽项；冲突未解决时 READY_TO_PLAN 为假，放宽后的新修订必须全员重新确认。"
+  },
+  "task": {
+    "taskId": "S2-T029",
+    "pbiId": "PBI-15-A",
+    "acceptanceCriteriaId": "AC-15-B",
+    "owner": "林粲涵",
+    "deliveryDay": "Day2",
+    "priority": "Must",
+    "remainingHours": 2,
+    "status": "IMPLEMENTED_WITH_UPSTREAM_RUNTIME_PENDING",
+    "dependsOn": ["S2-T003"],
+    "consumes": [
+      "S2-T003.CollaborationAggregate",
+      "S2-T003.DeterministicHardConflictEvaluator",
+      "S2-T003.ReadinessGuard",
+      "S2-T003.CanonicalRevisionPatch"
+    ],
+    "consumedBy": ["S2-T028", "S2-T030", "S2-T031"],
+    "moduleFiles": [
+      "app/domain/collaboration.py",
+      "app/application/collaboration_service.py"
+    ],
+    "integrationFiles": [
+      "frontend/src/domain/collaboration.ts",
+      "frontend/src/api/collaborationApi.ts",
+      "frontend/src/components/ConflictReviewPanel.tsx",
+      "frontend/src/pages/ConversationPlannerPage.tsx",
+      "frontend/src/index.css"
+    ],
+    "contractFiles": [
+      "backend/schemas/s2-t003-collaboration.schema.json",
+      ".agent/api_contracts.md",
+      "frontend/src/api/API.md"
+    ],
+    "fixtureFiles": [
+      "backend/tests/fixtures/collaboration/s2_t029_conflict_case.json",
+      "backend/tests/snapshots/s2_t003_confirmation_items.json"
+    ],
+    "testFiles": [
+      "backend/tests/test_s2_t029_conflict_acceptance.py",
+      "backend/tests/test_s2_lin_canhan_s2_t029_traceability.py",
+      "frontend/tests/collaborationConflictReview.test.ts"
+    ],
+    "acceptanceEvidence": [
+      "public-conflict-json-uses-participantId-ruleId-reason-and-allowedRelaxations",
+      "nfkc-must-visit-versus-avoid-conflict-identifies-both-field-owners",
+      "conflict-review-cannot-enter-readiness-or-call-downstream",
+      "organizer-can-only-apply-organizer-scoped-relaxations",
+      "participant-scoped-relaxations-remain-visible-but-not-organizer-actionable",
+      "relaxation-creates-a-new-revision-and-requires-every-member-to-reconfirm",
+      "ready-to-plan-requires-zero-open-issues-all-confirmed-and-a-readiness-digest",
+      "organizer-ui-uses-capability-version-idempotency-and-frozen-confirmation-item-route",
+      "375-and-768-layout-has-six-step-progress-no-horizontal-uuid-overflow-and-44px-actions"
+    ]
+  },
+  "crossTaskLinkages": [
+    {
+      "from": "S2-T003",
+      "to": "S2-T029",
+      "artifact": "deterministic CollaborationIssue plus scoped CanonicalRevisionPatch",
+      "status": "CONTRACT_REUSED_AND_HARDENED",
+      "evidenceFiles": [
+        "app/domain/hard_conflicts.py",
+        "app/application/collaboration_service.py",
+        "backend/tests/test_s2_t029_conflict_acceptance.py"
+      ]
+    },
+    {
+      "from": "S2-T027",
+      "to": "S2-T029",
+      "artifact": "participant ownership and member-session permission scope",
+      "status": "BACKEND_SCOPE_AVAILABLE_MEMBER_PAGE_UPSTREAM_PENDING",
+      "evidenceFiles": [
+        "app/api/collaboration_routes.py",
+        "app/application/collaboration_service.py"
+      ]
+    },
+    {
+      "from": "S2-T029",
+      "to": "S2-T028",
+      "artifact": "open issue count and fail-closed readiness state",
+      "status": "CONFLICT_REVIEW_GATE_VERIFIED",
+      "evidenceFiles": [
+        "app/application/collaboration_service.py",
+        "backend/tests/test_s2_t003_provider_readiness.py",
+        "backend/tests/test_s2_t003_recommendation_readiness.py",
+        "backend/tests/test_s2_t003_planning_readiness.py"
+      ]
+    },
+    {
+      "from": "S2-T029",
+      "to": "S2-T030",
+      "artifact": "READY_TO_PLAN plus readinessDigest",
+      "status": "BACKEND_UNLOCK_CONTRACT_AVAILABLE_DOWNSTREAM_PAGE_EXTERNAL",
+      "evidenceFiles": [
+        "frontend/src/domain/collaboration.ts",
+        "frontend/src/pages/ConversationPlannerPage.tsx"
+      ]
+    }
+  ],
+  "authorityBoundaries": {
+    "llm": "NO_AUTHORITY_CONFLICTS_AND_RELAXATIONS_ARE_DETERMINISTIC",
+    "organizer": "MAY_EXECUTE_ONLY_ORGANIZER_SCOPED_RELAXATIONS",
+    "participant": "MAY_EXECUTE_ONLY_OWN_PARTICIPANT_SCOPED_RELAXATIONS",
+    "frontend": "DISPLAY_AND_SUBMIT_IDS_ONLY_NO_FACT_OR_STATE_REWRITE",
+    "readiness": "ALL_MEMBERS_CURRENT_REVISION_CONFIRMED_AND_ZERO_ISSUES_REQUIRED"
+  },
+  "knownGaps": {
+    "t002ProductionRevisionPort": "UNAVAILABLE_CREATE_CONVERSATION_RETURNS_503",
+    "memberConversationFrontendMigration": "OWNED_BY_UPSTREAM_S2_T027_AND_NOT_CLAIMED",
+    "publicNetworkE2E": "NOT_RUN_NOT_CLAIMED",
+    "crossStoreAtomicity": "T002_AND_COLLABORATION_SQLITE_TRANSACTION_BOUNDARY_UPSTREAM_PENDING"
+  },
+  "localVerification": {
+    "status": "PASS",
+    "focusedBackendResult": "67 passed",
+    "backendResult": "537 passed",
+    "frontendTest": "37 passed",
+    "frontendBuild": "PASS",
+    "frontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
+    "diffCheck": "PASS",
+    "onlineE2E": "NOT_RUN_NOT_CLAIMED"
+  },
+  "neededInputs": [
+    "陈梓元交付可运行的 T002 TripDraftRevisionPort 与 applyRelaxation 持久化实现",
+    "王敬博或 T027 负责人把成员邀请/会话页面迁移到冻结的 member-session API",
+    "非作者评审、QA 与 PO 的验收记录"
+  ]
+}
