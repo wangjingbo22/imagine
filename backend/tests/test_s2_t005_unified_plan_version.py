@@ -1,23 +1,38 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 import json
 from copy import deepcopy
 from types import SimpleNamespace
 from uuid import UUID
 
+import httpx
 import pytest
 from pydantic import ValidationError
 from starlette.requests import Request
 
 from app.api import plan_routes
-from app.application.collaboration_ports import ReadinessPermit
+from app.application.collaboration_ports import (
+    PlanningAccess,
+    ReadinessPermit,
+)
+from app.application.collaboration_readiness import SqliteCollaborationReadinessGuard
+from app.application.collaboration_service import CollaborationService
 from app.application.planning_boundary_service import PlanningBoundaryService
 from app.application.plan_service import PlanVersionService
+from app.core.config import Settings
 from app.core.errors import AppError
 from app.domain.collaboration import TripFlowKind
-from app.domain.trip_draft import CareDraft, CareNapWindow, CareWalkLimits
+from app.domain.collaboration_digest import member_digest, shared_digest
+from app.domain.hard_conflicts import DeterministicHardConflictEvaluator
+from app.domain.trip_draft import (
+    CareDraft,
+    CareNapWindow,
+    CareWalkLimits,
+    TripUnderstandingProposal,
+)
 from app.application.collaboration_ports import PlanningOperation
 from app.application.workflow_service import WorkflowService
 from app.schemas.trip import PlanReviewTripSnapshot
@@ -29,6 +44,7 @@ from app.schemas.execution_adjustment import (
 )
 from app.schemas.execution_replan import (
     ExecutionAdjustmentReplanRequest,
+    ExecutionAdjustmentDecision,
 )
 from app.schemas.plan import PlanVersion, PlanVersionReason, PlanVersionStatus
 from app.schemas.planning import (
@@ -37,7 +53,10 @@ from app.schemas.planning import (
     ReplanRequestCandidate,
 )
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
+from app.infrastructure.collaboration_store import SqliteCollaborationRepository
+from app.infrastructure.trusted_planning_store import SqliteTrustedPlanningRepository
 from app.infrastructure.workflow_store import SqliteWorkflowRepository
+from app.main import create_app
 from app.services.planning.models import CandidatePlanRequest
 from app.services.planning.planner import (
     candidate_to_proposed_plan_version,
@@ -46,12 +65,13 @@ from app.services.planning.planner import (
     generate_proposed_plan_version,
 )
 from app.services.replanning import SuffixPlanningInput
-from backend.tests.s2_t003_support import FakeRevision
+from backend.tests.s2_t003_support import FakeRevision, FakeTripDraftRevisionPort
 from backend.tests.test_candidate_planner import (
     _payload,
     _payload_for_trip_shape,
     _request,
 )
+from backend.tests.plan_support import UnusedLocationService
 
 
 @pytest.mark.parametrize(
@@ -192,16 +212,160 @@ def _revision_for_request(request: CandidatePlanRequest) -> FakeRevision:
     )
 
 
-def _collaboration_permit(revision: FakeRevision) -> ReadinessPermit:
+def _collaboration_permit(
+    revision: FakeRevision,
+    operation: PlanningOperation = PlanningOperation.GENERATE_V1,
+) -> ReadinessPermit:
     return ReadinessPermit(
         trip_id=revision.trip_id,
         readiness_digest="a" * 64,
         operation_id="projection-test-0001",
-        operation=PlanningOperation.GENERATE_V1,
+        operation=operation,
         flow_kind=TripFlowKind.COLLABORATION_V2,
         expires_at=datetime.now(UTC) + timedelta(minutes=1),
         current_revision=revision.revision,
         revision=revision,
+    )
+
+
+def _authoritative_revision_for_request(
+    request: CandidatePlanRequest,
+) -> FakeRevision:
+    draft = _revision_for_request(request)
+    trip = request.trip
+    day = trip.days[0]
+    understanding_participants = draft.understanding.participants
+    trip_raw = {
+        "cityName": trip.city_context.city_name,
+        "travelDate": trip.start_date.isoformat(),
+        "startTime": day.time_window.start.strftime("%H:%M"),
+        "endTime": day.time_window.end.strftime("%H:%M"),
+        "startLocationText": day.start_location_text,
+        "endLocationText": day.end_location_text,
+        "budgetCents": trip.total_budget_cents,
+    }
+    evidence: list[dict[str, object]] = []
+
+    def add_evidence(
+        field_path: str,
+        value: object,
+        *,
+        member_key: str | None = None,
+    ) -> None:
+        if value is None:
+            return
+        evidence.append({
+            "fieldPath": field_path,
+            "memberKey": member_key,
+            "sourceType": "EXPLICIT_FIELD",
+            "sourceText": str(value),
+        })
+
+    for field, value in trip_raw.items():
+        add_evidence(f"trip.{field}", value)
+
+    participants_raw: list[dict[str, object]] = []
+    for index, (participant, understanding) in enumerate(
+        zip(trip.participants, understanding_participants, strict=True)
+    ):
+        member_key = understanding.member_key
+        participant_raw = {
+            "memberKey": member_key,
+            "nickname": participant.nickname,
+            "budgetCapCents": participant.budget_cap_cents,
+            "interests": [
+                item.value
+                for item in participant.preferences
+                if item.type.value == "INTEREST"
+            ],
+            "mustVisit": [
+                item.value
+                for item in participant.preferences
+                if item.type.value == "MUST_VISIT"
+            ],
+            "avoidPlaces": [
+                item.value
+                for item in participant.preferences
+                if item.type.value == "AVOID_PLACE"
+            ],
+            "careDraft": (
+                understanding.care_draft.model_dump(mode="json", by_alias=True)
+                if understanding.care_draft is not None
+                else None
+            ),
+        }
+        add_evidence(
+            f"participants[{index}].nickname",
+            participant_raw["nickname"],
+            member_key=member_key,
+        )
+        add_evidence(
+            f"participants[{index}].budgetCapCents",
+            participant_raw["budgetCapCents"],
+            member_key=member_key,
+        )
+        for field in ("interests", "mustVisit", "avoidPlaces"):
+            for value_index, value in enumerate(participant_raw[field]):
+                add_evidence(
+                    f"participants[{index}].{field}[{value_index}]",
+                    value,
+                    member_key=member_key,
+                )
+        care = participant_raw["careDraft"]
+        if isinstance(care, dict):
+            care_paths = {
+                "assistanceTypeHint": care.get("assistanceTypeHint"),
+                "childAge": care.get("childAge"),
+                "walkLimits.maxContinuousMeters": (
+                    care.get("walkLimits", {}).get("maxContinuousMeters")
+                ),
+                "walkLimits.maxDailyMeters": (
+                    care.get("walkLimits", {}).get("maxDailyMeters")
+                ),
+                "maxTransfers": care.get("maxTransfers"),
+                "restIntervalMinutes": care.get("restIntervalMinutes"),
+                "careDraft.napWindow.start": (
+                    care.get("napWindow", {}).get("start")
+                    if care.get("napWindow") is not None
+                    else None
+                ),
+                "careDraft.napWindow.end": (
+                    care.get("napWindow", {}).get("end")
+                    if care.get("napWindow") is not None
+                    else None
+                ),
+                "avoidStairs": care.get("avoidStairs"),
+            }
+            for field, value in care_paths.items():
+                if field.startswith("careDraft."):
+                    path = f"participants[{index}].{field}"
+                else:
+                    path = f"participants[{index}].careDraft.{field}"
+                add_evidence(path, value, member_key=member_key)
+        participants_raw.append(participant_raw)
+
+    understanding = TripUnderstandingProposal.model_validate_json(
+        json.dumps(
+            {
+                "schemaVersion": "1.0",
+                "trip": trip_raw,
+                "participants": participants_raw,
+                "fieldEvidence": evidence,
+                "missingFields": [],
+                "ambiguities": [],
+                "confirmationQuestions": [],
+            },
+            ensure_ascii=False,
+        ),
+        strict=True,
+    )
+    return FakeRevision(
+        draft_id=draft.draft_id,
+        revision=draft.revision,
+        trip_id=draft.trip_id,
+        understanding=understanding,
+        member_bindings=draft.member_bindings,
+        source_digest=draft.source_digest,
     )
 
 
@@ -292,6 +456,7 @@ def test_unified_state_events_diff_and_current_invariant(
     decision: str,
 ) -> None:
     request = _state_machine_request(mode, participant_count)
+    revision = _revision_for_request(request)
     database_path = tmp_path / f"{mode.lower()}-{participant_count}-{decision}.sqlite3"
     plan_service = PlanVersionService(
         SqlitePlanVersionRepository(database_path)
@@ -299,9 +464,13 @@ def test_unified_state_events_diff_and_current_invariant(
     v1_proposal = generate_proposed_plan_version(request)
     v1 = plan_service.register_proposed(
         v1_proposal,
-        readiness_permit=_legacy_permit(
-            v1_proposal.trip_snapshot.trip_id,
-            PlanningOperation.GENERATE_V1,
+        readiness_permit=(
+            _legacy_permit(
+                v1_proposal.trip_snapshot.trip_id,
+                PlanningOperation.GENERATE_V1,
+            )
+            if participant_count == 1
+            else _collaboration_permit(revision, PlanningOperation.GENERATE_V1)
         ),
     )
     trip_id = v1.trip_snapshot.trip_id
@@ -336,18 +505,23 @@ def test_unified_state_events_diff_and_current_invariant(
     assert replayed_event.event_id == first_event.event_id
     assert len(workflow.list_events(trip_id)) == 1
 
-    candidate = generate_candidate_plan(request)
+    v2_payload = deepcopy(_payload_for_trip_shape(mode, participant_count))
+    v2_payload["request"]["taskFacts"][1]["startAt"] = "12:00:00"
+    v2_payload["request"]["taskFacts"][1]["endAt"] = "13:00:00"
+    v2_request = _request(v2_payload)
+    candidate = generate_candidate_plan(v2_request)
     v2_proposal = candidate_to_proposed_plan_version_v2(
         candidate,
-        request,
+        v2_request,
         current,
         reason=PlanVersionReason.USER_FEEDBACK,
     )
     v2 = plan_service.register_proposed(
         v2_proposal,
-        readiness_permit=_legacy_permit(
-            trip_id,
-            PlanningOperation.GENERATE_V2,
+        readiness_permit=(
+            _legacy_permit(trip_id, PlanningOperation.GENERATE_V2)
+            if participant_count == 1
+            else _collaboration_permit(revision, PlanningOperation.GENERATE_V2)
         ),
     )
     before_decision = plan_service.get_trip_state(trip_id)
@@ -357,7 +531,11 @@ def test_unified_state_events_diff_and_current_invariant(
         PlanVersionStatus.CURRENT,
         PlanVersionStatus.PROPOSED,
     ]
-    assert len(plan_service.get_diff(trip_id, v2.plan_id).items) >= 0
+    diff = plan_service.get_diff(trip_id, v2.plan_id)
+    assert diff.base_plan_id == v1.plan_id
+    assert diff.candidate_plan_id == v2.plan_id
+    assert diff.items
+    assert any(item.key.endswith(":time_range") for item in diff.items)
 
     if decision == "reject":
         result = plan_service.reject_v2(trip_id, v2.plan_id)
@@ -375,6 +553,291 @@ def test_unified_state_events_diff_and_current_invariant(
     assert plan_service.get_trip_state(trip_id).current_plan is not None
     assert plan_service.get_trip_state(trip_id).current_plan.plan_id == expected_current
     assert len(plan_service.get_trip_state(trip_id).events) == 1
+
+
+@pytest.mark.parametrize(
+    ("mode", "participant_count", "decision"),
+    [
+        ("SINGLE", 1, "accept"),
+        ("GROUP", 2, "reject"),
+        ("GROUP", 3, "accept"),
+    ],
+    ids=["real-single-accept", "real-group-reject", "real-group-accept"],
+)
+def test_real_collaboration_core_chain_recovers_after_restart(
+    tmp_path,
+    mode: str,
+    participant_count: int,
+    decision: str,
+) -> None:
+    request = _state_machine_request(mode, participant_count)
+    revision = _authoritative_revision_for_request(request)
+    database_path = tmp_path / f"real-{mode.lower()}-{participant_count}-{decision}.sqlite3"
+
+    collaboration_repository = SqliteCollaborationRepository(database_path)
+    bootstrap = collaboration_repository.bootstrap_collaboration(
+        revision,
+        f"t005-real-bootstrap-{participant_count}-{decision}",
+    )
+    assert bootstrap.organizer_token is not None
+    expected_version = 1
+    for index, member_key in enumerate(sorted(revision.member_bindings), start=1):
+        expected_version = collaboration_repository.record_confirmation(
+            trip_id=revision.trip_id,
+            participant_id=revision.member_bindings[member_key],
+            revision=revision.revision,
+            source_digest=revision.source_digest,
+            shared_digest=shared_digest(revision),
+            member_digest=member_digest(revision, member_key),
+            expected_version=expected_version,
+            idempotency_key=(
+                f"t005-real-confirm-{participant_count}-{decision}-{index}"
+            ),
+        )
+
+    revision_port = FakeTripDraftRevisionPort(revision)
+    collaboration = CollaborationService(
+        repository=collaboration_repository,
+        revisions=revision_port,
+        evaluator=DeterministicHardConflictEvaluator(),
+    )
+    readiness = SqliteCollaborationReadinessGuard(
+        database_path=database_path,
+        repository=collaboration_repository,
+        collaboration=collaboration,
+    )
+    workflow = WorkflowService(SqliteWorkflowRepository(database_path))
+    plan_service = PlanVersionService(
+        SqlitePlanVersionRepository(database_path),
+        workflow_service=workflow,
+    )
+    boundary = PlanningBoundaryService(
+        plan_service=plan_service,
+        workflow_service=workflow,
+        trust_repository=SqliteTrustedPlanningRepository(database_path),
+        readiness_guard=readiness,
+    )
+
+    def access(operation: PlanningOperation, suffix: str) -> PlanningAccess:
+        return PlanningAccess(
+            trip_id=revision.trip_id,
+            organizer_capability=bootstrap.organizer_token,
+            operation_id=(
+                f"t005-real-{participant_count}-{decision}-{suffix}"
+            ),
+            operation=operation,
+        )
+
+    v1 = boundary.generate_v1(
+        revision.trip_id,
+        request,
+        access=access(PlanningOperation.GENERATE_V1, "v1"),
+    )
+    boundary.confirm_v1(
+        revision.trip_id,
+        v1.plan_id,
+        access=access(PlanningOperation.PLAN_DECISION, "confirm"),
+    )
+    plan_service.start_execution(revision.trip_id)
+    current = plan_service.get_trip_state(revision.trip_id).current_plan
+    assert current is not None and current.plan_id == v1.plan_id
+
+    event_request = CreateExecutionEvent(
+        task_id=current.days[0].tasks[0].task_id,
+        plan_version_id=current.plan_id,
+        event_type=ExecutionEventType.START,
+        idempotency_key=f"t005-real-event-{participant_count}-{decision}",
+        occurred_at=datetime.now(UTC),
+    )
+    first_event = workflow.create_event(revision.trip_id, event_request)
+    assert workflow.create_event(revision.trip_id, event_request).event_id == (
+        first_event.event_id
+    )
+
+    v2_payload = deepcopy(_payload_for_trip_shape(mode, participant_count))
+    v2_payload["request"]["taskFacts"][1]["startAt"] = "12:00:00"
+    v2_payload["request"]["taskFacts"][1]["endAt"] = "13:00:00"
+    v2_request = _request(v2_payload)
+    generation = ReplanGenerationRequest(
+        schemaVersion="1.0",
+        reason=PlanVersionReason.USER_FEEDBACK,
+        candidates=(
+            ReplanRequestCandidate(request=v2_request, satisfaction_loss=0),
+        ),
+    )
+    registered = boundary.generate_v2(
+        revision.trip_id,
+        generation,
+        access=access(PlanningOperation.GENERATE_V2, "v2"),
+    )
+    v2 = registered.plan
+    diff = plan_service.get_diff(revision.trip_id, v2.plan_id)
+    assert diff.base_plan_id == v1.plan_id
+    assert diff.candidate_plan_id == v2.plan_id
+    assert any(item.key.endswith(":time_range") for item in diff.items)
+
+    decision_result = boundary.decide_v2(
+        revision.trip_id,
+        v2.plan_id,
+        accept=decision == "accept",
+        access=access(PlanningOperation.PLAN_DECISION, "decision"),
+    )
+    assert decision_result.candidate_plan_id == v2.plan_id
+    expected_current_id = v2.plan_id if decision == "accept" else v1.plan_id
+    state = plan_service.get_trip_state(revision.trip_id)
+    assert state.current_plan is not None
+    assert state.current_plan.plan_id == expected_current_id
+    assert len(state.events) == 1
+    assert sum(item.status is PlanVersionStatus.CURRENT for item in (
+        plan_service.list_plan_versions(revision.trip_id)
+    )) == 1
+
+    rebuilt_workflow = WorkflowService(SqliteWorkflowRepository(database_path))
+    rebuilt_service = PlanVersionService(
+        SqlitePlanVersionRepository(database_path),
+        workflow_service=rebuilt_workflow,
+    )
+    restored = rebuilt_service.get_trip_state(revision.trip_id)
+    assert restored.current_plan is not None
+    assert restored.current_plan.plan_id == expected_current_id
+    assert len(restored.events) == 1
+    restored_diff = rebuilt_service.get_diff(revision.trip_id, v2.plan_id)
+    assert restored_diff.base_plan_id == diff.base_plan_id
+    assert restored_diff.candidate_plan_id == diff.candidate_plan_id
+    assert restored_diff.items == diff.items
+
+
+@pytest.mark.asyncio
+async def test_cross_trip_organizer_token_rejects_v1_before_plan_or_trust_write(
+    tmp_path,
+) -> None:
+    request_a = _request_for_shape("GROUP", 2)
+    request_b = request_a.model_copy(update={
+        "trip": request_a.trip.model_copy(update={
+            "trip_id": UUID("11111111-1111-4111-8111-111111111112")
+        })
+    })
+    revision_a = _authoritative_revision_for_request(request_a)
+    revision_b = _authoritative_revision_for_request(request_b)
+    revisions_by_trip = {
+        revision_a.trip_id: revision_a,
+        revision_b.trip_id: revision_b,
+    }
+
+    class MultiRevisionPort:
+        def get_current(self, trip_id: UUID):
+            return revisions_by_trip[trip_id]
+
+    database_path = tmp_path / "cross-trip-permission.sqlite3"
+    collaboration_repository = SqliteCollaborationRepository(database_path)
+    tokens: dict[UUID, str] = {}
+    for index, revision in enumerate((revision_a, revision_b), start=1):
+        bootstrap = collaboration_repository.bootstrap_collaboration(
+            revision,
+            f"t005-cross-bootstrap-{index}",
+        )
+        assert bootstrap.organizer_token is not None
+        tokens[revision.trip_id] = bootstrap.organizer_token
+        expected_version = 1
+        for member_index, member_key in enumerate(
+            sorted(revision.member_bindings),
+            start=1,
+        ):
+            expected_version = collaboration_repository.record_confirmation(
+                trip_id=revision.trip_id,
+                participant_id=revision.member_bindings[member_key],
+                revision=revision.revision,
+                source_digest=revision.source_digest,
+                shared_digest=shared_digest(revision),
+                member_digest=member_digest(revision, member_key),
+                expected_version=expected_version,
+                idempotency_key=f"t005-cross-confirm-{index}-{member_index}",
+            )
+
+    revision_port = MultiRevisionPort()
+    collaboration = CollaborationService(
+        repository=collaboration_repository,
+        revisions=revision_port,
+        evaluator=DeterministicHardConflictEvaluator(),
+    )
+    readiness = SqliteCollaborationReadinessGuard(
+        database_path=database_path,
+        repository=collaboration_repository,
+        collaboration=collaboration,
+    )
+    workflow = WorkflowService(SqliteWorkflowRepository(database_path))
+    plan_service = PlanVersionService(
+        SqlitePlanVersionRepository(database_path),
+        workflow_service=workflow,
+    )
+    boundary = PlanningBoundaryService(
+        plan_service=plan_service,
+        workflow_service=workflow,
+        trust_repository=SqliteTrustedPlanningRepository(database_path),
+        readiness_guard=readiness,
+    )
+    app = create_app(
+        settings=Settings(
+            amap_web_service_key="test-amap",
+            amap_cache_db_path=tmp_path / "amap.sqlite3",
+            plan_version_db_path=database_path,
+        ),
+        service=UnusedLocationService(),  # type: ignore[arg-type]
+        plan_service=plan_service,
+        workflow_service=workflow,
+        planning_boundary_service=boundary,
+        collaboration_repository=collaboration_repository,
+        collaboration_readiness_guard=readiness,
+        trip_draft_revision_port=revision_port,
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        cross_trip_response = await client.post(
+            f"/api/v1/trips/{revision_a.trip_id}/plan-versions/generate",
+            headers={
+                "X-Organizer-Token": tokens[revision_b.trip_id],
+                "Idempotency-Key": "t005-cross-trip-generate-0001",
+            },
+            json=request_a.model_dump(mode="json", by_alias=True),
+        )
+
+        assert cross_trip_response.status_code == 403
+        assert cross_trip_response.json()["code"] == "ORGANIZER_PERMISSION_REQUIRED"
+        with collaboration_repository._connect() as connection:
+            assert connection.execute(
+                "SELECT COUNT(*) FROM plan_versions"
+            ).fetchone()[0] == 0
+            assert connection.execute(
+                "SELECT COUNT(*) FROM trusted_plan_issuances"
+            ).fetchone()[0] == 0
+
+        generated = await client.post(
+            f"/api/v1/trips/{revision_a.trip_id}/plan-versions/generate",
+            headers={
+                "X-Organizer-Token": tokens[revision_a.trip_id],
+                "Idempotency-Key": "t005-cross-trip-generate-authorized",
+            },
+            json=request_a.model_dump(mode="json", by_alias=True),
+        )
+        assert generated.status_code == 200, generated.text
+        v1_id = generated.json()["data"]["planId"]
+
+        forged_confirm = await client.post(
+            f"/api/v1/trips/{revision_a.trip_id}/plan-versions/{v1_id}/confirm",
+            headers={
+                "X-Organizer-Token": tokens[revision_b.trip_id],
+                "Idempotency-Key": "t005-cross-trip-confirm-forged",
+            },
+        )
+        assert forged_confirm.status_code == 403
+        assert forged_confirm.json()["code"] == "ORGANIZER_PERMISSION_REQUIRED"
+
+    assert plan_service.get_plan_version(revision_a.trip_id, UUID(v1_id)).status is (
+        PlanVersionStatus.PROPOSED
+    )
 
 
 def test_generate_v2_keeps_one_permit_through_unified_registration() -> None:
@@ -611,6 +1074,73 @@ def test_generic_v2_decision_revalidates_readiness_before_state_transition(
 
 
 @pytest.mark.parametrize(
+    "action",
+    [
+        "confirm_v1",
+        "accept_v2",
+        "reject_v2",
+        "adjustment_accept",
+        "adjustment_reject",
+    ],
+)
+def test_expired_decision_permit_is_rejected_before_state_transition(action: str) -> None:
+    boundary = _boundary()
+    expired = _legacy_permit(
+        UUID("11111111-1111-4111-8111-111111111111"),
+        PlanningOperation.PLAN_DECISION,
+    )
+    expired = replace(
+        expired,
+        expires_at=datetime.now(UTC) - timedelta(seconds=1),
+    )
+    boundary._planning_operation = lambda **_kwargs: nullcontext(expired)
+    boundary._require_v1_confirmation_ready = lambda *args, **kwargs: None
+    boundary._require_v2_acceptance_ready = lambda *args, **kwargs: None
+    boundary.plan_service = SimpleNamespace(
+        confirm=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("expired V1 permit must not confirm")
+        ),
+        accept_v2=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("expired V2 permit must not accept")
+        ),
+        reject_v2=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("expired V2 permit must not reject")
+        ),
+    )
+
+    with pytest.raises(AppError) as captured:
+        if action == "confirm_v1":
+            boundary.confirm_v1(
+                expired.trip_id,
+                UUID("66666666-6666-4666-8666-666666666666"),
+                access=object(),
+            )
+        elif action in {"accept_v2", "reject_v2"}:
+            boundary.decide_v2(
+                expired.trip_id,
+                UUID("66666666-6666-4666-8666-666666666666"),
+                accept=action == "accept_v2",
+                access=object(),
+            )
+        else:
+            boundary._require_adjustment_v2_decision_ready = (
+                lambda *args, **kwargs: None
+            )
+            boundary.decide_adjustment_v2(
+                expired.trip_id,
+                UUID("66666666-6666-4666-8666-666666666666"),
+                decision=(
+                    ExecutionAdjustmentDecision.ACCEPT
+                    if action == "adjustment_accept"
+                    else ExecutionAdjustmentDecision.REJECT
+                ),
+                access=object(),
+            )
+
+    assert captured.value.code == "PLANNING_ACCESS_INVALID"
+
+
+@pytest.mark.parametrize(
     ("mode", "participant_count"),
     [("SINGLE", 1), ("GROUP", 2), ("GROUP", 3)],
     ids=["single-one", "group-two", "group-three"],
@@ -694,6 +1224,116 @@ def test_plan_registration_requires_readiness_permit_before_repository_write(
     with pytest.raises(AppError) as empty:
         service.list_plan_versions(proposal.trip_snapshot.trip_id)
     assert empty.value.code == "PLAN_VERSION_NOT_FOUND"
+
+
+def test_legacy_permit_rejects_group_plan_before_repository_write(tmp_path) -> None:
+    proposal = generate_proposed_plan_version(_request_for_shape("GROUP", 2))
+    service = PlanVersionService(SqlitePlanVersionRepository(tmp_path / "plans.sqlite3"))
+
+    with pytest.raises(AppError) as captured:
+        service.register_proposed(
+            proposal,
+            readiness_permit=_legacy_permit(
+                proposal.trip_snapshot.trip_id,
+                PlanningOperation.GENERATE_V1,
+            ),
+        )
+
+    assert captured.value.code == "PLANNING_ACCESS_INVALID"
+    with pytest.raises(AppError) as empty:
+        service.list_plan_versions(proposal.trip_snapshot.trip_id)
+    assert empty.value.code == "PLAN_VERSION_NOT_FOUND"
+
+
+def test_collaboration_permit_rejects_participant_id_shape_before_repository_write(
+    tmp_path,
+) -> None:
+    request = _request_for_shape("GROUP", 2)
+    revision = _revision_for_request(request)
+    changed_request = request.model_copy(update={
+        "trip": request.trip.model_copy(update={
+            "participants": [
+                request.trip.participants[0].model_copy(update={
+                    "participant_id": UUID("99999999-9999-4999-8999-999999999999")
+                }),
+                request.trip.participants[1],
+            ]
+        })
+    })
+    proposal = generate_proposed_plan_version(changed_request)
+    service = PlanVersionService(SqlitePlanVersionRepository(tmp_path / "plans.sqlite3"))
+
+    with pytest.raises(AppError) as captured:
+        service.register_proposed(
+            proposal,
+            readiness_permit=_collaboration_permit(revision),
+        )
+
+    assert captured.value.code == "PLANNING_ACCESS_INVALID"
+    with pytest.raises(AppError) as empty:
+        service.list_plan_versions(proposal.trip_snapshot.trip_id)
+    assert empty.value.code == "PLAN_VERSION_NOT_FOUND"
+
+
+def test_direct_collaboration_v1_city_mismatch_stops_planner_and_state(monkeypatch) -> None:
+    request = _request_for_shape("SINGLE", 1)
+    revision = _revision_for_request(request)
+    permit = _collaboration_permit(revision)
+    changed_request = request.model_copy(update={
+        "trip": request.trip.model_copy(update={
+            "city_context": request.trip.city_context.model_copy(
+                update={"city_name": "上海市"}
+            )
+        })
+    })
+    boundary = _boundary()
+    stage_calls = 0
+    planner_calls = 0
+
+    def stage_candidate(**_kwargs):
+        nonlocal stage_calls
+        stage_calls += 1
+
+    def forbidden(_request):
+        nonlocal planner_calls
+        planner_calls += 1
+        raise AssertionError("city mismatch must stop before candidate planner")
+
+    boundary.trust_repository = SimpleNamespace(stage_candidate=stage_candidate)
+    monkeypatch.setattr(
+        "app.application.planning_boundary_service.generate_candidate_plan",
+        forbidden,
+    )
+    with pytest.raises(AppError) as captured:
+        boundary._generate_v1_ready(
+            request.trip.trip_id,
+            changed_request,
+            readiness_permit=permit,
+        )
+
+    assert captured.value.code == "COLLABORATION_PLAN_SNAPSHOT_MISMATCH"
+    assert planner_calls == 0
+    assert stage_calls == 0
+
+
+def test_planning_projection_exposes_city_name_mismatch_path() -> None:
+    request = _request_for_shape("SINGLE", 1)
+    revision = _revision_for_request(request)
+    changed_request = request.model_copy(update={
+        "trip": request.trip.model_copy(update={
+            "city_context": request.trip.city_context.model_copy(
+                update={"city_name": "上海市"}
+            )
+        })
+    })
+    boundary = _boundary()
+
+    paths = boundary._projection_mismatch_paths(
+        boundary._revision_planning_projection(revision),
+        boundary._request_planning_projection(changed_request),
+    )
+
+    assert "cityName" in paths
 
 
 @pytest.mark.asyncio
