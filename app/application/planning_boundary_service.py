@@ -1912,6 +1912,7 @@ class PlanningBoundaryService:
                 plan_id,
                 current_readiness=self._readiness_binding(permit),
             )
+            self._require_unexpired_permit(permit)
             return self.plan_service.confirm(trip_id, plan_id)
 
     def _require_v1_confirmation_ready(
@@ -1995,6 +1996,7 @@ class PlanningBoundaryService:
                 plan_id,
                 current_readiness=self._readiness_binding(permit),
             )
+            self._require_unexpired_permit(permit)
             return (
                 self.plan_service.accept_v2(trip_id, plan_id)
                 if accept
@@ -2041,6 +2043,7 @@ class PlanningBoundaryService:
                 plan_id,
                 current_readiness=self._readiness_binding(permit),
             )
+            self._require_unexpired_permit(permit)
             return (
                 self.plan_service.accept_v2(trip_id, plan_id)
                 if decision is ExecutionAdjustmentDecision.ACCEPT

@@ -1141,6 +1141,78 @@ def test_expired_decision_permit_is_rejected_before_state_transition(action: str
 
 
 @pytest.mark.parametrize(
+    "action",
+    ["confirm_v1", "decide_v2", "decide_adjustment_v2"],
+)
+def test_decision_rechecks_permit_after_readiness_validation(action: str) -> None:
+    boundary = _boundary()
+    permit = _legacy_permit(
+        UUID("11111111-1111-4111-8111-111111111111"),
+        PlanningOperation.PLAN_DECISION,
+    )
+    boundary._planning_operation = lambda **_kwargs: nullcontext(permit)
+    checks = 0
+    readiness_calls = 0
+
+    def require_unexpired(_permit: ReadinessPermit) -> None:
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            raise AppError(
+                "PLANNING_ACCESS_INVALID",
+                "permit expired during readiness validation",
+                409,
+                False,
+            )
+
+    def require_ready(*_args, **_kwargs) -> None:
+        nonlocal readiness_calls
+        readiness_calls += 1
+
+    boundary._require_unexpired_permit = require_unexpired
+    boundary._require_v1_confirmation_ready = require_ready
+    boundary._require_v2_acceptance_ready = require_ready
+    boundary._require_adjustment_v2_decision_ready = require_ready
+    boundary.plan_service = SimpleNamespace(
+        confirm=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("expired V1 permit must not confirm")
+        ),
+        accept_v2=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("expired V2 permit must not accept")
+        ),
+        reject_v2=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("expired V2 permit must not reject")
+        ),
+    )
+
+    with pytest.raises(AppError) as captured:
+        if action == "confirm_v1":
+            boundary.confirm_v1(
+                permit.trip_id,
+                UUID("66666666-6666-4666-8666-666666666666"),
+                access=object(),
+            )
+        elif action == "decide_v2":
+            boundary.decide_v2(
+                permit.trip_id,
+                UUID("66666666-6666-4666-8666-666666666666"),
+                accept=True,
+                access=object(),
+            )
+        else:
+            boundary.decide_adjustment_v2(
+                permit.trip_id,
+                UUID("66666666-6666-4666-8666-666666666666"),
+                decision=ExecutionAdjustmentDecision.ACCEPT,
+                access=object(),
+            )
+
+    assert captured.value.code == "PLANNING_ACCESS_INVALID"
+    assert checks == 2
+    assert readiness_calls == 1
+
+
+@pytest.mark.parametrize(
     ("mode", "participant_count"),
     [("SINGLE", 1), ("GROUP", 2), ("GROUP", 3)],
     ids=["single-one", "group-two", "group-three"],
