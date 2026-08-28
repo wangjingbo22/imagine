@@ -8,15 +8,21 @@ from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
+from starlette.requests import Request
 
+from app.api import plan_routes
 from app.application.collaboration_ports import ReadinessPermit
 from app.application.planning_boundary_service import PlanningBoundaryService
+from app.application.plan_service import PlanVersionService
 from app.core.errors import AppError
 from app.domain.collaboration import TripFlowKind
 from app.domain.trip_draft import CareDraft, CareNapWindow, CareWalkLimits
 from app.application.collaboration_ports import PlanningOperation
 from app.schemas.trip import PlanReviewTripSnapshot
+from app.schemas.execution_replan import ExecutionReplanReadinessBinding
+from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.services.planning.models import CandidatePlanRequest
+from app.services.planning.planner import generate_proposed_plan_version
 from backend.tests.s2_t003_support import FakeRevision
 from backend.tests.test_candidate_planner import (
     _payload,
@@ -180,6 +186,59 @@ def _boundary() -> PlanningBoundaryService:
     return PlanningBoundaryService.__new__(PlanningBoundaryService)
 
 
+def _collaboration_readiness() -> ExecutionReplanReadinessBinding:
+    return ExecutionReplanReadinessBinding(
+        readiness_digest="a" * 64,
+        current_revision=1,
+        flow_kind=TripFlowKind.COLLABORATION_V2,
+    )
+
+
+def test_issued_collaboration_plan_requires_immutable_readiness_evidence() -> None:
+    boundary = _boundary()
+    plan = SimpleNamespace(plan_id=UUID("33333333-3333-4333-8333-333333333333"))
+    boundary.plan_service = SimpleNamespace(
+        get_plan_version=lambda _trip_id, _plan_id: plan,
+    )
+    boundary.trust_repository = SimpleNamespace(
+        get_issued_validation=lambda **_kwargs: {"validator": "T011"},
+    )
+
+    with pytest.raises(AppError) as captured:
+        boundary._require_issued_readiness(
+            UUID("11111111-1111-4111-8111-111111111111"),
+            plan.plan_id,
+            boundary_kind="V1",
+            current=_collaboration_readiness(),
+        )
+
+    assert captured.value.code == "PLAN_READINESS_BINDING_CHANGED"
+    assert captured.value.http_status == 409
+
+
+def test_missing_historical_legacy_readiness_is_normalized() -> None:
+    boundary = _boundary()
+    plan = SimpleNamespace(plan_id=UUID("44444444-4444-4444-8444-444444444444"))
+    boundary.plan_service = SimpleNamespace(
+        get_plan_version=lambda _trip_id, _plan_id: plan,
+    )
+    boundary.trust_repository = SimpleNamespace(
+        get_issued_validation=lambda **_kwargs: {"validator": "T011"},
+    )
+    current = ExecutionReplanReadinessBinding(
+        readiness_digest="legacy",
+        current_revision=None,
+        flow_kind=TripFlowKind.LEGACY_SINGLE,
+    )
+
+    boundary._require_issued_readiness(
+        UUID("11111111-1111-4111-8111-111111111111"),
+        plan.plan_id,
+        boundary_kind="V1",
+        current=current,
+    )
+
+
 @pytest.mark.parametrize(
     ("mode", "participant_count"),
     [("SINGLE", 1), ("GROUP", 2), ("GROUP", 3)],
@@ -249,3 +308,51 @@ def test_collaboration_request_rejects_revision_projection_mismatch(mutation) ->
 
     assert captured.value.code == "COLLABORATION_PLAN_SNAPSHOT_MISMATCH"
     assert captured.value.http_status == 409
+
+
+def test_plan_registration_requires_readiness_permit_before_repository_write(
+    tmp_path,
+) -> None:
+    proposal = generate_proposed_plan_version(_request_for_shape("SINGLE", 1))
+    service = PlanVersionService(SqlitePlanVersionRepository(tmp_path / "plans.sqlite3"))
+
+    with pytest.raises(AppError) as captured:
+        service.register_proposed(proposal)
+
+    assert captured.value.code == "PLANNING_ACCESS_INVALID"
+    with pytest.raises(AppError) as empty:
+        service.list_plan_versions(proposal.trip_snapshot.trip_id)
+    assert empty.value.code == "PLAN_VERSION_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_v1_confirm_route_uses_boundary_atomic_confirmation(monkeypatch) -> None:
+    trip_id = UUID("11111111-1111-4111-8111-111111111111")
+    plan_id = UUID("22222222-2222-4222-8222-222222222222")
+    access = object()
+    result = object()
+
+    class Boundary:
+        def confirm_v1(self, received_trip_id, received_plan_id, *, access):
+            assert (received_trip_id, received_plan_id, access) == (
+                trip_id,
+                plan_id,
+                access,
+            )
+            return result
+
+        def require_v1_confirmation(self, *args, **kwargs):
+            raise AssertionError("confirmation must stay inside boundary lease")
+
+    monkeypatch.setattr(plan_routes, "build_planning_access", lambda *args: access)
+    request = Request({"type": "http", "method": "POST", "path": "/", "headers": []})
+
+    response = await plan_routes.confirm_plan_version(
+        trip_id,
+        plan_id,
+        request,
+        service=object(),  # type: ignore[arg-type]
+        planning=Boundary(),  # type: ignore[arg-type]
+    )
+
+    assert response.data is result

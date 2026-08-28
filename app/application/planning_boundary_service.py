@@ -41,6 +41,7 @@ from app.schemas.execution_replan import (
 )
 from app.schemas.plan import (
     PlanV2DecisionResult,
+    PlanTransitionResult,
     PlanVersion,
     PlanVersionReason,
     PlanVersionStatus,
@@ -464,8 +465,11 @@ class PlanningBoundaryService:
         )
 
     @staticmethod
-    def _proposal_validation(plan: Any) -> dict[str, Any]:
-        return {
+    def _proposal_validation(
+        plan: Any,
+        readiness_binding: ExecutionReplanReadinessBinding | None = None,
+    ) -> dict[str, Any]:
+        validation = {
             "validator": "T011",
             "metrics": plan.metrics.model_dump(mode="json", by_alias=True),
             "constraintsSnapshot": [
@@ -478,7 +482,19 @@ class PlanningBoundaryService:
             ],
         }
 
-    def _register_generated(self, proposal: ProposedPlanVersion) -> PlanVersion:
+        if readiness_binding is not None:
+            validation["collaborationReadiness"] = readiness_binding.model_dump(
+                mode="json",
+                by_alias=True,
+            )
+        return validation
+
+    def _register_generated(
+        self,
+        proposal: ProposedPlanVersion,
+        *,
+        readiness_permit: ReadinessPermit,
+    ) -> PlanVersion:
         """Register once, or recover an identical prior partial attempt.
 
         Staging and PlanVersion storage use separate fail-closed transactions. If
@@ -487,7 +503,10 @@ class PlanningBoundaryService:
         """
 
         try:
-            return self.plan_service.register_proposed(proposal)
+            return self.plan_service.register_proposed(
+                proposal,
+                readiness_permit=readiness_permit,
+            )
         except AppError as error:
             if error.code != "PLAN_VERSION_ALREADY_EXISTS":
                 raise
@@ -523,20 +542,32 @@ class PlanningBoundaryService:
             trip_id=trip_id,
             access=access,
             expected=PlanningOperation.GENERATE_V1,
-        ):
-            return self._generate_v1_ready(trip_id, request)
+        ) as permit:
+            return self._generate_v1_ready(
+                trip_id,
+                request,
+                readiness_permit=permit,
+            )
 
     def _generate_v1_ready(
         self,
         trip_id: UUID,
         request: CandidatePlanRequest,
+        *,
+        readiness_permit: ReadinessPermit,
     ) -> PlanVersion:
         self._require_trip_id(trip_id, request)
-        self.workflow_service.require_constraint_confirmed(
-            trip_id,
-            request.trip.participants[0].assistance_profile,
-        )
-        self.workflow_service.require_confirmed_trip(trip_id, request.trip)
+        if readiness_permit.flow_kind.value == "COLLABORATION_V2":
+            self._require_collaboration_request_matches_revision(
+                request,
+                readiness_permit,
+            )
+        else:
+            self.workflow_service.require_constraint_confirmed(
+                trip_id,
+                request.trip.participants[0].assistance_profile,
+            )
+            self.workflow_service.require_confirmed_trip(trip_id, request.trip)
         try:
             candidate = generate_candidate_plan(request)
         except CandidatePlanInputError as error:
@@ -545,7 +576,11 @@ class PlanningBoundaryService:
             raise self._rejected_error(error) from error
 
         if candidate.warnings:
-            review = self._stage_review(candidate, request)
+            review = self._stage_review(
+                candidate,
+                request,
+                readiness_permit=readiness_permit,
+            )
             raise AppError(
                 code="CANDIDATE_CONFIRMATION_REQUIRED",
                 message="候选计划包含需要用户确认的价格、设施或来源事实",
@@ -566,19 +601,24 @@ class PlanningBoundaryService:
         except CandidatePlanInputError as error:
             raise self._planner_error(error) from error
 
+        readiness_binding = self._readiness_binding(readiness_permit)
+        validation = self._proposal_validation(proposal, readiness_binding)
         try:
             self.trust_repository.stage_candidate(
                 plan=proposal,
                 request=request,
                 boundary_kind="V1",
-                validation=self._proposal_validation(proposal),
+                validation=validation,
             )
         except TrustedPlanningStoreError as error:
             raise self._trust_error(error) from error
 
-        stored = self._register_generated(proposal)
+        stored = self._register_generated(
+            proposal,
+            readiness_permit=readiness_permit,
+        )
         try:
-            self.trust_repository.mark_issued(stored)
+            self.trust_repository.mark_issued(stored, validation=validation)
         except TrustedPlanningStoreError as error:
             raise self._trust_error(error) from error
         return stored
@@ -626,14 +666,21 @@ class PlanningBoundaryService:
             trip_id=trip_id,
             access=access,
             expected=PlanningOperation.CONFIRM_REVIEW,
-        ):
-            return self._confirm_review_ready(trip_id, review_id, confirmation)
+        ) as permit:
+            return self._confirm_review_ready(
+                trip_id,
+                review_id,
+                confirmation,
+                readiness_permit=permit,
+            )
 
     def _confirm_review_ready(
         self,
         trip_id: UUID,
         review_id: str,
         confirmation: CandidateReviewConfirmationRequest,
+        *,
+        readiness_permit: ReadinessPermit,
     ) -> PlanVersion:
         row = self.trust_repository.get_review(review_id)
         if row is None:
@@ -647,6 +694,24 @@ class PlanningBoundaryService:
                 code="PLANNING_REVIEW_SCOPE_MISMATCH",
                 message="候选计划确认记录不属于当前 Trip",
                 http_status=409,
+            )
+
+        candidate = self._review_candidate(row)
+        request = self._review_request(row)
+        if (
+            self._review_id(
+                candidate,
+                request,
+                readiness_permit=readiness_permit,
+            )
+            != review_id
+        ):
+            raise AppError(
+                code="PLAN_READINESS_BINDING_CHANGED",
+                message="候选 review 的 readiness 绑定已变化，请重新生成候选",
+                http_status=409,
+                retryable=False,
+                errors=[{"field": "reviewId"}],
             )
 
         confirmation_digest = sha256(
@@ -670,8 +735,6 @@ class PlanningBoundaryService:
                 UUID(row["issued_plan_id"]),
             )
 
-        candidate = self._review_candidate(row)
-        request = self._review_request(row)
         items = self._review_items(candidate, request)
         expected_ids = {item.item_id for item in items}
         supplied = {item.item_id: item for item in confirmation.confirmations}
@@ -694,6 +757,11 @@ class PlanningBoundaryService:
             supplied,
             confirmed_at=datetime.fromisoformat(row["created_at"]),
         )
+        if readiness_permit.flow_kind.value == "COLLABORATION_V2":
+            self._require_collaboration_request_matches_revision(
+                confirmed_request,
+                readiness_permit,
+            )
         try:
             confirmed_candidate = generate_candidate_plan(confirmed_request)
             proposal = candidate_to_proposed_plan_version(
@@ -705,15 +773,20 @@ class PlanningBoundaryService:
         except CandidatePlanRejected as error:
             raise self._rejected_error(error) from error
 
+        readiness_binding = self._readiness_binding(readiness_permit)
+        validation = self._proposal_validation(proposal, readiness_binding)
         try:
             self.trust_repository.stage_candidate(
                 plan=proposal,
                 request=confirmed_request,
                 boundary_kind="V1",
-                validation=self._proposal_validation(proposal),
+                validation=validation,
             )
-            stored = self._register_generated(proposal)
-            self.trust_repository.mark_issued(stored)
+            stored = self._register_generated(
+                proposal,
+                readiness_permit=readiness_permit,
+            )
+            self.trust_repository.mark_issued(stored, validation=validation)
             self.trust_repository.mark_review_confirmed(
                 review_id=review_id,
                 confirmation_digest=confirmation_digest,
@@ -728,12 +801,13 @@ class PlanningBoundaryService:
         self,
         candidate: CandidatePlan,
         request: CandidatePlanRequest,
+        *,
+        readiness_permit: ReadinessPermit,
     ) -> CandidatePlanReview:
-        review_id = str(
-            uuid5(
-                NAMESPACE_URL,
-                f"xingzhi:candidate-review:{request.trip.trip_id}:{candidate.candidate_id}",
-            )
+        review_id = self._review_id(
+            candidate,
+            request,
+            readiness_permit=readiness_permit,
         )
         try:
             row = self.trust_repository.stage_review(
@@ -744,6 +818,27 @@ class PlanningBoundaryService:
         except TrustedPlanningStoreError as error:
             raise self._trust_error(error) from error
         return self._review_from_row(row, candidate)
+
+    @staticmethod
+    def _review_id(
+        candidate: CandidatePlan,
+        request: CandidatePlanRequest,
+        *,
+        readiness_permit: ReadinessPermit,
+    ) -> str:
+        identity = (
+            f"xingzhi:candidate-review:{request.trip.trip_id}:{candidate.candidate_id}"
+        )
+        if readiness_permit.flow_kind.value == "COLLABORATION_V2":
+            identity += ":" + json.dumps(
+                PlanningBoundaryService._readiness_binding(
+                    readiness_permit
+                ).model_dump(mode="json", by_alias=True),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        return str(uuid5(NAMESPACE_URL, identity))
 
     @staticmethod
     def _review_candidate(row: dict[str, Any]) -> CandidatePlan:
@@ -957,13 +1052,19 @@ class PlanningBoundaryService:
             trip_id=trip_id,
             access=access,
             expected=PlanningOperation.GENERATE_V2,
-        ):
-            return self._generate_v2_from_events_ready(trip_id, request)
+        ) as permit:
+            return self._generate_v2_from_events_ready(
+                trip_id,
+                request,
+                readiness_permit=permit,
+            )
 
     def _generate_v2_from_events_ready(
         self,
         trip_id: UUID,
         request: EventDrivenReplanRequest,
+        *,
+        readiness_permit: ReadinessPermit,
     ) -> RegisteredReplan:
         current, events = self._load_current_v1_context(trip_id)
         current_request = self._load_current_candidate_request(trip_id, current)
@@ -979,6 +1080,8 @@ class PlanningBoundaryService:
             reason=request.reason,
             locked_task_ids=frozen_task_ids,
             candidate_inputs=((candidate_request, 0),),
+            registration_permit=readiness_permit,
+            readiness_binding=self._readiness_binding(readiness_permit),
         )
 
     def generate_v2_from_adjustment(
@@ -996,6 +1099,7 @@ class PlanningBoundaryService:
             return self._generate_v2_from_adjustment_ready(
                 trip_id,
                 request,
+                readiness_permit=permit,
                 readiness=self._readiness_binding(permit),
             )
 
@@ -1004,6 +1108,7 @@ class PlanningBoundaryService:
         trip_id: UUID,
         request: ExecutionAdjustmentReplanRequest,
         *,
+        readiness_permit: ReadinessPermit,
         readiness: ExecutionReplanReadinessBinding,
     ) -> RegisteredExecutionAdjustmentReplan:
         """S2-T021: replan a trusted suffix under a transient T020 overlay."""
@@ -1020,6 +1125,12 @@ class PlanningBoundaryService:
                 retryable=True,
             )
         current, events = self._load_current_v1_context(trip_id)
+        self._require_issued_readiness(
+            trip_id,
+            current.plan_id,
+            boundary_kind="V1",
+            current=readiness,
+        )
         current_request = self._load_current_candidate_request(trip_id, current)
         adjustment = request.adjustment
         if request.adjustment_event_id is not None:
@@ -1104,6 +1215,7 @@ class PlanningBoundaryService:
             event_constraints=event_constraints,
             readiness_binding=readiness,
             adjustment_event_id=request.adjustment_event_id,
+            registration_permit=readiness_permit,
         )
         return RegisteredExecutionAdjustmentReplan(
             current_plan_id=current.plan_id,
@@ -1445,7 +1557,31 @@ class PlanningBoundaryService:
         event_constraints: EventConstraintSet | None = None,
         readiness_binding: ExecutionReplanReadinessBinding | None = None,
         adjustment_event_id: UUID | None = None,
+        registration_permit: ReadinessPermit | None = None,
     ) -> RegisteredReplan:
+        if registration_permit is None:
+            raise AppError(
+                code="PLANNING_ACCESS_INVALID",
+                message="V2 登记缺少服务端规划许可",
+                http_status=409,
+                retryable=False,
+            )
+        current_readiness = self._readiness_binding(registration_permit)
+        if readiness_binding is None:
+            readiness_binding = current_readiness
+        elif readiness_binding != current_readiness:
+            raise AppError(
+                code="PLAN_READINESS_BINDING_CHANGED",
+                message="V2 候选的 readiness 绑定已变化，请重新生成候选",
+                http_status=409,
+                retryable=False,
+            )
+        self._require_issued_readiness(
+            trip_id,
+            current.plan_id,
+            boundary_kind="V1",
+            current=current_readiness,
+        )
         identity_digest = (
             self._adjustment_identity_digest(
                 event_constraints,
@@ -1465,6 +1601,11 @@ class PlanningBoundaryService:
         generation_failures: list[dict[str, Any]] = []
         for index, (candidate_request, satisfaction_loss) in enumerate(candidate_inputs):
             self._require_trip_id(trip_id, candidate_request)
+            if registration_permit.flow_kind.value == "COLLABORATION_V2":
+                self._require_collaboration_request_matches_revision(
+                    candidate_request,
+                    registration_permit,
+                )
             try:
                 generated = generate_candidate_plan(candidate_request)
                 proposal = candidate_to_proposed_plan_version_v2(
@@ -1661,7 +1802,10 @@ class PlanningBoundaryService:
                 boundary_kind="V2",
                 validation=selection_validation,
             )
-            stored = self._register_generated(outcome.selected_plan)
+            stored = self._register_generated(
+                outcome.selected_plan,
+                readiness_permit=registration_permit,
+            )
             self.trust_repository.mark_issued(
                 stored,
                 validation=selection_validation,
@@ -1689,13 +1833,19 @@ class PlanningBoundaryService:
             trip_id=trip_id,
             access=access,
             expected=PlanningOperation.GENERATE_V2,
-        ):
-            return self._generate_v2_ready(trip_id, request)
+        ) as permit:
+            return self._generate_v2_ready(
+                trip_id,
+                request,
+                readiness_permit=permit,
+            )
 
     def _generate_v2_ready(
         self,
         trip_id: UUID,
         request: ReplanGenerationRequest,
+        *,
+        readiness_permit: ReadinessPermit,
     ) -> RegisteredReplan:
         current, events = self._load_current_v1_context(trip_id)
         candidate_inputs = tuple(
@@ -1709,6 +1859,8 @@ class PlanningBoundaryService:
             reason=request.reason,
             locked_task_ids=request.locked_task_ids,
             candidate_inputs=candidate_inputs,
+            registration_permit=readiness_permit,
+            readiness_binding=self._readiness_binding(readiness_permit),
         )
 
     def require_v1_confirmation(
@@ -1722,11 +1874,46 @@ class PlanningBoundaryService:
             trip_id=trip_id,
             access=access,
             expected=PlanningOperation.PLAN_DECISION,
-        ):
-            self._require_v1_confirmation_ready(trip_id, plan_id)
+        ) as permit:
+            self._require_v1_confirmation_ready(
+                trip_id,
+                plan_id,
+                current_readiness=self._readiness_binding(permit),
+            )
 
-    def _require_v1_confirmation_ready(self, trip_id: UUID, plan_id: UUID) -> None:
+    def confirm_v1(
+        self,
+        trip_id: UUID,
+        plan_id: UUID,
+        *,
+        access: PlanningAccess,
+    ) -> PlanTransitionResult:
+        with self._planning_operation(
+            trip_id=trip_id,
+            access=access,
+            expected=PlanningOperation.PLAN_DECISION,
+        ) as permit:
+            self._require_v1_confirmation_ready(
+                trip_id,
+                plan_id,
+                current_readiness=self._readiness_binding(permit),
+            )
+            return self.plan_service.confirm(trip_id, plan_id)
+
+    def _require_v1_confirmation_ready(
+        self,
+        trip_id: UUID,
+        plan_id: UUID,
+        *,
+        current_readiness: ExecutionReplanReadinessBinding,
+    ) -> None:
         self._require_issued(trip_id, plan_id, boundary_kind="V1")
+        self._require_issued_readiness(
+            trip_id,
+            plan_id,
+            boundary_kind="V1",
+            current=current_readiness,
+        )
 
     def require_v2_acceptance(
         self,
@@ -1739,10 +1926,20 @@ class PlanningBoundaryService:
             trip_id=trip_id,
             access=access,
             expected=PlanningOperation.PLAN_DECISION,
-        ):
-            self._require_v2_acceptance_ready(trip_id, plan_id)
+        ) as permit:
+            self._require_v2_acceptance_ready(
+                trip_id,
+                plan_id,
+                current_readiness=self._readiness_binding(permit),
+            )
 
-    def _require_v2_acceptance_ready(self, trip_id: UUID, plan_id: UUID) -> None:
+    def _require_v2_acceptance_ready(
+        self,
+        trip_id: UUID,
+        plan_id: UUID,
+        *,
+        current_readiness: ExecutionReplanReadinessBinding,
+    ) -> None:
         plan = self.plan_service.get_plan_version(trip_id, plan_id)
         if plan.reason in {PlanVersionReason.DELAY, PlanVersionReason.FATIGUE}:
             raise AppError(
@@ -1755,6 +1952,12 @@ class PlanningBoundaryService:
                 retryable=False,
             )
         self._require_issued(trip_id, plan_id, boundary_kind="V2")
+        self._require_issued_readiness(
+            trip_id,
+            plan_id,
+            boundary_kind="V2",
+            current=current_readiness,
+        )
 
     def decide_v2(
         self,
@@ -1770,8 +1973,12 @@ class PlanningBoundaryService:
             trip_id=trip_id,
             access=access,
             expected=PlanningOperation.PLAN_DECISION,
-        ):
-            self._require_v2_acceptance_ready(trip_id, plan_id)
+        ) as permit:
+            self._require_v2_acceptance_ready(
+                trip_id,
+                plan_id,
+                current_readiness=self._readiness_binding(permit),
+            )
             return (
                 self.plan_service.accept_v2(trip_id, plan_id)
                 if accept
@@ -1998,6 +2205,78 @@ class PlanningBoundaryService:
             )
         except TrustedPlanningStoreError as error:
             raise self._trust_error(error) from error
+
+    def _require_issued_readiness(
+        self,
+        trip_id: UUID,
+        plan_id: UUID,
+        *,
+        boundary_kind: Literal["V1", "V2"],
+        current: ExecutionReplanReadinessBinding,
+    ) -> None:
+        plan = self.plan_service.get_plan_version(trip_id, plan_id)
+        try:
+            validation = self.trust_repository.get_issued_validation(
+                trip_id=trip_id,
+                plan=plan,
+                boundary_kind=boundary_kind,
+            )
+        except TrustedPlanningStoreError as error:
+            raise self._trust_error(error) from error
+
+        if "collaborationReadiness" not in validation:
+            if (
+                current.flow_kind.value == "LEGACY_SINGLE"
+                and current.readiness_digest == "legacy"
+                and current.current_revision is None
+            ):
+                return
+            raise AppError(
+                code="PLAN_READINESS_BINDING_CHANGED",
+                message="已签发规划缺少 readiness 绑定证据，请重新生成",
+                http_status=409,
+                retryable=False,
+            )
+
+        try:
+            issued = ExecutionReplanReadinessBinding.model_validate_json(
+                json.dumps(
+                    validation["collaborationReadiness"],
+                    ensure_ascii=False,
+                ),
+                strict=True,
+            )
+        except (TypeError, ValueError, ValidationError) as error:
+            raise AppError(
+                code="PLAN_READINESS_BINDING_CHANGED",
+                message="已签发规划的 readiness 绑定证据无效，请重新生成",
+                http_status=409,
+                retryable=False,
+            ) from error
+
+        if issued != current:
+            issued_data = issued.model_dump(mode="json", by_alias=True)
+            current_data = current.model_dump(mode="json", by_alias=True)
+            raise AppError(
+                code="PLAN_READINESS_BINDING_CHANGED",
+                message="已签发规划的 readiness 绑定已变化，请重新生成",
+                http_status=409,
+                retryable=False,
+                errors=[
+                    {
+                        "issued": {
+                            "flowKind": issued_data["flowKind"],
+                            "currentRevision": issued_data["currentRevision"],
+                            "readinessDigest": issued_data["readinessDigest"][:12],
+                        },
+                        "current": {
+                            "flowKind": current_data["flowKind"],
+                            "currentRevision": current_data["currentRevision"],
+                            "readinessDigest": current_data["readinessDigest"][:12],
+                        },
+                    }
+                ],
+            )
 
 
 __all__ = ["PlanningBoundaryService"]

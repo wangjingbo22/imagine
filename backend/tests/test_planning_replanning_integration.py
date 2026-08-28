@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 from uuid import UUID
@@ -8,6 +8,8 @@ from uuid import UUID
 import pytest
 
 from app.application.plan_service import PlanVersionService
+from app.application.collaboration_ports import PlanningOperation, ReadinessPermit
+from app.domain.collaboration import TripFlowKind
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.schemas.execution import ExecutionEvent, ExecutionEventType
 from app.schemas.plan import (
@@ -43,6 +45,17 @@ FIXTURE_PATH = (
 )
 
 
+def _legacy_permit(trip_id, operation: PlanningOperation) -> ReadinessPermit:
+    return ReadinessPermit(
+        trip_id=trip_id,
+        readiness_digest="legacy",
+        operation_id="replanning-integration-legacy-0001",
+        operation=operation,
+        flow_kind=TripFlowKind.LEGACY_SINGLE,
+        expires_at=datetime.now(UTC) + timedelta(minutes=1),
+    )
+
+
 class InMemoryTrustedFacts:
     def __init__(self, records: dict[UUID, CandidatePlanRequest]) -> None:
         self.records = records
@@ -74,7 +87,14 @@ def _current_v1(tmp_path: Path) -> tuple[PlanVersionService, PlanVersion]:
     service = PlanVersionService(
         SqlitePlanVersionRepository(tmp_path / "plan_versions.sqlite3")
     )
-    proposed = service.register_proposed(generate_proposed_plan_version(request))
+    proposed_input = generate_proposed_plan_version(request)
+    proposed = service.register_proposed(
+        proposed_input,
+        readiness_permit=_legacy_permit(
+            proposed_input.trip_snapshot.trip_id,
+            PlanningOperation.GENERATE_V1,
+        ),
+    )
     service.confirm(proposed.trip_snapshot.trip_id, proposed.plan_id)
     service.start_execution(proposed.trip_snapshot.trip_id)
     current = service.get_trip_state(proposed.trip_snapshot.trip_id).current_plan
@@ -155,7 +175,13 @@ def test_t011_v1_to_t018_selection_to_real_v2_registration(
         if check.rule_id.startswith("T010.FACILITY.")
     )
 
-    stored = service.register_proposed(outcome.selected_plan)
+    stored = service.register_proposed(
+        outcome.selected_plan,
+        readiness_permit=_legacy_permit(
+            outcome.selected_plan.trip_snapshot.trip_id,
+            PlanningOperation.GENERATE_V2,
+        ),
+    )
     state = service.get_trip_state(current.trip_snapshot.trip_id)
 
     assert stored.status is PlanVersionStatus.PROPOSED

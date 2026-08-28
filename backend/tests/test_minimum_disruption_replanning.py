@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 from typing import cast
@@ -10,6 +10,8 @@ from uuid import UUID
 import pytest
 
 from app.application.plan_service import PlanVersionService
+from app.application.collaboration_ports import PlanningOperation, ReadinessPermit
+from app.domain.collaboration import TripFlowKind
 from app.schemas.execution import ExecutionEvent, ExecutionEventType
 from app.schemas.plan import (
     PlanVersion,
@@ -32,6 +34,17 @@ from app.services.replanning import (
     SelectedReplan,
 )
 from app.services.route_risk import ValidationStatus
+
+
+def _legacy_permit(trip_id, operation: PlanningOperation) -> ReadinessPermit:
+    return ReadinessPermit(
+        trip_id=trip_id,
+        readiness_digest="legacy",
+        operation_id="minimum-disruption-legacy-0001",
+        operation=operation,
+        flow_kind=TripFlowKind.LEGACY_SINGLE,
+        expires_at=datetime.now(UTC) + timedelta(minutes=1),
+    )
 
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures"
@@ -514,13 +527,22 @@ def test_selected_plan_is_direct_input_to_existing_plan_version_service():
         def __init__(self) -> None:
             self.proposal: ProposedPlanVersion | None = None
 
-        def register_proposed(self, proposal: ProposedPlanVersion) -> ProposedPlanVersion:
+        def register_proposed(
+            self,
+            proposal: ProposedPlanVersion,
+        ) -> ProposedPlanVersion:
             self.proposal = proposal
             return proposal
 
     repository = RecordingRepository()
     service = PlanVersionService(cast(object, repository))
-    returned = service.register_proposed(outcome.selected_plan)
+    returned = service.register_proposed(
+        outcome.selected_plan,
+        readiness_permit=_legacy_permit(
+            outcome.selected_plan.trip_snapshot.trip_id,
+            PlanningOperation.GENERATE_V2,
+        ),
+    )
 
     assert returned is outcome.selected_plan
     assert repository.proposal is outcome.selected_plan

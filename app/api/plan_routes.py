@@ -61,8 +61,13 @@ async def confirm_plan_version(
     planning: PlanningBoundaryService = Depends(get_planning_boundary),
 ) -> ApiResponse:
     access = build_planning_access(request, trip_id, PlanningOperation.PLAN_DECISION)
-    planning.require_v1_confirmation(trip_id, plan_id, access=access)
-    return ApiResponse(data=service.confirm(trip_id, plan_id))
+    return ApiResponse(
+        data=planning.confirm_v1(
+            trip_id,
+            plan_id,
+            access=access,
+        )
+    )
 
 
 @router.post(

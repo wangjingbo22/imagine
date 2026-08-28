@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 
@@ -9,6 +9,8 @@ from pydantic import ValidationError
 import pytest
 
 from app.application.plan_service import PlanVersionService
+from app.application.collaboration_ports import PlanningOperation, ReadinessPermit
+from app.domain.collaboration import TripFlowKind
 from app.domain.models import FacilityType
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.schemas.plan import PlanVersion, PlanVersionStatus, ProposedPlanVersion
@@ -31,6 +33,17 @@ FIXTURE_PATH = (
     / "planning"
     / "golden_candidate_plan.json"
 )
+
+
+def _legacy_permit(trip_id, operation: PlanningOperation) -> ReadinessPermit:
+    return ReadinessPermit(
+        trip_id=trip_id,
+        readiness_digest="legacy",
+        operation_id="candidate-planner-legacy-0001",
+        operation=operation,
+        flow_kind=TripFlowKind.LEGACY_SINGLE,
+        expires_at=datetime.now(UTC) + timedelta(minutes=1),
+    )
 
 
 def _payload() -> dict[str, object]:
@@ -597,7 +610,13 @@ def test_pass_candidate_converts_and_registers_without_schema_translation(
     service = PlanVersionService(
         SqlitePlanVersionRepository(tmp_path / "plans.sqlite3")
     )
-    stored = service.register_proposed(proposal)
+    stored = service.register_proposed(
+        proposal,
+        readiness_permit=_legacy_permit(
+            proposal.trip_snapshot.trip_id,
+            PlanningOperation.GENERATE_V1,
+        ),
+    )
     assert stored.status is PlanVersionStatus.PROPOSED
     assert stored.plan_id == proposal.plan_id
     assert stored.model_dump(exclude={"status", "created_at", "confirmed_at"}) == (

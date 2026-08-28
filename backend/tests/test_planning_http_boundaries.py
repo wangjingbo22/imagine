@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 import json
 import sqlite3
 from pathlib import Path
@@ -11,7 +12,9 @@ import httpx
 import pytest
 
 from app.application.plan_service import PlanVersionService
+from app.application.collaboration_ports import PlanningOperation, ReadinessPermit
 from app.application.workflow_service import WorkflowService
+from app.domain.collaboration import TripFlowKind
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.infrastructure.workflow_store import SqliteWorkflowRepository
 from app.main import create_app
@@ -24,6 +27,17 @@ from backend.tests.plan_support import UnusedLocationService, proposal_payload
 PLANNING_FIXTURE = (
     Path(__file__).parent / "fixtures" / "planning" / "golden_candidate_plan.json"
 )
+
+
+def _legacy_permit(trip_id, operation: PlanningOperation) -> ReadinessPermit:
+    return ReadinessPermit(
+        trip_id=trip_id,
+        readiness_digest="legacy",
+        operation_id="planning-http-legacy-0001",
+        operation=operation,
+        flow_kind=TripFlowKind.LEGACY_SINGLE,
+        expires_at=datetime.now(UTC) + timedelta(minutes=1),
+    )
 
 
 def _candidate_request() -> dict[str, Any]:
@@ -481,7 +495,13 @@ async def test_replan_rejects_a_legacy_current_v1_without_issuance(
         workflow_service=workflow,
     )
     legacy = generate_proposed_plan_version(candidate)
-    plans.register_proposed(legacy)
+    plans.register_proposed(
+        legacy,
+        readiness_permit=_legacy_permit(
+            legacy.trip_snapshot.trip_id,
+            PlanningOperation.GENERATE_V1,
+        ),
+    )
     plans.confirm(candidate.trip.trip_id, legacy.plan_id)
     plans.start_execution(candidate.trip.trip_id)
     app = create_app(

@@ -1,18 +1,32 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import httpx
 import pytest
 
 from app.application.execution_event_draft_service import ExecutionEventDraftService
+from app.application.collaboration_ports import PlanningOperation, ReadinessPermit
 from app.application.plan_service import PlanVersionService
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.main import create_app
+from app.domain.collaboration import TripFlowKind
 from backend.tests.plan_support import UnusedLocationService, parse_proposal
+
+
+def _legacy_permit(trip_id, operation: PlanningOperation) -> ReadinessPermit:
+    return ReadinessPermit(
+        trip_id=trip_id,
+        readiness_digest="legacy",
+        operation_id="s2-t019-legacy-0001",
+        operation=operation,
+        flow_kind=TripFlowKind.LEGACY_SINGLE,
+        expires_at=datetime.now(UTC) + timedelta(minutes=1),
+    )
 
 
 def _row_counts(database_path) -> dict[str, int]:
@@ -43,7 +57,14 @@ def _executing_app(tmp_path):
         plan_service=plan_service,
         execution_event_draft_service=ExecutionEventDraftService(),
     )
-    plan = plan_service.register_proposed(parse_proposal())
+    proposal = parse_proposal()
+    plan = plan_service.register_proposed(
+        proposal,
+        readiness_permit=_legacy_permit(
+            proposal.trip_snapshot.trip_id,
+            PlanningOperation.GENERATE_V1,
+        ),
+    )
     trip_id = plan.trip_snapshot.trip_id
     plan_service.confirm(trip_id, plan.plan_id)
     plan_service.start_execution(trip_id)

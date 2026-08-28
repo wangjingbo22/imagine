@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from collections.abc import Sequence
 
 import pytest
 
 from app.application.plan_service import PlanVersionService
+from app.application.collaboration_ports import PlanningOperation, ReadinessPermit
 from app.core.errors import AppError
+from app.domain.collaboration import TripFlowKind
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.schemas.execution import ExecutionEvent
 from app.schemas.plan import PlanVersion, PlanVersionStatus, ProposedPlanVersion
@@ -21,6 +24,17 @@ from app.services.replanning import (
 )
 from app.services.route_risk import ValidationStatus
 from backend.tests.plan_support import parse_proposal, v2_payload
+
+
+def _legacy_permit(trip_id, operation: PlanningOperation) -> ReadinessPermit:
+    return ReadinessPermit(
+        trip_id=trip_id,
+        readiness_digest="legacy",
+        operation_id="day2-duplicate-legacy-0001",
+        operation=operation,
+        flow_kind=TripFlowKind.LEGACY_SINGLE,
+        expires_at=datetime.now(UTC) + timedelta(minutes=1),
+    )
 
 
 class PassValidator:
@@ -53,7 +67,13 @@ def test_selected_v2_duplicate_registration_is_rejected_atomically(
         SqlitePlanVersionRepository(tmp_path / "plan_versions.sqlite3")
     )
     proposed_v1 = parse_proposal()
-    service.register_proposed(proposed_v1)
+    service.register_proposed(
+        proposed_v1,
+        readiness_permit=_legacy_permit(
+            proposed_v1.trip_snapshot.trip_id,
+            PlanningOperation.GENERATE_V1,
+        ),
+    )
     service.confirm(proposed_v1.trip_snapshot.trip_id, proposed_v1.plan_id)
     service.start_execution(proposed_v1.trip_snapshot.trip_id)
     current = service.get_trip_state(proposed_v1.trip_snapshot.trip_id).current_plan
@@ -67,9 +87,19 @@ def test_selected_v2_duplicate_registration_is_rejected_atomically(
     assert isinstance(outcome, SelectedReplan)
     assert outcome.selected_plan == proposed_v2
 
-    stored = service.register_proposed(outcome.selected_plan)
+    v2_permit = _legacy_permit(
+        outcome.selected_plan.trip_snapshot.trip_id,
+        PlanningOperation.GENERATE_V2,
+    )
+    stored = service.register_proposed(
+        outcome.selected_plan,
+        readiness_permit=v2_permit,
+    )
     with pytest.raises(AppError) as duplicate:
-        service.register_proposed(outcome.selected_plan)
+        service.register_proposed(
+            outcome.selected_plan,
+            readiness_permit=v2_permit,
+        )
 
     assert duplicate.value.code == "PLAN_VERSION_ALREADY_EXISTS"
     assert duplicate.value.http_status == 409

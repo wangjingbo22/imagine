@@ -6,7 +6,9 @@ from datetime import UTC, date, datetime, timedelta
 import json
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from uuid import UUID
 
 import httpx
 import pytest
@@ -20,9 +22,11 @@ from app.infrastructure.trusted_planning_store import TrustedPlanningStoreError
 from app.infrastructure.workflow_store import SqliteWorkflowRepository
 from app.main import create_app
 from app.domain.collaboration import TripFlowKind
+from app.domain.trip_draft import CareDraft, CareNapWindow, CareWalkLimits
 from app.schemas.plan import PlanVersion
 from app.schemas.replan_explanation import ReplanDifferenceExplanation
 from app.schemas.trip import CreateSingleDayTrip
+from app.services.planning.models import CandidatePlanRequest
 from app.services.replanning import (
     DeterministicRetainedSuffixPlanner,
     SuffixPlanningInput,
@@ -52,6 +56,70 @@ def _confirmed_trip(request: dict[str, Any]) -> CreateSingleDayTrip:
     return CreateSingleDayTrip.model_validate_json(
         json.dumps(payload, ensure_ascii=False),
         strict=True,
+    )
+
+
+def _revision_for_planning_request() -> SimpleNamespace:
+    request = CandidatePlanRequest.model_validate_json(
+        json.dumps(_planning_request(), ensure_ascii=False),
+        strict=True,
+    )
+    trip = request.trip
+    day = trip.days[0]
+    participant = trip.participants[0]
+    profile = participant.assistance_profile
+    care_draft = (
+        None
+        if profile is None
+        else CareDraft(
+            assistance_type_hint=profile.type.value,
+            child_age=profile.child_age,
+            walk_limits=CareWalkLimits(
+                max_continuous_meters=profile.walk_limits.max_continuous_meters,
+                max_daily_meters=profile.walk_limits.max_daily_meters,
+            ),
+            max_transfers=profile.max_transfers,
+            rest_interval_minutes=profile.rest_interval,
+            nap_window=(
+                None
+                if profile.nap_window is None
+                else CareNapWindow(
+                    start=profile.nap_window.start.strftime("%H:%M"),
+                    end=profile.nap_window.end.strftime("%H:%M"),
+                )
+            ),
+            avoid_stairs=profile.avoid_stairs,
+        )
+    )
+    understanding = SimpleNamespace(
+        trip=SimpleNamespace(
+            city_name=trip.city_context.city_name,
+            travel_date=trip.start_date,
+            start_time=day.time_window.start.strftime("%H:%M"),
+            end_time=day.time_window.end.strftime("%H:%M"),
+            start_location_text=day.start_location_text,
+            end_location_text=day.end_location_text,
+            budget_cents=trip.total_budget_cents,
+        ),
+        participants=[
+            SimpleNamespace(
+                member_key="member-1",
+                nickname=participant.nickname,
+                budget_cap_cents=participant.budget_cap_cents,
+                interests=[],
+                must_visit=[],
+                avoid_places=[],
+                care_draft=care_draft,
+            )
+        ],
+    )
+    return SimpleNamespace(
+        draft_id=UUID("20000000-0000-4000-8000-000000000001"),
+        revision=1,
+        trip_id=trip.trip_id,
+        understanding=understanding,
+        member_bindings={"member-1": participant.participant_id},
+        source_digest="a" * 64,
     )
 
 
@@ -142,6 +210,7 @@ class MutableReadinessGuard:
     def __init__(self) -> None:
         self.readiness_digest = "a" * 64
         self.current_revision = 1
+        self.revision = _revision_for_planning_request()
 
     @contextmanager
     def operation(self, access):
@@ -153,6 +222,7 @@ class MutableReadinessGuard:
             flow_kind=TripFlowKind.COLLABORATION_V2,
             expires_at=datetime.now(UTC) + timedelta(minutes=1),
             current_revision=self.current_revision,
+            revision=self.revision,
         )
 
 

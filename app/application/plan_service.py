@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+import re
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from app.application.collaboration_ports import PlanningOperation, ReadinessPermit
 from app.core.errors import AppError
+from app.domain.collaboration import TripFlowKind
 from app.infrastructure.plan_store import PlanStoreError, SqlitePlanVersionRepository
 from app.schemas.plan import (
     ExecutionStartResult,
@@ -47,8 +51,72 @@ class PlanVersionService:
             retryable=False,
         )
 
-    def register_proposed(self, proposal: ProposedPlanVersion) -> PlanVersion:
-        if self.workflow_service is not None and proposal.version == 1:
+    @staticmethod
+    def _invalid_readiness() -> AppError:
+        return AppError(
+            code="PLANNING_ACCESS_INVALID",
+            message="PlanVersion 登记缺少或包含非法规划许可",
+            http_status=409,
+            retryable=False,
+        )
+
+    @classmethod
+    def _require_readiness_permit(
+        cls,
+        proposal: ProposedPlanVersion,
+        permit: ReadinessPermit | None,
+    ) -> ReadinessPermit:
+        if permit is None:
+            raise cls._invalid_readiness()
+        if (
+            permit.trip_id != proposal.trip_snapshot.trip_id
+            or permit.expires_at <= datetime.now(UTC)
+        ):
+            raise cls._invalid_readiness()
+
+        expected_operation = {
+            1: {
+                PlanningOperation.GENERATE_V1,
+                PlanningOperation.CONFIRM_REVIEW,
+            },
+            2: {PlanningOperation.GENERATE_V2},
+        }[proposal.version]
+        if permit.operation not in expected_operation:
+            raise cls._invalid_readiness()
+
+        if permit.flow_kind is TripFlowKind.LEGACY_SINGLE:
+            if (
+                permit.readiness_digest != "legacy"
+                or permit.current_revision is not None
+                or permit.revision is not None
+            ):
+                raise cls._invalid_readiness()
+        elif permit.flow_kind is TripFlowKind.COLLABORATION_V2:
+            revision = permit.revision
+            if (
+                revision is None
+                or revision.trip_id != permit.trip_id
+                or revision.trip_id != proposal.trip_snapshot.trip_id
+                or permit.current_revision != revision.revision
+                or re.fullmatch(r"[0-9a-f]{64}", permit.readiness_digest) is None
+            ):
+                raise cls._invalid_readiness()
+        else:
+            raise cls._invalid_readiness()
+        return permit
+
+    def register_proposed(
+        self,
+        proposal: ProposedPlanVersion,
+        *,
+        readiness_permit: ReadinessPermit | None = None,
+    ) -> PlanVersion:
+        permit = self._require_readiness_permit(proposal, readiness_permit)
+        if (
+            permit.flow_kind is TripFlowKind.LEGACY_SINGLE
+            and self.workflow_service is not None
+            and proposal.version == 1
+        ):
             self.workflow_service.require_constraint_confirmed(
                 proposal.trip_snapshot.trip_id,
                 proposal.trip_snapshot.participants[0].assistance_profile,
