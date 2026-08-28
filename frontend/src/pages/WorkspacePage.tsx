@@ -48,6 +48,13 @@ import type {
   TripPlanState,
   TripSummary,
 } from '../domain/trip'
+import type {
+  ConfirmedExecutionAdjustmentEventInput,
+  ExecutionAdjustmentReplanPreview,
+  ExecutionAdjustmentType,
+  ExecutionEventParseOutcome,
+  FatigueLevel,
+} from '../domain/executionAdjustment'
 import {
   loadAmapPlan,
   type AmapPlanResult,
@@ -63,6 +70,10 @@ import {
   sprint1SummaryView,
   submitTaskCompletionEvents,
 } from '../services/executionReplan'
+import {
+  buildConfirmedAdjustment,
+  createAdjustmentIdempotencyKey,
+} from '../services/executionAdjustment'
 import { facilityEvidenceNeedsConfirmation } from '../services/routeRiskFacts'
 import { restoreDraftFromPlanningFacts } from '../services/planningFacts'
 import {
@@ -247,6 +258,9 @@ export function WorkspacePage() {
   const confirmedTrip = navigationState?.trip
   const tripId =
     new URLSearchParams(location.search).get('tripId') ?? navigationState?.tripId ?? null
+  const organizerToken = tripId
+    ? window.sessionStorage.getItem(`organizer-token:${tripId}`)
+    : null
   const [view, setView] = useState<WorkspaceView>('plan')
   const [summary, setSummary] = useState<TripSummary | null>(null)
   const [restoredPlan, setRestoredPlan] = useState<PlanSnapshot | null>(null)
@@ -276,6 +290,19 @@ export function WorkspacePage() {
   const [appliedFeedback, setAppliedFeedback] = useState<string[]>([])
   const [executionAdjustmentCount, setExecutionAdjustmentCount] = useState(0)
   const [executionNotice, setExecutionNotice] = useState('')
+  const [adjustmentText, setAdjustmentText] = useState('')
+  const [adjustmentParse, setAdjustmentParse] = useState<ExecutionEventParseOutcome | null>(null)
+  const [adjustmentEventType, setAdjustmentEventType] = useState<ExecutionAdjustmentType | ''>('')
+  const [adjustmentLateMinutes, setAdjustmentLateMinutes] = useState('')
+  const [adjustmentFatigueLevel, setAdjustmentFatigueLevel] = useState<FatigueLevel | ''>('')
+  const [pendingAdjustmentEvent, setPendingAdjustmentEvent] = useState<
+    ConfirmedExecutionAdjustmentEventInput | null
+  >(null)
+  const [adjustmentPreview, setAdjustmentPreview] = useState<
+    ExecutionAdjustmentReplanPreview | null
+  >(null)
+  const [isParsingAdjustment, setIsParsingAdjustment] = useState(false)
+  const [isConfirmingAdjustment, setIsConfirmingAdjustment] = useState(false)
   const [providerPlan, setProviderPlan] = useState<PlanSnapshot | null>(
     navigationState?.amapPlanResult?.plan ?? null,
   )
@@ -843,6 +870,127 @@ export function WorkspacePage() {
     setView('diff')
   }
 
+  async function parseExecutionAdjustment() {
+    if (!tripId || !currentTask) {
+      setPlanLifecycleError('当前页面缺少正在执行的任务，无法解析调整。')
+      return
+    }
+    if (!organizerToken) {
+      setPlanLifecycleError('当前浏览器没有组织者凭证，不能提交迟到或疲劳调整。')
+      return
+    }
+    const rawText = adjustmentText.trim()
+    if (!rawText) {
+      setPlanLifecycleError('请先说明迟到或疲劳情况。')
+      return
+    }
+    setIsParsingAdjustment(true)
+    setPlanLifecycleError('')
+    try {
+      const parsed = await tripApi.parseExecutionAdjustment(
+        {
+          schemaVersion: '1.0',
+          rawText,
+          taskId: currentTask.id,
+          currentTask: { taskId: currentTask.id, title: currentTask.title },
+        },
+        organizerToken,
+      )
+      setAdjustmentParse(parsed)
+      setAdjustmentEventType(parsed.draft.eventType ?? '')
+      setAdjustmentLateMinutes(
+        parsed.draft.lateMinutes === null ? '' : String(parsed.draft.lateMinutes),
+      )
+      setAdjustmentFatigueLevel(parsed.draft.fatigueLevel ?? '')
+      setPendingAdjustmentEvent(null)
+    } catch (error) {
+      setPlanLifecycleError(error instanceof Error ? error.message : '解析迟到或疲劳反馈失败')
+    } finally {
+      setIsParsingAdjustment(false)
+    }
+  }
+
+  async function confirmExecutionAdjustment() {
+    if (!tripId || !storedCurrentPlan || !adjustmentParse) {
+      setPlanLifecycleError('请先解析并确认当前任务的迟到或疲劳情况。')
+      return
+    }
+    if (!organizerToken) {
+      setPlanLifecycleError('当前浏览器没有组织者凭证，只有组织者可以发起重规划。')
+      return
+    }
+    setIsConfirmingAdjustment(true)
+    setPlanLifecycleError('')
+    try {
+      const adjustment = buildConfirmedAdjustment(adjustmentParse.draft, {
+        eventType: adjustmentEventType || undefined,
+        lateMinutes: adjustmentLateMinutes.trim()
+          ? Number(adjustmentLateMinutes)
+          : null,
+        fatigueLevel: adjustmentFatigueLevel || null,
+      })
+      const pendingMatches = pendingAdjustmentEvent !== null &&
+        pendingAdjustmentEvent.planVersionId === storedCurrentPlan.planId &&
+        pendingAdjustmentEvent.taskId === adjustment.taskId &&
+        pendingAdjustmentEvent.eventType === adjustment.eventType &&
+        pendingAdjustmentEvent.lateMinutes === adjustment.lateMinutes &&
+        pendingAdjustmentEvent.fatigueLevel === adjustment.fatigueLevel
+      const occurredAt = pendingMatches
+        ? pendingAdjustmentEvent.occurredAt
+        : new Date().toISOString()
+      const eventInput: ConfirmedExecutionAdjustmentEventInput = pendingMatches
+        ? pendingAdjustmentEvent
+        : {
+            ...adjustment,
+            planVersionId: storedCurrentPlan.planId,
+            occurredAt,
+            idempotencyKey: createAdjustmentIdempotencyKey(
+              storedCurrentPlan.planId,
+              adjustment.taskId,
+              adjustment.eventType,
+              occurredAt,
+            ),
+          }
+      setPendingAdjustmentEvent(eventInput)
+
+      const persisted = await tripApi.confirmExecutionAdjustment(
+        tripId,
+        eventInput,
+        organizerToken,
+      )
+      const preview = await tripApi.previewExecutionReplan(
+        tripId,
+        {
+          schemaVersion: '1.0',
+          adjustmentEventId: persisted.data.eventId,
+          adjustment,
+          lockedTaskIds: [...new Set([...completedTaskIds, ...skippedTaskIds])],
+          explainDifferences: true,
+        },
+        organizerToken,
+      )
+      if (
+        preview.data.currentPlanChanged ||
+        preview.data.currentPlanId !== storedCurrentPlan.planId
+      ) {
+        throw new Error('服务端候选预览违反 CURRENT 不变约束，已停止展示。')
+      }
+      setAdjustmentPreview(preview.data)
+      setCandidatePlanV2(preview.data.candidatePlan)
+      setPlanDiff(preview.data.diff)
+      setExecutionNotice(
+        preview.data.explanation.status === 'UNAVAILABLE'
+          ? '结构化 V2 与 Diff 已生成；文字解释暂不可用，不影响组织者决策。'
+          : '迟到或疲劳事件已确认，候选 V2 尚未替换当前计划。',
+      )
+      setView('diff')
+    } catch (error) {
+      setPlanLifecycleError(error instanceof Error ? error.message : '确认事件并生成 V2 失败')
+    } finally {
+      setIsConfirmingAdjustment(false)
+    }
+  }
+
   async function decidePlanV2(decision: 'accept' | 'reject') {
     if (!tripId || !candidatePlanV2) {
       return
@@ -850,12 +998,21 @@ export function WorkspacePage() {
     setIsDecidingV2(true)
     setPlanLifecycleError('')
     try {
+      const requiresAdjustmentDecision =
+        candidatePlanV2.reason === 'DELAY' || candidatePlanV2.reason === 'FATIGUE'
+      if (requiresAdjustmentDecision && !organizerToken) {
+        throw new Error('当前浏览器没有组织者凭证，不能接受或拒绝此 V2。')
+      }
       const continuation = await decideAndContinueExecution(
         decision,
         candidatePlanV2.planId,
         {
-          acceptPlan: (planId) => tripApi.acceptPlanV2(tripId, planId),
-          rejectPlan: (planId) => tripApi.rejectPlanV2(tripId, planId),
+          acceptPlan: (planId) => requiresAdjustmentDecision
+            ? tripApi.decideExecutionReplan(tripId, planId, 'ACCEPT', organizerToken as string)
+            : tripApi.acceptPlanV2(tripId, planId),
+          rejectPlan: (planId) => requiresAdjustmentDecision
+            ? tripApi.decideExecutionReplan(tripId, planId, 'REJECT', organizerToken as string)
+            : tripApi.rejectPlanV2(tripId, planId),
           restoreTrip: async () => (await tripApi.getTrip(tripId)).data,
           applyRestoredState: applyTripState,
           startTask,
@@ -864,6 +1021,10 @@ export function WorkspacePage() {
       )
       setCandidatePlanV2(null)
       setPlanDiff(null)
+      setAdjustmentPreview(null)
+      setPendingAdjustmentEvent(null)
+      setAdjustmentParse(null)
+      setAdjustmentText('')
       setExecutionNotice(
         decision === 'accept'
           ? '已接受 Plan V2；Plan V1 已转为历史版本。'
@@ -1433,6 +1594,35 @@ export function WorkspacePage() {
               <span className="plan-diff-version">V1 <ArrowRight size={16} /> V2</span>
             </div>
 
+            {adjustmentPreview && (
+              <section className="explanation-card" aria-live="polite">
+                <div className="explanation-card__head">
+                  <span><Sparkles size={18} /> 本次执行调整</span>
+                  <small>{adjustmentPreview.explanation.status}</small>
+                </div>
+                <p>
+                  {adjustmentPreview.explanation.status === 'GENERATED'
+                    ? adjustmentPreview.explanation.summary
+                    : adjustmentPreview.explanation.status === 'UNAVAILABLE'
+                      ? '文字解释暂不可用；下方结构化 Diff、HARD 校验和决策仍然有效。'
+                      : '本次未请求文字解释；请以结构化 Diff 为准。'}
+                </p>
+                <div className="reason-tags">
+                  {adjustmentPreview.eventConstraints.reasons.map((reason) => (
+                    <span key={reason.reasonCode}>{reason.message}</span>
+                  ))}
+                  <span>冻结任务 {adjustmentPreview.frozenTaskIds.length} 个</span>
+                  <span>
+                    HARD 校验 {
+                      adjustmentPreview.validationReport.checks.every(
+                        (check) => check.hardness !== 'HARD' || check.status === 'PASS',
+                      ) ? '通过' : '未通过'
+                    }
+                  </span>
+                </div>
+              </section>
+            )}
+
             <div className="plan-diff-summary" aria-label="计划指标变化">
               <article>
                 <span>预计费用</span>
@@ -1630,24 +1820,112 @@ export function WorkspacePage() {
 
               <section className="execution-feedback-card">
                 <div className="source-card__head">
-                  <span><MessageSquareText size={18} /> 随时反馈给 Agent</span>
+                  <span><MessageSquareText size={18} /> 迟到 / 疲劳调整</span>
                 </div>
                 <textarea
-                  disabled
+                  aria-label="说明迟到或疲劳情况"
+                  disabled={isParsingAdjustment || isConfirmingAdjustment || !organizerToken}
                   maxLength={160}
-                  placeholder={S1_EVENT_REPLAN_ONLY_MESSAGE}
-                  readOnly
-                  value=""
+                  onChange={(event) => {
+                    setAdjustmentText(event.target.value)
+                    setAdjustmentParse(null)
+                    setPendingAdjustmentEvent(null)
+                  }}
+                  placeholder="例如：迟到了 25 分钟；或者：我现在很累"
+                  value={adjustmentText}
                 />
                 <button
                   className="button button--soft"
-                  disabled
+                  disabled={
+                    isParsingAdjustment ||
+                    isConfirmingAdjustment ||
+                    !organizerToken ||
+                    !adjustmentText.trim()
+                  }
+                  onClick={() => void parseExecutionAdjustment()}
                   type="button"
                 >
-                  <Send size={15} />
-                  实际消费变化才会触发 V2
+                  {isParsingAdjustment
+                    ? <LoaderCircle className="spin-icon" size={15} />
+                    : <Send size={15} />}
+                  {isParsingAdjustment ? '正在解析…' : '解析并进入确认'}
                 </button>
-                <p>{S1_EVENT_REPLAN_ONLY_MESSAGE}</p>
+                {!organizerToken && (
+                  <p className="media-error">当前浏览器没有组织者凭证，只能查看行程，不能发起重规划。</p>
+                )}
+                <p>{S1_EVENT_REPLAN_ONLY_MESSAGE}；Sprint2 可由组织者确认迟到或疲劳后预览 V2。</p>
+                {adjustmentParse && (
+                  <div className="evidence-review-list" aria-live="polite">
+                    <p>
+                      识别来源：{adjustmentParse.recognition.source}
+                      {adjustmentParse.recognition.degradedReason
+                        ? `（${adjustmentParse.recognition.degradedReason}，请使用固定选项确认）`
+                        : ''}
+                    </p>
+                    {adjustmentParse.draft.clarificationQuestions.map((question) => (
+                      <p key={question.questionKey}>{question.prompt}</p>
+                    ))}
+                    <label htmlFor="execution-adjustment-type">调整类型</label>
+                    <select
+                      id="execution-adjustment-type"
+                      onChange={(event) => {
+                        setAdjustmentEventType(event.target.value as ExecutionAdjustmentType | '')
+                        setPendingAdjustmentEvent(null)
+                      }}
+                      value={adjustmentEventType}
+                    >
+                      <option value="">请选择</option>
+                      <option value="LATE">迟到</option>
+                      <option value="FATIGUE">疲劳</option>
+                    </select>
+                    {adjustmentEventType === 'LATE' && (
+                      <label htmlFor="execution-adjustment-late-minutes">
+                        迟到分钟数（1–240）
+                        <input
+                          id="execution-adjustment-late-minutes"
+                          inputMode="numeric"
+                          max="240"
+                          min="1"
+                          onChange={(event) => {
+                            setAdjustmentLateMinutes(event.target.value)
+                            setPendingAdjustmentEvent(null)
+                          }}
+                          type="number"
+                          value={adjustmentLateMinutes}
+                        />
+                      </label>
+                    )}
+                    {adjustmentEventType === 'FATIGUE' && (
+                      <label htmlFor="execution-adjustment-fatigue-level">
+                        疲劳程度
+                        <select
+                          id="execution-adjustment-fatigue-level"
+                          onChange={(event) => {
+                            setAdjustmentFatigueLevel(event.target.value as FatigueLevel | '')
+                            setPendingAdjustmentEvent(null)
+                          }}
+                          value={adjustmentFatigueLevel}
+                        >
+                          <option value="">请选择</option>
+                          <option value="MILD">轻度</option>
+                          <option value="MODERATE">中度</option>
+                          <option value="SEVERE">重度</option>
+                        </select>
+                      </label>
+                    )}
+                    <button
+                      className="button button--primary"
+                      disabled={isConfirmingAdjustment || !adjustmentEventType}
+                      onClick={() => void confirmExecutionAdjustment()}
+                      type="button"
+                    >
+                      {isConfirmingAdjustment
+                        ? <LoaderCircle className="spin-icon" size={15} />
+                        : <Check size={15} />}
+                      {isConfirmingAdjustment ? '正在生成候选 V2…' : '确认事件并预览 V2'}
+                    </button>
+                  </div>
+                )}
                 {executionNotice && <p><CheckCircle2 size={14} /> {executionNotice}</p>}
                 {planLifecycleError && <p className="media-error">{planLifecycleError}</p>}
               </section>

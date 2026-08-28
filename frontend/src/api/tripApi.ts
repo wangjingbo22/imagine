@@ -27,15 +27,110 @@ import type {
   TripSummary,
   TripPlanState,
 } from '../domain/trip'
-import { request } from './client'
+import type {
+  AdjustmentRecognitionSource,
+  ConfirmedExecutionAdjustmentEvent,
+  ConfirmedExecutionAdjustmentEventInput,
+  ExecutionAdjustmentDecision,
+  ExecutionAdjustmentDecisionView,
+  ExecutionAdjustmentParseInput,
+  ExecutionAdjustmentReplanPreview,
+  ExecutionAdjustmentReplanRequest,
+  ExecutionEventDraft,
+  ExecutionEventParseOutcome,
+} from '../domain/executionAdjustment'
+import { ApiError, request, requestBare } from './client'
 import { createExpenseChangeReplanRequest } from '../services/executionReplan'
 
 export const USE_PLAN_VERSION_API =
-  (import.meta.env.VITE_USE_PLAN_VERSION_API ?? 'true') === 'true'
+  (import.meta.env?.VITE_USE_PLAN_VERSION_API ?? 'true') === 'true'
 export const USE_WORKFLOW_API =
-  (import.meta.env.VITE_USE_WORKFLOW_API ?? 'true') === 'true'
+  (import.meta.env?.VITE_USE_WORKFLOW_API ?? 'true') === 'true'
+
+function isAdjustmentRecognitionSource(
+  value: string | null,
+): value is AdjustmentRecognitionSource {
+  return value === 'BAILIAN' ||
+    value === 'DETERMINISTIC_FORM' ||
+    value === 'DEGRADED_FORM'
+}
 
 export const tripApi = {
+  async parseExecutionAdjustment(
+    input: ExecutionAdjustmentParseInput,
+    organizerToken: string,
+  ): Promise<ExecutionEventParseOutcome> {
+    const response = await requestBare<ExecutionEventDraft>(
+      '/api/v1/execution-adjustments/parse',
+      {
+        method: 'POST',
+        headers: { 'X-Organizer-Token': organizerToken },
+        body: JSON.stringify(input),
+      },
+    )
+    const source = response.headers.get('X-Recognition-Source')
+    if (!isAdjustmentRecognitionSource(source)) {
+      throw new ApiError(
+        'EXECUTION_ADJUSTMENT_RECOGNITION_HEADER_INVALID',
+        '服务端没有返回有效的执行调整识别来源。',
+      )
+    }
+    return {
+      draft: response.data,
+      recognition: {
+        source,
+        model: response.headers.get('X-Recognition-Model'),
+        degradedReason: response.headers.get('X-Degraded-Reason'),
+      },
+    }
+  },
+
+  confirmExecutionAdjustment(
+    tripId: string,
+    input: ConfirmedExecutionAdjustmentEventInput,
+    organizerToken: string,
+  ) {
+    return request<ConfirmedExecutionAdjustmentEvent>(
+      `/api/v1/execution-adjustments/trips/${encodeURIComponent(tripId)}/events`,
+      {
+        method: 'POST',
+        headers: { 'X-Organizer-Token': organizerToken },
+        body: JSON.stringify(input),
+      },
+    )
+  },
+
+  previewExecutionReplan(
+    tripId: string,
+    input: ExecutionAdjustmentReplanRequest,
+    organizerToken: string,
+  ) {
+    return request<ExecutionAdjustmentReplanPreview>(
+      `/api/v1/trips/${encodeURIComponent(tripId)}/replans/from-adjustment`,
+      {
+        method: 'POST',
+        headers: { 'X-Organizer-Token': organizerToken },
+        body: JSON.stringify(input),
+      },
+    )
+  },
+
+  decideExecutionReplan(
+    tripId: string,
+    planId: string,
+    decision: ExecutionAdjustmentDecision,
+    organizerToken: string,
+  ) {
+    return request<ExecutionAdjustmentDecisionView>(
+      `/api/v1/trips/${encodeURIComponent(tripId)}/replans/${encodeURIComponent(planId)}/decision`,
+      {
+        method: 'POST',
+        headers: { 'X-Organizer-Token': organizerToken },
+        body: JSON.stringify({ schemaVersion: '1.0', decision }),
+      },
+    )
+  },
+
   createDraft(input: TripDraftParseInput) {
     return request<TripDraftParseResult>('/api/v1/trips/drafts/parse', {
       method: 'POST',
