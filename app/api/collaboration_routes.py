@@ -5,10 +5,15 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.application.collaboration_service import CollaborationService
+from app.application.trip_draft_revision_service import (
+    TripUnderstandingFallbackResponse,
+)
 from app.core.errors import AppError
 from app.domain.collaboration import (
     InvitationCreateRequest,
     InvitationRedeemRequest,
+    OrganizerConversationCreated,
+    OrganizerConversationRequest,
     ParticipantConversationRequest,
     ParticipantMutationRequest,
     ResolveConfirmationItemRequest,
@@ -52,12 +57,30 @@ def require_organizer_token(request: Request) -> str:
 
 
 @router.post("/trips/conversations")
-async def create_organizer() -> ApiResponse:
-    raise AppError(
-        code="TRIP_DRAFT_REVISION_UNAVAILABLE",
-        message="该入口等待 T002 TripDraftRevision 接力",
-        http_status=503,
-        retryable=True,
+async def create_conversation(
+    payload: OrganizerConversationRequest,
+    request: Request,
+    response: Response,
+    current: CollaborationService = Depends(service),
+) -> ApiResponse:
+    response.headers["Cache-Control"] = "no-store"
+    idempotency_key = require_idempotency_key(request)
+    outcome = await request.app.state.trip_draft_revision_creator.create_initial(
+        payload,
+        idempotency_key=idempotency_key,
+    )
+    if isinstance(outcome, TripUnderstandingFallbackResponse):
+        return ApiResponse(data=outcome)
+    revision = outcome
+    organizer_access = current.bootstrap(
+        revision=revision,
+        idempotency_key=idempotency_key,
+    )
+    return ApiResponse(
+        data=OrganizerConversationCreated(
+            revision=revision,
+            organizerAccess=organizer_access,
+        )
     )
 
 
@@ -107,8 +130,10 @@ async def member_session(
 async def submit_member(
     payload: ParticipantConversationRequest,
     request: Request,
+    response: Response,
     current: CollaborationService = Depends(service),
 ) -> ApiResponse:
+    response.headers["Cache-Control"] = "no-store"
     return ApiResponse(data=await current.submit_member(
         session_token=require_member_session(request),
         request=payload,
@@ -120,8 +145,10 @@ async def submit_member(
 async def confirm_member(
     payload: ParticipantMutationRequest,
     request: Request,
+    response: Response,
     current: CollaborationService = Depends(service),
 ) -> ApiResponse:
+    response.headers["Cache-Control"] = "no-store"
     return ApiResponse(data=current.confirm_member(
         session_token=require_member_session(request),
         request=payload,
@@ -152,8 +179,10 @@ async def confirm_organizer(
     participant_id: UUID,
     payload: ParticipantMutationRequest,
     request: Request,
+    response: Response,
     current: CollaborationService = Depends(service),
 ) -> ApiResponse:
+    response.headers["Cache-Control"] = "no-store"
     return ApiResponse(data=current.confirm_organizer(
         trip_id=trip_id,
         participant_id=participant_id,

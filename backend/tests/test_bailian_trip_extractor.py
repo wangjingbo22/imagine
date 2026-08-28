@@ -48,7 +48,7 @@ async def test_bailian_extractor_uses_openai_compatible_json_contract() -> None:
         api_key="test-key",
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         model="qwen3.7-plus",
-        timeout_seconds=5,
+        timeout_seconds=10,
         transport=httpx.MockTransport(handler),
     )
     try:
@@ -92,7 +92,7 @@ async def test_bailian_extractor_accepts_json_code_fence() -> None:
         api_key="test-key",
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         model="qwen3.7-plus",
-        timeout_seconds=5,
+        timeout_seconds=10,
         transport=httpx.MockTransport(handler),
     )
     try:

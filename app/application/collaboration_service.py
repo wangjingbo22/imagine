@@ -9,6 +9,9 @@ from app.application.collaboration_ports import (
     TripDraftRevisionUnavailable,
     TripDraftRevisionView,
 )
+from app.application.trip_draft_revision_service import (
+    TripUnderstandingFallbackResponse,
+)
 from app.core.errors import AppError
 from app.domain.collaboration import (
     ActorScope,
@@ -209,9 +212,16 @@ class CollaborationService:
         revision: TripDraftRevisionView,
         member_key: str,
         participant_id: UUID,
+        issues: tuple[CollaborationIssue, ...],
     ) -> ParticipantProgress:
         confirmation = stored.confirmations.get(participant_id)
         current_member = member_digest(revision, member_key)
+        relevant_issue = any(
+            issue.participant_id is None
+            or issue.participant_id == participant_id
+            or participant_id in issue.related_participant_ids
+            for issue in issues
+        )
         access_status = self._access_status(
             stored=stored,
             participant_id=participant_id,
@@ -219,10 +229,9 @@ class CollaborationService:
         confirmed = bool(
             confirmation
             and access_status is not ParticipantAccessStatus.REVOKED
-            and confirmation.confirmed_revision == revision.revision
-            and confirmation.confirmed_source_digest == revision.source_digest
             and confirmation.confirmed_shared_digest == shared_digest(revision)
             and confirmation.confirmed_member_digest == current_member
+            and not relevant_issue
         )
         confirmation_status = (
             ParticipantConfirmationStatus.CONFIRMED
@@ -242,6 +251,36 @@ class CollaborationService:
             confirmedRevision=(confirmation.confirmed_revision if confirmed else None),
         )
 
+    @staticmethod
+    def _source_digest_is_ready(
+        revision: TripDraftRevisionView,
+        stored: StoredCollaboration,
+    ) -> bool:
+        confirmations = tuple(stored.confirmations.values())
+        if not confirmations:
+            return False
+        if all(
+            confirmation.confirmed_source_digest == revision.source_digest
+            for confirmation in confirmations
+        ):
+            return True
+        current_shared = shared_digest(revision)
+        return (
+            any(
+                confirmation.confirmed_revision == revision.revision
+                and confirmation.confirmed_source_digest == revision.source_digest
+                for confirmation in confirmations
+            )
+            and any(
+                confirmation.confirmed_revision != revision.revision
+                for confirmation in confirmations
+            )
+            and all(
+                confirmation.confirmed_shared_digest == current_shared
+                for confirmation in confirmations
+            )
+        )
+
     def _derive(
         self,
         revision: TripDraftRevisionView,
@@ -257,6 +296,7 @@ class CollaborationService:
                 revision=revision,
                 member_key=member_key,
                 participant_id=revision.member_bindings[member_key],
+                issues=issues,
             )
             for member_key in sorted(revision.member_bindings)
         ]
@@ -264,7 +304,12 @@ class CollaborationService:
             item.confirmation_status is ParticipantConfirmationStatus.CONFIRMED
             for item in progress
         )
-        can_plan = all_confirmed and not issues and stored.current_revision == revision.revision
+        can_plan = (
+            all_confirmed
+            and not issues
+            and stored.current_revision == revision.revision
+            and self._source_digest_is_ready(revision, stored)
+        )
         digest = (
             readiness_digest(
                 revision,
@@ -352,11 +397,24 @@ class CollaborationService:
         session_token: str | None,
         request: ParticipantConversationRequest,
         idempotency_key: str,
-    ) -> MemberSessionView:
+    ) -> MemberSessionView | TripUnderstandingFallbackResponse:
         try:
             actor = self.repository.authenticate_participant(session_token)
+            is_advance_replay = self.repository.has_completed_operation(
+                actor_scope="PARTICIPANT",
+                actor_id=str(actor.participant_id),
+                operation="ADVANCE_REVISION",
+                idempotency_key=idempotency_key,
+            )
+            if not is_advance_replay:
+                stored = self.repository.get_stored(actor.trip_id)
+                if request.expected_version != stored.version:
+                    raise AppError("COLLABORATION_VERSION_STALE", "鍗忎綔鐗堟湰宸茬粡鍙樺寲", 409, False)
+                if request.base_revision != stored.current_revision:
+                    raise AppError("DRAFT_REVISION_STALE", "鑽夌鐗堟湰宸茬粡鍙樺寲", 409, False)
+                self.repository.assert_mutation_allowed(actor.trip_id)
             current = self._current(actor.trip_id)
-            if request.base_revision != current.revision:
+            if current.trip_id != actor.trip_id:
                 raise AppError("DRAFT_REVISION_STALE", "成员草稿版本已经变化", 409, False)
             try:
                 revised = await self.revisions.submit_participant_conversation(
@@ -368,11 +426,17 @@ class CollaborationService:
                 )
             except TripDraftRevisionUnavailable as error:
                 raise self._revision_error(error) from error
-            if revised.trip_id != actor.trip_id or revised.revision != current.revision + 1:
+            if isinstance(revised, TripUnderstandingFallbackResponse):
+                return revised
+            if (
+                revised.trip_id != actor.trip_id
+                or revised.revision != request.base_revision + 1
+                or revised.member_bindings != current.member_bindings
+            ):
                 raise AppError("DRAFT_REVISION_STALE", "T002 返回了非连续草稿版本", 409, False)
             self.repository.advance_revision(
                 trip_id=actor.trip_id,
-                before_revision=current.revision,
+                before_revision=request.base_revision,
                 after_revision=revised.revision,
                 expected_version=request.expected_version,
                 actor_scope="PARTICIPANT",

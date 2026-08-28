@@ -5,8 +5,9 @@ import pytest
 
 from app.api.collaboration_routes import router
 from app.application.collaboration_ports import UnavailableTripDraftRevisionPort
-from app.domain.collaboration import IssueCode, ResolveConfirmationItemRequest
+from app.domain.collaboration import IssueCode, QUESTION_IDS, ResolveConfirmationItemRequest
 from app.core.config import Settings
+from app.core.errors import AppError
 from app.infrastructure.collaboration_store import SqliteCollaborationRepository
 from app.main import create_app
 from backend.tests.s2_t003_support import (
@@ -38,6 +39,135 @@ def test_collaboration_route_table_contains_only_scoped_frozen_paths() -> None:
     assert expected <= paths
     assert not any("{token}" in path for path, _ in paths)
     assert not any("/conflicts/" in path for path, _ in paths)
+
+
+@pytest.mark.asyncio
+async def test_organizer_confirm_success_and_replay_responses_are_no_store(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    app = create_app(
+        settings=Settings(
+            amap_web_service_key="test-amap",
+            amap_cache_db_path=tmp_path / "amap.sqlite3",
+            plan_version_db_path=tmp_path / "plan.sqlite3",
+        ),
+        collaboration_repository=harness.repository,
+        trip_draft_revision_port=harness.revisions,
+    )
+    participant_id = harness.revision.member_bindings["member-1"]
+    path = (
+        f"/api/v2/trips/{harness.revision.trip_id}/participants/"
+        f"{participant_id}/confirm"
+    )
+    payload = {
+        "schemaVersion": "1.0",
+        "baseRevision": 1,
+        "expectedVersion": 3,
+    }
+    headers = {
+        "X-Organizer-Token": harness.organizer_token,
+        "Idempotency-Key": "d020-organizer-confirm",
+    }
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        first = await client.post(path, headers=headers, json=payload)
+        replay = await client.post(path, headers=headers, json=payload)
+
+    assert first.status_code == replay.status_code == 200
+    assert first.headers["Cache-Control"] == "no-store"
+    assert replay.headers["Cache-Control"] == "no-store"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "target", "method", "payload", "headers"),
+    [
+        (
+            "/api/v2/trips/conversations",
+            "trip_draft_revision_creator",
+            "create_initial",
+            {
+                "schemaVersion": "1.0",
+                "referenceDate": "2026-08-27",
+                "naturalLanguageRequest": "busy",
+                "answers": [
+                    {"questionId": question_id, "answer": "busy"}
+                    for question_id in QUESTION_IDS
+                ],
+            },
+            {"Idempotency-Key": "d020-organizer-conversation"},
+        ),
+        (
+            "/api/v2/member-session/conversation",
+            "collaboration_service",
+            "submit_member",
+            {
+                "schemaVersion": "1.0",
+                "baseRevision": 1,
+                "expectedVersion": 1,
+                "naturalLanguageRequest": "busy",
+                "answers": [
+                    {"questionId": question_id, "answer": "busy"}
+                    for question_id in QUESTION_IDS
+                ],
+            },
+            {
+                "X-Participant-Session": "session-for-test",
+                "Idempotency-Key": "d020-member-conversation",
+            },
+        ),
+        (
+            "/api/v2/trips/30000000-0000-4000-8000-000000000001/participants/"
+            "10000000-0000-4000-8000-000000000001/confirm",
+            "collaboration_service",
+            "confirm_organizer",
+            {"schemaVersion": "1.0", "baseRevision": 1, "expectedVersion": 1},
+            {
+                "X-Organizer-Token": "organizer-for-test",
+                "Idempotency-Key": "d020-organizer-confirm-error",
+            },
+        ),
+    ],
+)
+async def test_conversation_and_confirm_in_progress_errors_are_no_store(
+    tmp_path,
+    monkeypatch,
+    path,
+    target,
+    method,
+    payload,
+    headers,
+) -> None:
+    app = create_app(
+        settings=Settings(
+            amap_web_service_key="test-amap",
+            amap_cache_db_path=tmp_path / "amap.sqlite3",
+            plan_version_db_path=tmp_path / "plan.sqlite3",
+        ),
+        trip_draft_revision_port=UnavailableTripDraftRevisionPort(),
+    )
+
+    def fail_in_progress(*args, **kwargs):
+        raise AppError(
+            "COLLABORATION_OPERATION_IN_PROGRESS",
+            "operation is already in progress",
+            409,
+            True,
+        )
+
+    monkeypatch.setattr(getattr(app.state, target), method, fail_in_progress)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.request("POST" if method != "submit_member" else "PUT", path, headers=headers, json=payload)
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "COLLABORATION_OPERATION_IN_PROGRESS"
+    assert response.headers["Cache-Control"] == "no-store"
 
 
 @pytest.mark.asyncio
