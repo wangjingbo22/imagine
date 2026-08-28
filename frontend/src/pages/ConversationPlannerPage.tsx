@@ -123,6 +123,11 @@ export function ConversationPlannerPage() {
         body: JSON.stringify({ schemaVersion: '1.0', referenceDate: new Date().toISOString().slice(0, 10), naturalLanguageRequest: description, answers: questions.map(([questionId], index) => ({ questionId, answer: answers[index] })) }),
       })
       if (!created.data.revision || !created.data.organizerAccess?.organizerToken) {
+        const fallback = created.data.fallback
+        if (fallback?.mode === 'FIXED_QUESTIONS') {
+          setError('智能识别暂不可用，已保留六个回答。请在配置百炼后重试，或继续逐项核对并补充信息。')
+          return
+        }
         throw new Error('需求尚未被解析为可创建的行程，请补全六个问题后重试。')
       }
       const revision = created.data.revision
