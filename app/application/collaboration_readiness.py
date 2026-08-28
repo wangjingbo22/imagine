@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Iterator
@@ -68,6 +69,10 @@ class SqliteCollaborationReadinessGuard:
             return
         if flow is not TripFlowKind.COLLABORATION_V2:
             raise self._unknown_flow(access.trip_id)
+        revision = self.collaboration.ready_revision(
+            access.trip_id,
+            access.organizer_capability,
+        )
         digest = self.collaboration.require_ready(
             access.trip_id,
             access.organizer_capability,
@@ -78,7 +83,33 @@ class SqliteCollaborationReadinessGuard:
             ttl=self.lease_ttl,
         )
         try:
-            yield permit
+            # A collaboration mutation can race between the initial readiness
+            # check and lease acquisition.  Once the lease exists, mutations
+            # are blocked; re-reading here binds the permit to that exact ready
+            # revision or fails before any Provider/planner/state call.
+            leased_revision = self.collaboration.ready_revision(
+                access.trip_id,
+                access.organizer_capability,
+            )
+            leased_digest = self.collaboration.require_ready(
+                access.trip_id,
+                access.organizer_capability,
+            )
+            if (
+                leased_digest != digest
+                or leased_revision.revision != revision.revision
+            ):
+                raise AppError(
+                    "COLLABORATION_READY_CONTEXT_STALE",
+                    "协作需求在规划操作开始前已变化，请重新生成候选",
+                    409,
+                    False,
+                )
+            yield replace(
+                permit,
+                readiness_digest=leased_digest,
+                current_revision=leased_revision.revision,
+            )
         finally:
             self.repository.complete_lease(permit.operation_id)
 

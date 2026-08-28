@@ -300,15 +300,18 @@ src/api/tripContract.ts
 ## 11. 执行中迟到/疲劳草稿与临时约束
 
 - `POST /api/v1/execution-adjustments/parse`：输入 `rawText/taskId/currentTask`，只返回 `LATE | FATIGUE` 零写入草稿或固定确认问题。百炼超过 10 秒、输出非法或未配置时降级为固定表单。
+- `POST /api/v1/execution-adjustments/trips/{tripId}/events`：用户确认后保存 LATE/FATIGUE 事件；必须携带 CURRENT `planVersionId`、稳定 `idempotencyKey` 和带时区 `occurredAt`。
+- `GET /api/v1/execution-adjustments/trips/{tripId}/events`：恢复服务端已确认事件；同键同内容幂等，同键不同内容冲突。
 - `POST /api/v1/execution-adjustments/compile`：只接受 `confirmationStatus=CONFIRMED`，确定性返回临时 `EventConstraintSet` 和可见原因。
 
 这两个接口都不会写现有 `/trips/{tripId}/events`、长期关怀画像或 PlanVersion。T023 页面可以消费草稿和原因；真正生成 V2 由 T021 使用服务端可信 CURRENT/任务事实重新编译。
 
 ## 12. 执行中迟到/疲劳重规划与 Diff
 
-- `POST /api/v1/trips/{tripId}/replans/from-adjustment`：提交已确认的 `LATE | FATIGUE` 事件、锁定任务 ID 与是否请求解释。客户端不得提交候选、事实、约束 PASS 或 planId；服务端恢复 `CURRENT V1` 和可信规划事实，冻结前缀并重验预算、时间、路线、关怀和瞬时 HARD。
+- `POST /api/v1/trips/{tripId}/replans/from-adjustment`：提交服务端返回的 `adjustmentEventId`、与之完全一致的已确认事件、锁定任务 ID 与是否请求解释。客户端不得提交候选、事实、约束 PASS 或 planId；服务端恢复 `CURRENT V1` 和可信规划事实，冻结前缀并重验预算、时间、路线、关怀和瞬时 HARD。
 - 成功响应返回 `candidatePlan + diff + eventConstraints + derivedContext + frozenTaskIds + validationReport + explanation`。候选接受前不会替换 `CURRENT`。
 - `POST /api/v1/trips/{tripId}/replans/{planId}/decision`：请求 `{schemaVersion:"1.0", decision:"ACCEPT"|"REJECT"}`。接受原子切换唯一 CURRENT；拒绝保留原计划。
+- 预览会绑定当时的 `readinessDigest/currentRevision`；成员资料变化后旧候选决策会失败。迟到/疲劳候选不能改用通用 V2 accept/reject 绕过此检查。
 - 百炼解释是可选展示字段。`UNAVAILABLE` 只表示解释降级，页面仍必须使用完整结构化候选和 Diff；不得根据解释文案改写任务、价格或状态。
 - 协作 Trip 调用以上接口必须继续携带 `X-Organizer-Token`。S2-T023 页面尚未在本次后端交付中实现。
 

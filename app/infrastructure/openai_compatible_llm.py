@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -69,21 +70,25 @@ class OpenAiCompatibleCandidateSelectionClient:
             ],
         }
         try:
-            response = await self._client.post(
-                "/chat/completions",
-                headers=self._headers,
-                json=payload,
-            )
-            response.raise_for_status()
-            body = response.json()
-            content = body["choices"][0]["message"]["content"]
-            if not isinstance(content, str):
-                raise TypeError("message content is not text")
-            return content
-        except httpx.TimeoutException as error:
+            # httpx applies timeouts to individual I/O phases.  The outer
+            # deadline makes the complete one-shot model interaction obey the
+            # same eight-to-twelve-second budget, including response parsing.
+            async with asyncio.timeout(self.timeout_seconds):
+                response = await self._client.post(
+                    "/chat/completions",
+                    headers=self._headers,
+                    json=payload,
+                )
+                response.raise_for_status()
+                body = response.json()
+                content = body["choices"][0]["message"]["content"]
+                if not isinstance(content, str):
+                    raise TypeError("message content is not text")
+                return content
+        except (httpx.TimeoutException, TimeoutError) as error:
             raise CandidateSelectionTransportError(
                 "LLM_TIMEOUT",
-                retryable=True,
+                retryable=False,
             ) from error
         except httpx.HTTPStatusError as error:
             status = error.response.status_code
@@ -94,12 +99,12 @@ class OpenAiCompatibleCandidateSelectionClient:
                 ) from error
             raise CandidateSelectionTransportError(
                 "LLM_UNAVAILABLE",
-                retryable=status == 429 or status >= 500,
+                retryable=False,
             ) from error
         except httpx.HTTPError as error:
             raise CandidateSelectionTransportError(
                 "LLM_UNAVAILABLE",
-                retryable=True,
+                retryable=False,
             ) from error
         except (KeyError, IndexError, TypeError, ValueError) as error:
             raise CandidateSelectionTransportError(

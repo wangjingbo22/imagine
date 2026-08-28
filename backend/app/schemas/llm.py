@@ -246,7 +246,7 @@ class CandidateSelectionGatewayResult(ContractModel):
     decision: Literal["MODEL_PROPOSAL", "DETERMINISTIC_ENUMERATION"]
     proposal: ProviderCandidateSelectionProposal | None
     failure_code: CandidateSelectionFailureCode | None
-    call_count: Annotated[int, Field(ge=0, le=2)]
+    call_count: Annotated[int, Field(ge=0, le=1)]
     model: ShortText | None = None
 
     @model_validator(mode="after")

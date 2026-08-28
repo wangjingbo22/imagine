@@ -93,6 +93,11 @@ class ExecutionEventDraftService:
             )
         except ExecutionEventDraftExtractionError as error:
             return self._degraded(request, error.code)
+        except Exception:
+            # asyncio cancellation inherits BaseException and is deliberately
+            # not swallowed. Every ordinary adapter/provider failure still
+            # degrades to the fixed deterministic confirmation form.
+            return self._degraded(request, "BAILIAN_EXECUTION_FAILED")
 
     @staticmethod
     def _degraded(

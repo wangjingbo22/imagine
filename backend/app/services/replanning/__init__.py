@@ -25,14 +25,17 @@ from .selector import (
     RULE_VALIDATION_COVERAGE_PREFIX,
 )
 from .suffix_planner import (
+    DeterministicEventAwareSuffixPlanner,
     DeterministicRetainedSuffixPlanner,
     SuffixPlanner,
+    SuffixPlanningError,
     SuffixPlanningInput,
 )
 
 
 __all__ = [
     "CandidateAssessment",
+    "DeterministicEventAwareSuffixPlanner",
     "DeterministicRetainedSuffixPlanner",
     "MinimumDisruptionReplanningService",
     "MinimumDisruptionSelector",
@@ -56,5 +59,6 @@ __all__ = [
     "RULE_VALIDATION_COVERAGE_PREFIX",
     "SelectedReplan",
     "SuffixPlanner",
+    "SuffixPlanningError",
     "SuffixPlanningInput",
 ]

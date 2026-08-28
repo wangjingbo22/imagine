@@ -44,7 +44,10 @@ from app.application.execution_replan_service import (
 )
 from app.application.planning_boundary_service import PlanningBoundaryService
 from app.application.plan_service import PlanVersionService
-from app.application.recommendation_service import RecommendationOrchestrationService
+from app.application.recommendation_service import (
+    RecommendationOrchestrationService,
+    RouteCandidateBuilderPort,
+)
 from app.application.trip_draft_service import TripDraftParserService
 from app.application.workflow_service import WorkflowService
 from app.core.config import Settings, get_settings
@@ -165,6 +168,7 @@ def create_app(
     planning_boundary_service: PlanningBoundaryService | None = None,
     recommendation_service: RecommendationOrchestrationService | None = None,
     provider_fact_registry: SqliteProviderFactRegistry | None = None,
+    route_candidate_builder: RouteCandidateBuilderPort | None = None,
     suffix_planner: SuffixPlanner | None = None,
     candidate_selection_gateway: CandidateSelectionGateway | None = None,
     execution_event_draft_service: ExecutionEventDraftService | None = None,
@@ -283,6 +287,18 @@ def create_app(
             candidate_timeout_seconds=resolved_settings.bailian_candidate_timeout_seconds,
         )
     )
+    resolved_provider_fact_registry = (
+        provider_fact_registry
+        or SqliteProviderFactRegistry(resolved_settings.plan_version_db_path)
+    )
+
+    if recommendation_service is None:
+        recommendation_service = RecommendationOrchestrationService(
+            fact_registry=resolved_provider_fact_registry,
+            route_builder=route_candidate_builder,
+            readiness_guard=resolved_readiness_guard,
+            candidate_selection_gateway=candidate_selection_gateway,
+        )
 
     if planning_boundary_service is None and isinstance(
         plan_service,
@@ -462,10 +478,7 @@ def create_app(
         ),
     )
     app.state.planning_boundary_service = planning_boundary_service
-    app.state.provider_fact_registry = (
-        provider_fact_registry
-        or SqliteProviderFactRegistry(resolved_settings.plan_version_db_path)
-    )
+    app.state.provider_fact_registry = resolved_provider_fact_registry
     app.state.recommendation_service = recommendation_service
     app.include_router(arrival_decision_router)
     app.include_router(arrival_evidence_router)

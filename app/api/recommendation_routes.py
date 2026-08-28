@@ -11,7 +11,6 @@ from app.application.recommendation_service import (
     ProviderFactRestoreError,
     RecommendationOrchestrationError,
     RecommendationOrchestrationService,
-    TrustedRecommendationService,
 )
 from app.core.errors import AppError
 from app.domain.models import ApiResponse
@@ -127,6 +126,10 @@ async def recommendations(trip_id: UUID, request: Request) -> ApiResponse:
     collaboration = request.app.state.collaboration_service
     with guard.operation(access):
         revision = collaboration.ready_revision(trip_id, organizer_token)
+        # Resolve the shared v1/v2 orchestrator only after the authoritative
+        # collaboration check, so an unavailable T002 revision still stops all
+        # Provider/model calls with its original error.
+        orchestration = get_recommendation_service(request)
         trip = revision.understanding.trip
         city = await request.app.state.location_service.resolve_city(
             trip.city_name or ""
@@ -146,28 +149,42 @@ async def recommendations(trip_id: UUID, request: Request) -> ApiResponse:
             FactRef(factRefId=f"AMAP:{place.placeId}", place=place)
             for place in places.places
         ]
-        service = TrustedRecommendationService()
-        candidates = service.issue_candidates(
-            facts,
-            interests=interests,
-            must_visit=must_visit,
-            avoid_places=avoid_places,
-        )
-        ranked = service.rank(candidates, None)
-        return ApiResponse(
-            data=service.choose_single_plan(
-                ranked,
-                facts,
-                [
-                    MemberPreference(
-                        participant_id=str(revision.member_bindings[item.member_key]),
-                        interests=tuple(item.interests),
-                        must_visit=tuple(item.must_visit),
-                    )
-                    for item in members
-                ],
+        member_preferences = [
+            MemberPreference(
+                participant_id=str(revision.member_bindings[item.member_key]),
+                interests=tuple(item.interests),
+                must_visit=tuple(item.must_visit),
             )
-        )
+            for item in members
+        ]
+        care_need_labels = [
+            label
+            for item in members
+            if item.care_draft is not None
+            for label in (
+                item.care_draft.assistance_type_hint,
+                "避开楼梯" if item.care_draft.avoid_stairs else None,
+            )
+            if label is not None
+        ]
+        try:
+            bundle = await orchestration.recommend_preview_from_provider_facts(
+                trip_id=trip_id,
+                facts=facts,
+                city_code=city.cityContext.city_code,
+                interests=interests,
+                must_visit=must_visit,
+                avoid_places=avoid_places,
+                care_need_labels=care_need_labels,
+                members=member_preferences,
+            )
+        except RecommendationOrchestrationError as error:
+            raise AppError(
+                code=error.code,
+                message=error.message,
+                http_status=error.http_status,
+            ) from error
+        return ApiResponse(data=bundle)
 
 
 __all__ = ["router"]

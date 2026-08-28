@@ -53,22 +53,26 @@ class CandidateSelectionGateway(Protocol):
 
 
 class StrictCandidateSelectionGateway:
-    """Validate one model proposal and otherwise request deterministic fallback.
+    """Validate exactly one model proposal or request deterministic fallback.
 
-    Only retryable transport failures may be attempted once more.  JSON,
-    schema, semantic and allowlist failures never trigger a model repair call.
+    S2 deliberately has no model repair or transport-retry loop at this
+    boundary.  A timeout, provider error, invalid JSON, schema violation or
+    allowlist violation therefore consumes at most one model call before the
+    deterministic enumerator takes over.
     """
 
     def __init__(
         self,
         client: CandidateSelectionModelClient,
         *,
-        max_transport_attempts: int = 2,
+        max_transport_attempts: int = 1,
     ) -> None:
-        if max_transport_attempts not in {1, 2}:
-            raise ValueError("maxTransportAttempts must be 1 or 2")
+        # Keep the keyword for source compatibility with callers that already
+        # construct the gateway explicitly, but fail closed instead of silently
+        # re-enabling the retired retry behavior.
+        if max_transport_attempts != 1:
+            raise ValueError("maxTransportAttempts is fixed to 1")
         self._client = client
-        self._max_transport_attempts = max_transport_attempts
 
     async def select(
         self,
@@ -76,88 +80,79 @@ class StrictCandidateSelectionGateway:
     ) -> CandidateSelectionGatewayResult:
         trusted_request = _strict_request(request)
         digest = _request_digest(trusted_request)
-        call_count = 0
-
-        while call_count < self._max_transport_attempts:
-            call_count += 1
-            try:
-                raw = await self._client.propose_candidate_selection(
-                    trusted_request
-                )
-            except CandidateSelectionTransportError as error:
-                if error.retryable and call_count < self._max_transport_attempts:
-                    continue
-                return _fallback(
-                    request=trusted_request,
-                    request_digest=digest,
-                    failure_code=error.code,
-                    call_count=call_count,
-                    model=self._client.model,
-                )
-            except Exception as error:
-                logger.warning(
-                    "candidate selection client failed with %s",
-                    type(error).__name__,
-                )
-                return _fallback(
-                    request=trusted_request,
-                    request_digest=digest,
-                    failure_code="LLM_UNAVAILABLE",
-                    call_count=call_count,
-                    model=self._client.model,
-                )
-
-            try:
-                proposal = ProviderCandidateSelectionProposal.model_validate_json(
-                    raw,
-                    strict=True,
-                )
-            except ValidationError as error:
-                failure_code: CandidateSelectionFailureCode = (
-                    "LLM_INVALID_JSON"
-                    if any(item["type"] == "json_invalid" for item in error.errors())
-                    else "LLM_SCHEMA_INVALID"
-                )
-                return _fallback(
-                    request=trusted_request,
-                    request_digest=digest,
-                    failure_code=failure_code,
-                    call_count=call_count,
-                    model=self._client.model,
-                )
-
-            allowed_ids = {
-                item.place_fact_id for item in trusted_request.candidate_facts
-            }
-            if not set(proposal.selected_place_fact_ids) <= allowed_ids:
-                return _fallback(
-                    request=trusted_request,
-                    request_digest=digest,
-                    failure_code="LLM_OUT_OF_ALLOWLIST",
-                    call_count=call_count,
-                    model=self._client.model,
-                )
-
-            if not _proposal_is_grounded(trusted_request, proposal):
-                return _fallback(
-                    request=trusted_request,
-                    request_digest=digest,
-                    failure_code="LLM_SCHEMA_INVALID",
-                    call_count=call_count,
-                    model=self._client.model,
-                )
-
-            return CandidateSelectionGatewayResult(
-                trace_id=trusted_request.trace_id,
+        call_count = 1
+        try:
+            raw = await self._client.propose_candidate_selection(trusted_request)
+        except CandidateSelectionTransportError as error:
+            return _fallback(
+                request=trusted_request,
                 request_digest=digest,
-                decision="MODEL_PROPOSAL",
-                proposal=proposal,
-                failure_code=None,
+                failure_code=error.code,
+                call_count=call_count,
+                model=self._client.model,
+            )
+        except Exception as error:
+            logger.warning(
+                "candidate selection client failed with %s",
+                type(error).__name__,
+            )
+            return _fallback(
+                request=trusted_request,
+                request_digest=digest,
+                failure_code="LLM_UNAVAILABLE",
                 call_count=call_count,
                 model=self._client.model,
             )
 
-        raise AssertionError("candidate selection loop must return")
+        try:
+            proposal = ProviderCandidateSelectionProposal.model_validate_json(
+                raw,
+                strict=True,
+            )
+        except ValidationError as error:
+            failure_code: CandidateSelectionFailureCode = (
+                "LLM_INVALID_JSON"
+                if any(item["type"] == "json_invalid" for item in error.errors())
+                else "LLM_SCHEMA_INVALID"
+            )
+            return _fallback(
+                request=trusted_request,
+                request_digest=digest,
+                failure_code=failure_code,
+                call_count=call_count,
+                model=self._client.model,
+            )
+
+        allowed_ids = {
+            item.place_fact_id for item in trusted_request.candidate_facts
+        }
+        if not set(proposal.selected_place_fact_ids) <= allowed_ids:
+            return _fallback(
+                request=trusted_request,
+                request_digest=digest,
+                failure_code="LLM_OUT_OF_ALLOWLIST",
+                call_count=call_count,
+                model=self._client.model,
+            )
+
+        if not _proposal_is_grounded(trusted_request, proposal):
+            return _fallback(
+                request=trusted_request,
+                request_digest=digest,
+                failure_code="LLM_SCHEMA_INVALID",
+                call_count=call_count,
+                model=self._client.model,
+            )
+
+        return CandidateSelectionGatewayResult(
+            trace_id=trusted_request.trace_id,
+            request_digest=digest,
+            decision="MODEL_PROPOSAL",
+            proposal=proposal,
+            failure_code=None,
+            call_count=call_count,
+            model=self._client.model,
+        )
 
 
 class UnavailableLlmGateway:
