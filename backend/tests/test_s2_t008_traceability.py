@@ -36,7 +36,7 @@ def test_s2_t008_maps_pbi_ac_task_to_real_evidence() -> None:
     assert task["owner"] == "林粲涵"
     assert task["priority"] == "Must"
     assert task["plannedDay"] == "Day1"
-    assert task["estimateHours"] == 3
+    assert task["remainingHours"] == 0
     assert task["status"] == "IMPLEMENTED_WITH_EXTERNAL_ROUTE_BUILDER_PENDING"
     assert task["dependsOn"] == ["S2-T006"]
     assert task["consumedBy"] == ["S2-T009"]
@@ -227,5 +227,5 @@ def test_local_verification_records_the_actual_acceptance_run() -> None:
         "fullResult": "528 passed",
         "frontendTest": "npm test: 32 passed",
         "frontendBuild": "npm run build passed",
-        "frontendLint": "npm run lint passed",
+        "frontendLint": "npm run lint passed with 2 existing warnings",
     }

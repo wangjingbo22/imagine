@@ -79,6 +79,7 @@ def test_task_dependencies_and_day2_evidence_paths_are_machine_resolvable() -> N
         assert task["deliveryDay"] == "Day2"
         assert task["pbiId"] == "PBI-11-B"
         assert task["acceptanceCriteriaId"] == "AC-11-B"
+        assert task["remainingHours"] == 0
         assert task["status"] == "VERIFIED"
         for path in _evidence_paths(task):
             assert (ROOT / path).is_file(), path
@@ -186,5 +187,5 @@ def test_verification_is_pending_or_contains_real_final_results() -> None:
         assert verification["backendResult"] == "528 passed"
         assert verification["frontendTest"] == "32 passed"
         assert verification["frontendBuild"] == "PASS"
-        assert verification["frontendLint"] == "PASS"
+        assert verification["frontendLint"] == "PASS_WITH_2_EXISTING_WARNINGS"
         assert verification["diffCheck"] == "PASS"

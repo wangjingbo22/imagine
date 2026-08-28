@@ -135,7 +135,7 @@ def test_verification_and_required_acceptance_artifacts_are_locked() -> None:
     assert verification["backendResult"] == "528 passed"
     assert verification["frontendTest"] == "32 passed"
     assert verification["frontendBuild"] == "PASS"
-    assert verification["frontendLint"] == "PASS"
+    assert verification["frontendLint"] == "PASS_WITH_2_EXISTING_WARNINGS"
     assert verification["diffCheck"] == "PASS"
 
     tasks = {task["taskId"]: task for task in trace["tasks"]}

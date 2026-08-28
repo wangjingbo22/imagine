@@ -240,6 +240,14 @@ async def test_confirmed_adjustment_event_requires_current_plan_and_timezone(
             transport=httpx.ASGITransport(app=app),
             base_url="http://testserver",
         ) as client:
+            missing_occurred_at = await client.post(
+                endpoint,
+                json={
+                    key: value
+                    for key, value in payload.items()
+                    if key != "occurredAt"
+                },
+            )
             naive = await client.post(endpoint, json=payload)
             wrong_plan = await client.post(
                 endpoint,
@@ -251,6 +259,7 @@ async def test_confirmed_adjustment_event_requires_current_plan_and_timezone(
                 },
             )
 
+    assert missing_occurred_at.status_code == 422, missing_occurred_at.text
     assert naive.status_code == 422, naive.text
     assert wrong_plan.status_code == 409, wrong_plan.text
     assert wrong_plan.json()["code"] == "EVENT_PLAN_NOT_CURRENT"

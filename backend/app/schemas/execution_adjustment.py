@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import Enum
 from typing import Annotated, Literal
 
@@ -168,7 +168,7 @@ class CreateConfirmedExecutionAdjustmentEvent(ConfirmedExecutionAdjustment):
 
     plan_version_id: UUID4
     idempotency_key: Annotated[str, Field(min_length=1, max_length=160)]
-    occurred_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    occurred_at: datetime
 
     @model_validator(mode="after")
     def occurred_at_must_be_aware(self) -> "CreateConfirmedExecutionAdjustmentEvent":

@@ -24,7 +24,7 @@
     "owner": "林粲涵",
     "priority": "Must",
     "plannedDay": "Day1",
-    "estimateHours": 3,
+    "remainingHours": 0,
     "status": "IMPLEMENTED_WITH_EXTERNAL_ROUTE_BUILDER_PENDING",
     "dependsOn": ["S2-T006"],
     "consumedBy": ["S2-T009"],
@@ -192,7 +192,7 @@
     "fullResult": "528 passed",
     "frontendTest": "npm test: 32 passed",
     "frontendBuild": "npm run build passed",
-    "frontendLint": "npm run lint passed"
+    "frontendLint": "npm run lint passed with 2 existing warnings"
   },
   "externalEvidence": {
     "pullRequest": null,

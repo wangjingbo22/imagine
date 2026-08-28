@@ -1,6 +1,6 @@
 # 林粲涵 Sprint 2 Day 1 代码追溯
 
-本交付对应 `S2-T008 / PBI-08-A / AC-08-A`。需求口径来自 `doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx` 的 `SprintBacklog模板!A12:V12`、`LLM接入设计!A6:K6` 与 `LLM JSON契约!A5:K5`。
+本交付对应 `S2-T008 / PBI-08-A / AC-08-A`（Must；修订表当前剩余工时为 0h）。需求口径来自 `doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx` 的 `SprintBacklog模板!A12:V12`、`LLM接入设计!A6:K6` 与 `LLM JSON契约!A5:K5`。
 
 实现提交为 `f376574a5c8c5c577d6ed43efd200293023b3b32`，核对基线为 `origin/main@a43ad37a5c8b97d2b90507fa9966998bfee038b9`。机器可读追溯见 `lin_canhan_s2_t008_day1.json`；同一负责人的 S2-T019/T020 追溯见 `lin_canhan_day1.json`。
 

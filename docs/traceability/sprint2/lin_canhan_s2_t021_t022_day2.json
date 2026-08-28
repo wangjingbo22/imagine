@@ -42,7 +42,7 @@
       "owner": "林粲涵",
       "deliveryDay": "Day2",
       "priority": "Must",
-      "estimateHours": 3,
+      "remainingHours": 0,
       "status": "VERIFIED",
       "dependsOn": ["S2-T005", "S2-T006", "S2-T019", "S2-T020"],
       "consumes": [
@@ -107,7 +107,7 @@
       "owner": "林粲涵",
       "deliveryDay": "Day2",
       "priority": "Must",
-      "estimateHours": 3,
+      "remainingHours": 0,
       "status": "VERIFIED",
       "dependsOn": ["S2-T005", "S2-T021"],
       "consumes": [
@@ -299,7 +299,7 @@
     "diffCheck": "PASS",
     "frontendTest": "32 passed",
     "frontendBuild": "PASS",
-    "frontendLint": "PASS",
+    "frontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
     "onlineE2E": "NOT_RUN_NOT_CLAIMED"
   },
   "securityFix": {

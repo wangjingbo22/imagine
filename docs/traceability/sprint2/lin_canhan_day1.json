@@ -166,7 +166,7 @@
     "backendResult": "528 passed",
     "frontendTest": "32 passed",
     "frontendBuild": "PASS",
-    "frontendLint": "PASS",
+    "frontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
     "diffCheck": "PASS"
   },
   "productDecisionsStillNeeded": [

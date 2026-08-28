@@ -6,7 +6,7 @@
 - PBI / AC：`PBI-11-B` / `AC-11-B`
 - 验证基线：远端 `main` 的 `a43ad37a5c8b97d2b90507fa9966998bfee038b9`
 - 实现提交：`f376574a5c8c5c577d6ed43efd200293023b3b32`
-- Day 2：`S2-T021`（3h，Must）和 `S2-T022`（3h，Must）
+- Day 2：`S2-T021` 与 `S2-T022`（均为 Must；修订表当前剩余工时均为 0h）
 - 需求文件：`doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx`
 - 需求范围：`SprintBacklog模板!A25:V26`、`PBI追溯!A11:J11`、`LLM接入设计!A7:K7`、`用户功能验收清单!A12:J13`
 - 机器可读追溯：`docs/traceability/sprint2/lin_canhan_s2_t021_t022_day2.json`
