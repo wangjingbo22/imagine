@@ -697,14 +697,14 @@ export function WorkspacePage() {
       return
     }
     setIsLocating(true); setArrivalMessage('正在进行一次定位…')
-    const attempt = await new Promise<GeolocationPosition | null>((resolve) => navigator.geolocation.getCurrentPosition(resolve, () => resolve(null), { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 }))
+    const attempt = await new Promise<{ position: GeolocationPosition | null; outcome: 'EVIDENCE' | 'PERMISSION_DENIED' | 'TIMEOUT' }>((resolve) => navigator.geolocation.getCurrentPosition((position) => resolve({ position, outcome: 'EVIDENCE' }), (error) => resolve({ position: null, outcome: error.code === error.TIMEOUT ? 'TIMEOUT' : 'PERMISSION_DENIED' }), { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 }))
     try {
-      if (!attempt) {
-        const decision = await tripApi.decideArrival(tripId, { schemaVersion: '1.0', taskId: currentTask.id, targetLocation: target, attemptOutcome: 'PERMISSION_DENIED', source: 'WEB_GEOLOCATION' })
+      if (!attempt.position) {
+        const decision = await tripApi.decideArrival(tripId, { schemaVersion: '1.0', taskId: currentTask.id, targetLocation: target, attemptOutcome: attempt.outcome, source: 'WEB_GEOLOCATION' })
         setArrivalMessage(decision.data.message)
         return
       }
-      const evidence = await tripApi.saveArrivalEvidence(tripId, { schemaVersion: '1.0', taskId: currentTask.id, locationEvidence: { longitude: attempt.coords.longitude, latitude: attempt.coords.latitude, accuracy: attempt.coords.accuracy, capturedAt: new Date(attempt.timestamp).toISOString(), source: 'WEB_GEOLOCATION' }, idempotencyKey: `arrival-${crypto.randomUUID()}` })
+      const evidence = await tripApi.saveArrivalEvidence(tripId, { schemaVersion: '1.0', taskId: currentTask.id, locationEvidence: { longitude: attempt.position.coords.longitude, latitude: attempt.position.coords.latitude, accuracy: attempt.position.coords.accuracy, capturedAt: new Date(attempt.position.timestamp).toISOString(), source: 'WEB_GEOLOCATION' }, idempotencyKey: `arrival-${crypto.randomUUID()}` })
       const decision = await tripApi.decideArrival(tripId, { schemaVersion: '1.0', taskId: currentTask.id, targetLocation: target, attemptOutcome: 'EVIDENCE', source: 'WEB_GEOLOCATION', arrivalEvidenceId: evidence.data.evidenceId })
       setArrivalMessage(decision.data.message)
     } catch (error) { setArrivalMessage(error instanceof Error ? error.message : '定位判断失败，可改为手动确认。') }
