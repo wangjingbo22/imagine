@@ -167,6 +167,13 @@ class PlanningBoundaryService:
         return normalize("NFKC", value).strip().casefold()
 
     @classmethod
+    def _projection_city_name(cls, value: str) -> str:
+        normalized = cls._projection_text(value)
+        if len(normalized) > 1 and normalized.endswith("市"):
+            return normalized[:-1]
+        return normalized
+
+    @classmethod
     def _projection_time(cls, value: object) -> str:
         if hasattr(value, "strftime"):
             return value.strftime("%H:%M")
@@ -239,7 +246,7 @@ class PlanningBoundaryService:
         return {
             "tripId": str(revision.trip_id),
             "mode": "SINGLE" if len(participants) == 1 else "GROUP",
-            "cityName": cls._projection_text(trip.city_name or ""),
+            "cityName": cls._projection_city_name(trip.city_name or ""),
             "date": trip.travel_date.isoformat() if trip.travel_date else None,
             "time": {
                 "start": cls._projection_time(trip.start_time),
@@ -284,7 +291,7 @@ class PlanningBoundaryService:
         return {
             "tripId": str(trip.trip_id),
             "mode": trip.mode.value,
-            "cityName": cls._projection_text(trip.city_context.city_name),
+            "cityName": cls._projection_city_name(trip.city_context.city_name),
             "date": trip.start_date.isoformat(),
             "time": {
                 "start": cls._projection_time(day.time_window.start),

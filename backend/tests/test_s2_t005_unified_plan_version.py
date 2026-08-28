@@ -1388,6 +1388,27 @@ def test_direct_collaboration_v1_city_mismatch_stops_planner_and_state(monkeypat
     assert stage_calls == 0
 
 
+def test_planning_projection_accepts_city_administrative_suffix_alias() -> None:
+    request = _request_for_shape("SINGLE", 1)
+    revision = _revision_for_request(request)
+    revision.understanding.trip.city_name = "北京"
+    alias_request = request.model_copy(update={
+        "trip": request.trip.model_copy(update={
+            "city_context": request.trip.city_context.model_copy(
+                update={"city_name": "北京市"}
+            )
+        })
+    })
+    boundary = _boundary()
+
+    paths = boundary._projection_mismatch_paths(
+        boundary._revision_planning_projection(revision),
+        boundary._request_planning_projection(alias_request),
+    )
+
+    assert "cityName" not in paths
+
+
 def test_planning_projection_exposes_city_name_mismatch_path() -> None:
     request = _request_for_shape("SINGLE", 1)
     revision = _revision_for_request(request)
