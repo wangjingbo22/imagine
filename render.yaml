@@ -14,7 +14,7 @@ services:
       - key: BAILIAN_MODEL
         value: qwen3.7-plus
       - key: BAILIAN_REQUEST_TIMEOUT_SECONDS
-        value: 45
+        value: 10
       - key: BAILIAN_EXECUTION_EVENT_TIMEOUT_SECONDS
         value: 10
       - key: BAILIAN_REPLAN_EXPLANATION_TIMEOUT_SECONDS

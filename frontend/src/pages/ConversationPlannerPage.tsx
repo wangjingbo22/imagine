@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import { request } from '../api/client'
-import type { CreateSingleDayTrip, TripDraftInput } from '../domain/trip'
 
 const questions = [
   ['trip', '这次想去哪里、哪天出发、当天大约什么时间可用？'],
@@ -26,7 +25,7 @@ type Parsed = {
   mustVisit: string[]
   avoidPlaces: string[]
 }
-type ConversationResult = { state: { tripId: string; expectedParticipants: number; participants: Array<{ participantId: string; status: string }> } | null; parse: { parsed: Parsed; canPlan: boolean; confirmationItems: Array<{ message: string }>; trip: CreateSingleDayTrip | null }; organizerAccessToken: string | null }
+type ConversationResult = { state: { tripId: string; expectedParticipants: number; participants: Array<{ participantId: string; status: string }> } | null; parse: { parsed: Parsed; canPlan: boolean; confirmationItems: Array<{ message: string }>; trip: null }; organizerAccessToken: string | null }
 type Invitation = { invitationUrl: string }
 type CollaborationState = {
   tripId: string
@@ -34,6 +33,10 @@ type CollaborationState = {
   expectedParticipants: number
   participants: Array<{ participantId: string; status: string; isOrganizer: boolean }>
   conflicts: Array<{ conflictId: string; message: string; suggestion: string; allowedRelaxations: string[] }>
+}
+
+function idempotencyKey(prefix: string) {
+  return `${prefix}-${crypto.randomUUID()}`
 }
 
 export function ConversationPlannerPage() {
@@ -108,40 +111,29 @@ export function ConversationPlannerPage() {
     navigate(`/join/${token}`)
   }
 
-  function planningDraft(parsed: Parsed): TripDraftInput | null {
-    if (!parsed.cityName || !parsed.travelDate || !parsed.startTime || !parsed.endTime ||
-      !parsed.startLocationText || !parsed.endLocationText || parsed.budgetCents === null) return null
-    return {
-      schemaVersion: '1.0', cityName: parsed.cityName, travelDate: parsed.travelDate,
-      startTime: parsed.startTime, endTime: parsed.endTime,
-      startLocationText: parsed.startLocationText, endLocationText: parsed.endLocationText,
-      budgetCents: parsed.budgetCents, interests: parsed.interests,
-      mustVisit: parsed.mustVisit, avoidPlaces: parsed.avoidPlaces,
-      assistanceMode: 'standard', assistanceProfile: { maxSegmentWalkMeters: 500, maxTransfers: 2, restIntervalMinutes: 90 },
-      naturalLanguageRequest: description,
-    }
-  }
-
   async function analyze() {
     if (!isReady) return
     setLoading(true); setError('')
     try {
-      const created = await request<ConversationResult>('/api/v2/trips/conversations', {
-        method: 'POST', body: JSON.stringify({ naturalLanguageRequest: description, answers: questions.map(([questionId], index) => ({ questionId, answer: answers[index] })) }),
+      const created = await request<any>('/api/v2/trips/conversations', {
+        method: 'POST', headers: { 'Idempotency-Key': idempotencyKey('organizer-conversation') },
+        body: JSON.stringify({ schemaVersion: '1.0', referenceDate: new Date().toISOString().slice(0, 10), naturalLanguageRequest: description, answers: questions.map(([questionId], index) => ({ questionId, answer: answers[index] })) }),
       })
-      setResult(created.data)
-      if (created.data.state) {
-        if (!created.data.organizerAccessToken) throw new Error('组织者凭证未生成，请重新创建行程。')
-        const organizerToken = created.data.organizerAccessToken
-        window.sessionStorage.setItem(`organizer-token:${created.data.state.tripId}`, organizerToken)
-        const draft = planningDraft(created.data.parse.parsed)
-        if (draft && created.data.parse.trip) {
-          window.sessionStorage.setItem(`s2-plan-context:${created.data.state.tripId}`, JSON.stringify({ draft, trip: created.data.parse.trip }))
-        }
-        const count = created.data.state.expectedParticipants - 1
-        const invitations = await Promise.all(Array.from({ length: count }, () => request<Invitation>(`/api/v2/trips/${created.data.state?.tripId}/participants/invitations`, { method: 'POST', headers: { 'X-Organizer-Token': organizerToken } })))
-        setLinks(invitations.map((item) => `${window.location.origin}${item.data.invitationUrl}`))
+      if (!created.data.revision || !created.data.organizerAccess?.organizerToken) {
+        throw new Error('需求尚未被解析为可创建的行程，请补全六个问题后重试。')
       }
+      const revision = created.data.revision
+      const organizerToken = created.data.organizerAccess.organizerToken as string
+      const stateResponse = await request<any>(`/api/v2/trips/${revision.tripId}/collaboration`, { headers: { 'X-Organizer-Token': organizerToken } })
+      const collaborationState = stateResponse.data
+      const trip = revision.understanding.trip
+      const parsed: Parsed = { cityName: trip.cityName, travelDate: trip.travelDate, startTime: trip.startTime, endTime: trip.endTime, startLocationText: trip.startLocationText, endLocationText: trip.endLocationText, budgetCents: trip.budgetCents, interests: revision.understanding.participants.flatMap((item: any) => item.interests ?? []), mustVisit: revision.understanding.participants.flatMap((item: any) => item.mustVisit ?? []), avoidPlaces: revision.understanding.participants.flatMap((item: any) => item.avoidPlaces ?? []) }
+      const compatible: ConversationResult = { state: { tripId: revision.tripId, expectedParticipants: collaborationState.progress.expectedCount, participants: collaborationState.participants }, parse: { parsed, canPlan: false, confirmationItems: [], trip: null }, organizerAccessToken: organizerToken }
+      setResult(compatible)
+      window.sessionStorage.setItem(`organizer-token:${revision.tripId}`, organizerToken)
+      setCollaboration(collaborationState)
+      const invitations = await Promise.all(collaborationState.participants.filter((item: any) => item.participantId !== collaborationState.organizerParticipantId).map((item: any) => request<Invitation>(`/api/v2/trips/${revision.tripId}/participants/${item.participantId}/invitations`, { method: 'POST', headers: { 'X-Organizer-Token': organizerToken, 'Idempotency-Key': idempotencyKey('participant-invitation') }, body: JSON.stringify({ schemaVersion: '1.0', expectedVersion: collaborationState.collaborationVersion }) })))
+      setLinks(invitations.map((item) => `${window.location.origin}${item.data.invitationUrl ?? ''}`))
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '对话解析失败，请稍后重试。')
     } finally { setLoading(false) }
