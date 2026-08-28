@@ -38,19 +38,29 @@ def test_day2_trace_locks_owner_pbi_ac_and_latest_main_base() -> None:
     assert trace["deliveryDay"] == "Day2"
     assert trace["owner"] == "林粲涵"
     assert trace["verifiedAgainstMainCommit"] == (
-        "5e71d03b98cd80fd92ffbc442d369ec4aa29330a"
+        "a43ad37a5c8b97d2b90507fa9966998bfee038b9"
     )
     assert trace["deliveryBaseCommit"] == (
-        "5b846f35eafc51a3834701e9c0b729f22ae21223"
-    )
-    assert trace["latestMainMergeCommit"] == (
-        "3c1daa638363a531f43d07c6bdcdc52a31dd1694"
+        "a43ad37a5c8b97d2b90507fa9966998bfee038b9"
     )
     assert trace["implementationCommit"] == (
-        "d738b0a2ecde37f4fb9d76f420b73b645d7ed150"
+        "f376574a5c8c5c577d6ed43efd200293023b3b32"
     )
     assert trace["pbi"]["pbiId"] == "PBI-11-B"
     assert trace["pbi"]["acceptanceCriteriaId"] == "AC-11-B"
+
+    requirements = {
+        (item["sheet"], item["range"], item["file"])
+        for item in trace["requirementsSource"]
+    }
+    source = "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx"
+    assert (ROOT / source).is_file()
+    assert requirements == {
+        ("SprintBacklog模板", "A25:V26", source),
+        ("PBI追溯", "A11:J11", source),
+        ("LLM接入设计", "A7:K7", source),
+        ("用户功能验收清单", "A12:J13", source),
+    }
 
 
 def test_task_dependencies_and_day2_evidence_paths_are_machine_resolvable() -> None:
@@ -83,6 +93,7 @@ def test_pbi_linkage_is_complete_through_downstream_consumers() -> None:
         ("S2-T005", "S2-T021"),
         ("S2-T006", "S2-T021"),
         ("S2-T019", "S2-T020"),
+        ("S2-T019", "S2-T021"),
         ("S2-T020", "S2-T021"),
         ("S2-T021", "S2-T022"),
         ("S2-T022", "S2-T018"),
@@ -92,10 +103,16 @@ def test_pbi_linkage_is_complete_through_downstream_consumers() -> None:
         "server-recompiled transient EventConstraintSet"
     )
     assert links[("S2-T021", "S2-T022")]["artifact"] == (
-        "PROPOSED PlanVersion plus full HARD validation report"
+        "readiness-bound PROPOSED PlanVersion plus full HARD validation report"
+    )
+    assert links[("S2-T006", "S2-T021")]["status"] == (
+        "REGISTRY_IMPLEMENTED_FORMAL_ONLINE_ROUTE_BUILDER_EXTERNAL_PENDING"
+    )
+    assert links[("S2-T019", "S2-T021")]["status"] == (
+        "VERIFIED_WITH_INLINE_MISMATCH_FAIL_CLOSED"
     )
     assert links[("S2-T022", "S2-T023")]["status"] == (
-        "BACKEND_CONTRACT_READY_UI_NOT_IMPLEMENTED_HERE"
+        "BACKEND_CONTRACT_READY_T023_FRONTEND_PENDING"
     )
     for link in links.values():
         for path in link["evidenceFiles"]:
@@ -108,6 +125,10 @@ def test_acceptance_and_authority_boundaries_cannot_be_silently_weakened() -> No
     assert "only the unfinished suffix is adjusted" in contract["S2-T021"]
     assert "all HARD rules are revalidated" in contract["S2-T021"]
     assert "no infeasible partial candidate is persisted" in contract["S2-T021"]
+    assert (
+        "persisted adjustmentEventId is restored server-side and inline tampering is rejected"
+        in contract["S2-T021"]
+    )
     assert "CURRENT is unchanged until candidate acceptance" in contract["S2-T022"]
     assert (
         "explanation failure does not remove structured candidate or Diff"
@@ -123,21 +144,28 @@ def test_acceptance_and_authority_boundaries_cannot_be_silently_weakened() -> No
     )
     assert boundaries["candidateState"] == "PROPOSED_UNTIL_EXPLICIT_ACCEPT"
     assert boundaries["defaultCandidateSource"] == (
-        "EVENT_AWARE_SUFFIX_PLANNER_REQUIRED_FAIL_CLOSED_WHEN_ABSENT"
+        "DETERMINISTIC_EVENT_AWARE_TRUSTED_SUFFIX_PLANNER_PRESERVES_PROVIDER_FACTS_AND_FAILS_CLOSED_WHEN_FACTS_CANNOT_SATISFY_HARD_RULES"
     )
-    assert boundaries["frontendScope"] == "NO_FRONTEND_IMPLEMENTED_BY_THIS_DELIVERY"
+    assert boundaries["readinessBinding"] == (
+        "V2_IDENTITY_AND_ISSUED_EVIDENCE_BIND_READINESS_DIGEST_AND_CURRENT_REVISION; DECISION_REVALIDATES_BOTH"
+    )
+    assert boundaries["decisionAuthority"] == (
+        "DELAY_AND_FATIGUE_USE_DEDICATED_ORGANIZER_DECISION; GENERIC_ACCEPT_REJECT_CANNOT_BYPASS_T021_EVIDENCE"
+    )
+    assert boundaries["frontendScope"] == (
+        "T023_FRONTEND_INTEGRATION_PENDING_OUTSIDE_THIS_DELIVERY"
+    )
 
 
 def test_known_upstream_and_external_gaps_are_explicit_not_claimed_done() -> None:
     trace = _trace()
     gaps = trace["knownGaps"]
-    assert gaps["s2T006ConcreteFactRefRegistry"] == (
-        "ABSENT_ON_BASELINE_MAIN_ONLY_CONTRACT_SEAM_AVAILABLE"
-    )
+    assert gaps["s2T006ConcreteFactRefRegistry"] == "IMPLEMENTED"
+    assert gaps["s2T006FormalOnlineRouteBuilder"] == "EXTERNAL_PENDING"
     assert gaps["s2T005TwoThreePersonPlanVersionChain"] == (
         "BLOCKED_BY_S2_T005_UPSTREAM_DELIVERY"
     )
-    assert gaps["s2T023Frontend"] == "MISSING_OUTSIDE_THIS_DELIVERY"
+    assert gaps["s2T023Frontend"] == "PENDING_OUTSIDE_THIS_DELIVERY"
     assert gaps["fatigueThresholds"] == "PO_CONFIRMATION_PENDING"
     assert gaps["lateBeyondRemainingWindowPolicy"] == "PO_CONFIRMATION_PENDING"
     assert gaps["onlineE2E"] == "NOT_CLAIMED"
@@ -153,6 +181,10 @@ def test_verification_is_pending_or_contains_real_final_results() -> None:
         assert verification["backendResult"] == "PENDING"
         assert verification["diffCheck"] == "PENDING"
     else:
-        assert verification["focusedResult"] != "PENDING"
-        assert verification["backendResult"] != "PENDING"
+        assert verification["focusedResult"] == "42 passed"
+        assert verification["boundaryResult"] == "43 passed"
+        assert verification["backendResult"] == "528 passed"
+        assert verification["frontendTest"] == "32 passed"
+        assert verification["frontendBuild"] == "PASS"
+        assert verification["frontendLint"] == "PASS"
         assert verification["diffCheck"] == "PASS"

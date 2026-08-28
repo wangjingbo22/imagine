@@ -25,6 +25,6 @@
 
 ## 联动边界
 
-`S2-T019 草稿 → 用户确认 → S2-T020 EventConstraintSet → S2-T021 后缀重规划 → S2-T022 Diff/决策 → S2-T023 页面展示`。
+`S2-T019 零写入草稿 → 用户确认并以 idempotencyKey 保存事件 → S2-T020 EventConstraintSet → S2-T021 按 adjustmentEventId 恢复事件并重规划后缀 → S2-T022 Diff/决策 → S2-T023 页面展示`。
 
 `inputDigest` 只用于幂等比较，不是签名。S2-T021 必须从服务端可信 CURRENT、任务事实和已确认事件重新编译，不能相信客户端自报的约束或摘要。

@@ -33,13 +33,14 @@ def test_trace_identifies_latest_main_delivery_base_and_real_implementation() ->
     assert trace["sprint"] == "Sprint2"
     assert trace["deliveryDay"] == "Day1"
     assert trace["verifiedAgainstMainCommit"] == (
-        "3e60435fcfde0705149dbc5f340d60e1aa63103c"
+        "a43ad37a5c8b97d2b90507fa9966998bfee038b9"
     )
+    assert trace["integratedWithMainCommit"] == trace["verifiedAgainstMainCommit"]
     assert trace["deliveryBaseCommit"] == (
-        "299341928f7d3c0474328219083e821bcb026498"
+        "a43ad37a5c8b97d2b90507fa9966998bfee038b9"
     )
     assert trace["implementationCommit"] == (
-        "f095e6973dced01d0f2498386e7b62779073053a"
+        "f376574a5c8c5c577d6ed43efd200293023b3b32"
     )
     assert re.fullmatch(r"[0-9a-f]{40}", trace["implementationCommit"])
 
@@ -60,6 +61,29 @@ def test_pbi_ac_tasks_and_all_evidence_paths_are_machine_resolvable() -> None:
         assert task["status"] == "IMPLEMENTED"
         for path in _all_paths(task):
             assert (ROOT / path).is_file(), path
+    assert tasks["S2-T020"]["productThresholdStatus"] == "PENDING"
+
+    requirements_file = (
+        "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx"
+    )
+    assert trace["requirementsSource"] == [
+        {
+            "file": requirements_file,
+            "sheet": "SprintBacklog模板",
+            "range": "A23:V24",
+        },
+        {
+            "file": requirements_file,
+            "sheet": "PBI追溯",
+            "range": "A11:J11",
+        },
+        {
+            "file": requirements_file,
+            "sheet": "LLM接入设计",
+            "range": "A5:K5",
+        },
+    ]
+    assert (ROOT / requirements_file).is_file()
 
 
 def test_runtime_linkages_are_explicit_and_honest_about_day2_boundary() -> None:
@@ -69,7 +93,29 @@ def test_runtime_linkages_are_explicit_and_honest_about_day2_boundary() -> None:
         "EXECUTABLE_AND_TESTED"
     )
     assert links[("S2-T020", "S2-T021")]["status"] == (
-        "DOWNSTREAM_PORT_ONLY_NOT_IMPLEMENTED_BY_DAY1"
+        "EXECUTABLE_AND_TESTED"
+    )
+    assert links[("S2-T019", "S2-T021")] == {
+        "from": "S2-T019",
+        "to": "S2-T021",
+        "artifact": (
+            "ConfirmedExecutionAdjustmentEvent.eventId plus Trip-scoped lookup"
+        ),
+        "status": "EXECUTABLE_AND_TESTED",
+    }
+    assert (
+        "S2-T021 resolves eventId within the Trip and matches it to CURRENT "
+        "and the inline confirmed adjustment"
+    ) in trace["integrationBoundaries"]
+    assert (
+        "same idempotencyKey requires identical payload and UTC-normalized "
+        "occurredAt"
+    ) in trace["integrationBoundaries"]
+    assert (
+        "app/application/workflow_service.py"
+        in {task["taskId"]: task for task in trace["tasks"]}["S2-T019"][
+            "moduleFiles"
+        ]
     )
     assert links[("S2-T019", "S2-T023")]["status"] == (
         "FIXTURE_AND_HTTP_CONTRACT_READY_UI_NOT_IMPLEMENTED_HERE"
@@ -85,8 +131,8 @@ def test_runtime_linkages_are_explicit_and_honest_about_day2_boundary() -> None:
 def test_verification_and_required_acceptance_artifacts_are_locked() -> None:
     trace = _trace()
     verification = trace["localVerification"]
-    assert verification["focusedResult"] == "19 passed in 0.70s"
-    assert verification["backendResult"] == "270 passed in 8.89s"
+    assert verification["focusedResult"] == "24 passed"
+    assert verification["backendResult"] == "528 passed"
     assert verification["frontendTest"] == "32 passed"
     assert verification["frontendBuild"] == "PASS"
     assert verification["frontendLint"] == "PASS"

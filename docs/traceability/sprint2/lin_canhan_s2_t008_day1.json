@@ -5,8 +5,17 @@
   "scope": "DAY_1",
   "verifiedAgainst": {
     "remoteBranch": "origin/main",
-    "remoteMainCommit": "b88aeee441f1160243acf55521d50e4e1c26d7b9",
-    "verifiedAt": "2026-08-26"
+    "remoteMainCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
+    "implementationCommit": "f376574a5c8c5c577d6ed43efd200293023b3b32",
+    "verifiedAt": "2026-08-28"
+  },
+  "requirementsSource": {
+    "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
+    "ranges": [
+      "SprintBacklog模板!A12:V12",
+      "LLM接入设计!A6:K6",
+      "LLM JSON契约!A5:K5"
+    ]
   },
   "task": {
     "taskId": "S2-T008",
@@ -16,7 +25,7 @@
     "priority": "Must",
     "plannedDay": "Day1",
     "estimateHours": 3,
-    "status": "IMPLEMENTED_WITH_UPSTREAM_FIXTURE_PENDING",
+    "status": "IMPLEMENTED_WITH_EXTERNAL_ROUTE_BUILDER_PENDING",
     "dependsOn": ["S2-T006"],
     "consumedBy": ["S2-T009"],
     "indirectlyVisibleIn": ["S2-T010"],
@@ -26,6 +35,11 @@
       "app/infrastructure/openai_compatible_llm.py"
     ],
     "integrationFiles": [
+      "backend/app/services/recommendation/contracts.py",
+      "app/application/recommendation_service.py",
+      "backend/app/services/recommendation/fact_registry_contracts.py",
+      "app/infrastructure/provider_fact_registry.py",
+      "app/api/recommendation_routes.py",
       "app/main.py",
       "app/core/config.py",
       ".env.example"
@@ -55,9 +69,11 @@
       "model-payload-excludes-digest-provider-payload-coordinates-and-sensitive-facts",
       "candidate-model-timeout-is-ten-seconds-with-an-eight-to-twelve-second-config-guard",
       "invalid-json-schema-or-allowlist-output-never-starts-a-repair-call",
-      "transient-transport-failure-stops-after-at-most-two-calls",
+      "every-model-path-stops-after-at-most-one-call-without-transport-retry",
       "all-model-failures-return-deterministic-enumeration-with-sanitized-codes",
-      "runtime-exposes-an-injectable-gateway-for-s2-t009"
+      "t006-registry-facts-are-projected-through-a-price-route-pass-free-adapter",
+      "v2-recommendation-route-consumes-the-injected-strict-gateway-through-the-shared-orchestrator",
+      "formal-t009-route-builder-remains-an-external-production-dependency"
     ]
   },
   "pbiTrace": {
@@ -68,6 +84,11 @@
       "backend/app/schemas/llm.py",
       "app/application/llm_gateway.py",
       "app/infrastructure/openai_compatible_llm.py",
+      "backend/app/services/recommendation/contracts.py",
+      "app/application/recommendation_service.py",
+      "backend/app/services/recommendation/fact_registry_contracts.py",
+      "app/infrastructure/provider_fact_registry.py",
+      "app/api/recommendation_routes.py",
       "app/main.py",
       "app/core/config.py",
       ".env.example"
@@ -89,24 +110,31 @@
     {
       "sourceTaskId": "S2-T006",
       "targetTaskId": "S2-T008",
-      "status": "UPSTREAM_FIXTURE_CONTRACT_PENDING",
+      "status": "INTEGRATED_WITH_T006_REGISTRY",
       "contract": "ProviderCandidateFact(placeFactId, factDigest, displayName, categoryTags, knownAttributes, riskFlags)",
-      "behavior": "T008 accepts only opaque server-issued IDs and lowercase sha256 digests; it neither creates nor restores Provider facts.",
+      "behavior": "The existing T006 registry restores signed Provider facts and per-FactRef digests; T008 projects only opaque IDs, digests and safe labels, while registry issuance and authoritative restoration remain owned by T006.",
       "files": [
         "backend/app/schemas/llm.py",
-        "backend/tests/fixtures/s2_t008/candidate_selection_request.json"
+        "backend/app/services/recommendation/fact_registry_contracts.py",
+        "app/infrastructure/provider_fact_registry.py",
+        "app/application/recommendation_service.py",
+        "backend/tests/test_s2_t006_provider_fact_registry.py",
+        "backend/tests/test_s2_t009_recommendation_orchestration.py"
       ]
     },
     {
       "sourceTaskId": "S2-T008",
       "targetTaskId": "S2-T009",
-      "status": "READY_FOR_CONSUMER_INTEGRATION",
+      "status": "V2_STRICT_GATEWAY_CONNECTED_ROUTE_BUILDER_PENDING",
       "contract": "CandidateSelectionGateway.select(ProviderCandidateSelectionRequest) -> CandidateSelectionGatewayResult",
-      "behavior": "A valid model proposal returns only ordered allowlisted placeFactIds and explanations; every failure returns DETERMINISTIC_ENUMERATION so T009 owns fact restoration, fairness, routing, validation and planning.",
+      "behavior": "The v2 recommendation route now uses the shared orchestration service and injected strict gateway. A valid model proposal returns only ordered allowlisted placeFactIds and explanations; every failure returns DETERMINISTIC_ENUMERATION. The formal route-backed T009 endpoint still needs an external production RouteCandidateBuilderPort.",
       "files": [
         "app/application/llm_gateway.py",
+        "app/application/recommendation_service.py",
+        "app/api/recommendation_routes.py",
         "app/main.py",
-        "backend/tests/test_s2_t008_candidate_selection_gateway.py"
+        "backend/tests/test_s2_t008_candidate_selection_gateway.py",
+        "backend/tests/test_s2_t009_recommendation_orchestration.py"
       ]
     },
     {
@@ -136,32 +164,32 @@
       "redacted OpenAI-compatible model request",
       "allowlist and semantic validation",
       "ten-second model timeout",
-      "zero-or-one transport retry and deterministic fallback",
-      "runtime injection port and call-count evidence"
+      "one-shot model call without repair or transport retry and deterministic fallback",
+      "safe projection from the existing T006 fact registry",
+      "v2 strict-gateway injection through the shared recommendation orchestrator"
     ],
     "notImplementedByS2T008": [
-      "S2-T006 FactRef registry, digest issuance or authoritative fact restoration",
+      "S2-T006 FactRef registry ownership, digest issuance or authoritative fact restoration, although that registry is present and integrated",
       "S2-T007 fairness calculation",
-      "S2-T009 deterministic enumeration, route generation or hard validation",
+      "S2-T009 production RouteCandidateBuilderPort, authoritative route generation or hard validation",
       "price, route, score, PASS, Constraint, PlanVersion or persistence decisions",
       "S2-T010 frontend rendering"
     ]
   },
   "neededInputs": [
-    "S2-T006 final FactRef fixture and digest-generation contract or implementation commit",
-    "S2-T009 confirmation that it will consume CandidateSelectionGatewayResult and own deterministic fallback",
-    "six-to-eight real same-city redacted candidate facts for integration evidence",
+    "S2-T009 production RouteCandidateBuilderPort implementation and runtime injection for the formal route-backed endpoint",
+    "public end-to-end evidence covering signed T006 facts, T008 one-shot selection and T009 real route validation",
     "a newly rotated local BAILIAN_API_KEY only for opt-in live acceptance, never committed or sent in chat",
     "non-author review plus QA and PO acceptance evidence"
   ],
   "relatedDeliveryTrace": "docs/traceability/sprint2/lin_canhan_day1.json",
   "localVerification": {
-    "status": "VERIFIED_AFTER_MAIN_S2_T007_AND_LCH_T019_T020_INTEGRATION",
-    "verifiedAt": "2026-08-26",
-    "focusedCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_s2_t008_candidate_selection_gateway.py backend/tests/test_s2_t008_traceability.py backend/tests/test_bailian_trip_extractor.py backend/tests/test_trip_draft_llm_integration.py",
-    "focusedResult": "65 passed in 1.06s",
+    "status": "VERIFIED_ON_IMPLEMENTATION_COMMIT_AGAINST_MAIN_BASELINE",
+    "verifiedAt": "2026-08-28",
+    "focusedCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_s2_t006_provider_fact_registry.py backend/tests/test_s2_t008_candidate_selection_gateway.py backend/tests/test_s2_t009_recommendation_orchestration.py backend/tests/test_s2_t003_recommendation_readiness.py",
+    "focusedResult": "87 passed",
     "fullCommand": "python -B -m pytest -p no:cacheprovider -q",
-    "fullResult": "270 passed in 8.89s",
+    "fullResult": "528 passed",
     "frontendTest": "npm test: 32 passed",
     "frontendBuild": "npm run build passed",
     "frontendLint": "npm run lint passed"
