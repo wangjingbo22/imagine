@@ -1,0 +1,280 @@
+{
+  "schemaVersion": "1.0",
+  "sprint": "Sprint2",
+  "deliveryDay": "Day3",
+  "owner": "林粲涵",
+  "verifiedAgainstMainCommit": "61aee2c529ddbac7e573eed6cff73edf7e067b6e",
+  "deliveryBaseCommit": "61aee2c529ddbac7e573eed6cff73edf7e067b6e",
+  "implementationCommit": "67459279e57e666b9cd34918695483b1afd51914",
+  "requirementsSource": [
+    {
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
+      "sheet": "SprintBacklog模板",
+      "range": "A28:V28"
+    },
+    {
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
+      "sheet": "PBI追溯",
+      "range": "A13:J13"
+    },
+    {
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
+      "sheet": "用户功能验收清单",
+      "range": "A15:J15"
+    },
+    {
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
+      "sheet": "版权说明",
+      "range": "A10:B14"
+    },
+    {
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
+      "sheet": "LLM接入设计",
+      "range": "A10:K10"
+    }
+  ],
+  "pbi": {
+    "pbiId": "PBI-13-A",
+    "acceptanceCriteriaId": "AC-13-A",
+    "coverage": "S2_T024_BACKEND_SINGLE_GOLDEN_AND_LOCAL_MOCK_UI_CONTRACT_PASS_PUBLIC_EVIDENCE_PENDING",
+    "productAcceptance": "在 375px、768px 和公网环境完成六问、唯一推荐、执行、照片、V2 与回忆，文本不遮挡、操作可达、关键数字可读。"
+  },
+  "task": {
+    "taskId": "S2-T024",
+    "pbiId": "PBI-13-A",
+    "acceptanceCriteriaId": "AC-13-A",
+    "owner": "林粲涵",
+    "deliveryDay": "Day3",
+    "priority": "Must",
+    "storyPoints": 3,
+    "remainingHours": 2,
+    "status": "IMPLEMENTED_BACKEND_SINGLE_GOLDEN_AND_LOCAL_UI_CONTRACT_PASS_PUBLIC_EVIDENCE_PENDING",
+    "dependsOn": "S2-T001~S2-T023",
+    "journeyPhases": [
+      "SIX_QUESTION_CONFIRMATION",
+      "UNIQUE_RECOMMENDATION",
+      "EXECUTION_AND_GPS",
+      "TASK_PHOTO",
+      "LATE_OR_FATIGUE_V2",
+      "ORGANIZER_DECISION",
+      "MEMORY_TIMELINE"
+    ],
+    "documentationFiles": [
+      "docs/testing/s2_t024_public_acceptance.md",
+      "docs/testing/evidence/s2_t024/README.md",
+      "docs/traceability/sprint2/lin_canhan_s2_t024_day3.json",
+      "docs/traceability/sprint2/lin_canhan_s2_t024_day3.md"
+    ],
+    "testFiles": [
+      "backend/tests/test_s2_lin_canhan_s2_t024_traceability.py",
+      "backend/tests/test_s2_t024_single_golden_path.py",
+      "backend/tests/test_s2_t003_readiness_guard.py",
+      "frontend/tests/s2T024ResponsiveContract.test.ts",
+      "frontend/e2e/s2-t024-responsive.spec.ts"
+    ],
+    "moduleFiles": [
+      "app/application/collaboration_planning_bridge.py",
+      "frontend/src/services/collaborationDraft.ts",
+      "frontend/src/services/s2T024Acceptance.ts"
+    ],
+    "integrationFiles": [
+      "app/api/recommendation_routes.py",
+      "app/application/workflow_service.py",
+      "app/infrastructure/collaboration_store.py",
+      "app/infrastructure/workflow_store.py",
+      "app/main.py",
+      "frontend/src/api/collaborationApi.ts",
+      "frontend/src/pages/ConversationPlannerPage.tsx",
+      "frontend/src/pages/MemberConversationPage.tsx",
+      "frontend/src/pages/RecommendationPage.tsx",
+      "frontend/src/api/tripApi.ts",
+      "frontend/src/services/amapPlan.ts",
+      "frontend/src/services/planningFacts.ts",
+      "frontend/playwright.config.ts",
+      ".github/workflows/ci.yml"
+    ],
+    "dependencyEvidenceFiles": [
+      "frontend/src/pages/ConversationPlannerPage.tsx",
+      "frontend/src/pages/RecommendationPage.tsx",
+      "frontend/src/pages/WorkspacePage.tsx",
+      "frontend/src/components/TaskPhotoCard.tsx",
+      "frontend/src/components/MemoryPhotoStrip.tsx",
+      "frontend/src/services/executionReplan.ts",
+      "docs/traceability/sprint2/lin_canhan_s2_t021_t022_day2.json",
+      "docs/traceability/sprint2/zhang_qi_s2_t017.md"
+    ]
+  },
+  "scopeBoundary": {
+    "includedTask": "S2-T024",
+    "includedPbi": "PBI-13-A",
+    "excludedTask": "S2-T032",
+    "excludedPbi": "PBI-17-A",
+    "excludedUat": "UAT-S2-E2E-001",
+    "reason": "T032 is the separately planned organizer-plus-two-members invitation and conflict-resolution end-to-end acceptance; it must not be claimed by T024."
+  },
+  "uat": {
+    "uatId": "UAT-S2-012",
+    "evidenceId": "RESP-S2-001",
+    "viewports": [
+      {
+        "width": 375,
+        "height": 812
+      },
+      {
+        "width": 768,
+        "height": 1024
+      }
+    ],
+    "requirements": [
+      "NO_HORIZONTAL_SCROLL",
+      "NO_TEXT_OR_CONTROL_OVERLAP",
+      "PRIMARY_ACTION_MIN_44_PX",
+      "STATUS_PERMISSION_AND_FAILURE_VISIBLE",
+      "KEY_AMOUNTS_TIMES_AND_DIFF_READABLE",
+      "KEYBOARD_FOCUS_ORDER_VISIBLE",
+      "REDUCED_MOTION_SUPPORTED"
+    ],
+    "publicResult": "NOT_RUN_NOT_CLAIMED"
+  },
+  "plannedFiles": [
+    {
+      "path": "frontend/playwright.config.ts",
+      "role": "375px and 768px browser projects plus trace/video policy",
+      "status": "IMPLEMENTED"
+    },
+    {
+      "path": "frontend/e2e/s2-t024-responsive.spec.ts",
+      "role": "local mocked UI integration and viewport assertions; not public golden-path evidence",
+      "status": "IMPLEMENTED"
+    },
+    {
+      "path": "frontend/tests/s2T024ResponsiveContract.test.ts",
+      "role": "fast responsive and accessibility contract tests",
+      "status": "IMPLEMENTED"
+    },
+    {
+      "path": "frontend/src/services/s2T024Acceptance.ts",
+      "role": "production acceptance helpers without business-state authority",
+      "status": "IMPLEMENTED"
+    }
+  ],
+  "crossTaskLinkages": [
+    {
+      "from": "S2-T001~S2-T005",
+      "to": "S2-T024",
+      "artifact": "confirmed Trip, collaboration state and shared 1/2/3-person execution compatibility",
+      "status": "UPSTREAM_CONSUMED_NOT_REIMPLEMENTED",
+      "evidenceFiles": [
+        "frontend/src/pages/ConversationPlannerPage.tsx",
+        "app/application/collaboration_planning_bridge.py",
+        "backend/tests/test_s2_t024_single_golden_path.py"
+      ]
+    },
+    {
+      "from": "S2-T006~S2-T010",
+      "to": "S2-T024",
+      "artifact": "FactRef-backed unique recommendation and explanation",
+      "status": "UPSTREAM_CONSUMED_NOT_REIMPLEMENTED",
+      "evidenceFiles": [
+        "frontend/src/pages/RecommendationPage.tsx"
+      ]
+    },
+    {
+      "from": "S2-T011~S2-T016",
+      "to": "S2-T024",
+      "artifact": "task photo and one-shot arrival evidence",
+      "status": "UPSTREAM_CONSUMED_NOT_REIMPLEMENTED",
+      "evidenceFiles": [
+        "frontend/src/components/TaskPhotoCard.tsx",
+        "frontend/src/pages/WorkspacePage.tsx"
+      ]
+    },
+    {
+      "from": "S2-T017~S2-T018",
+      "to": "S2-T024",
+      "artifact": "ordered memory timeline and undeleted task photos",
+      "status": "UPSTREAM_CONSUMED_NOT_REIMPLEMENTED",
+      "evidenceFiles": [
+        "frontend/src/components/MemoryPhotoStrip.tsx",
+        "docs/traceability/sprint2/zhang_qi_s2_t017.md"
+      ]
+    },
+    {
+      "from": "S2-T019~S2-T023",
+      "to": "S2-T024",
+      "artifact": "LATE/FATIGUE proposed V2, structured Diff and organizer decision",
+      "status": "UPSTREAM_CONSUMED_NOT_REIMPLEMENTED",
+      "evidenceFiles": [
+        "frontend/src/services/executionReplan.ts",
+        "docs/traceability/sprint2/lin_canhan_s2_t021_t022_day2.json"
+      ]
+    },
+    {
+      "from": "S2-T024",
+      "to": "PBI-13-A",
+      "artifact": "UAT-S2-012 plus RESP-S2-001 acceptance package",
+      "status": "LOCAL_AUTOMATION_VERIFIED_PUBLIC_EXECUTION_PENDING",
+      "evidenceFiles": [
+        "docs/testing/s2_t024_public_acceptance.md",
+        "docs/testing/evidence/s2_t024/README.md"
+      ]
+    }
+  ],
+  "authorityBoundaries": {
+    "frontend": "COLLECT_DISPLAY_CONFIRM_AND_DRIVE_USER_ACTIONS_ONLY_NO_FACT_AMOUNT_SCORE_OR_STATE_REWRITE",
+    "llm": "EXTRACT_AND_EXPLAIN_ONLY_FAILURE_MUST_NOT_REMOVE_STRUCTURED_DIFF_OR_STATE_TRANSITION",
+    "provider": "AMAP_OR_CACHE_OWNS_PLACE_ROUTE_PRICE_AND_FACILITY_FACTS",
+    "backend": "DETERMINISTIC_CONFLICT_SCORE_ORDER_PASS_AND_STATE_TRANSITIONS",
+    "acceptanceHelper": "OBSERVE_AND_ASSERT_ONLY_NO_SHORTCUT_OR_SYNTHETIC_PASS_AUTHORITY"
+  },
+  "evidencePolicy": {
+    "root": "docs/testing/evidence/s2_t024/",
+    "required": [
+      "RESP-S2-001 manifest",
+      "375px video trace and core screenshots",
+      "768px video trace and core screenshots",
+      "local command outputs",
+      "public URL health build SHA and redacted lineage",
+      "acceptance signoff"
+    ],
+    "forbidden": [
+      "API keys",
+      "cookies or authorization headers",
+      "one-time invitation tokens",
+      "unredacted precise personal location",
+      "photo EXIF"
+    ]
+  },
+  "knownGaps": {
+    "plannedFrontendFiles": "IMPLEMENTED",
+    "localResponsiveAutomation": "PASS_14_MOCK_UI_CONTRACT_TESTS_AT_375_AND_768",
+    "localBackendGoldenPath": "PASS_REAL_ASGI_AND_SQLITE_SINGLE_PERSON_CHAIN",
+    "browserBackendMode": "MOCKED_UI_INTEGRATION_NOT_A_CONTINUOUS_REAL_BACKEND_CHAIN",
+    "publicNetworkE2E": "NOT_RUN_NOT_CLAIMED",
+    "realAmapAndBailianEvidence": "EXTERNAL_RUNTIME_INPUT_PENDING",
+    "teacherSignoff": "PENDING",
+    "t032": "EXCLUDED_SEPARATE_TASK_NOT_CLAIMED"
+  },
+  "localVerification": {
+    "status": "PASS",
+    "traceabilityCommand": "python -m pytest -q backend/tests/test_s2_lin_canhan_s2_t024_traceability.py",
+    "traceabilityResult": "7 passed",
+    "focusedCommand": "npm test -- s2T024ResponsiveContract.test.ts && npx playwright test e2e/s2-t024-responsive.spec.ts",
+    "focusedResult": "23 backend focused passed in 2.67s; 8 readiness/cache closure passed in 2.31s; 14 Playwright passed in 30.5s",
+    "backendFull": "625 passed in 71.21s",
+    "frontendContractResult": "4 T024 contract tests passed within 48 frontend tests",
+    "playwright375Result": "7 passed",
+    "playwright768Result": "7 passed",
+    "frontendTest": "48 passed",
+    "frontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
+    "frontendBuild": "PASS",
+    "diffCheck": "PASS",
+    "onlineE2E": "NOT_RUN_NOT_CLAIMED"
+  },
+  "neededInputs": [
+    "target-build public frontend and backend URLs",
+    "deployment confirmation that AMAP and BAILIAN secrets are configured without exposing their values",
+    "real browser access to location and file or camera permissions",
+    "non-author acceptance operator and teacher signoff"
+  ]
+}
