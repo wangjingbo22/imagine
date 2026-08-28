@@ -3,10 +3,12 @@
   "sprint": "Sprint2",
   "deliveryDay": "Day2",
   "owner": "林粲涵",
-  "verifiedAgainstMainCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
+  "verifiedAgainstMainCommit": "012fa364894ffc7dd36a6dd91cdd21641550da06",
   "deliveryBaseCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
   "implementationCommit": "f376574a5c8c5c577d6ed43efd200293023b3b32",
   "eventContractHardeningCommit": "0856b745075156e3da5365e74852aaa192329325",
+  "compatibilityClosureCommit": "1a7fcf7169f3e3656507be878e896bf4db1dd9fd",
+  "frontendIntegrationCommit": "e4f9c50f7c9ee6c058030c5d6e6739e9f1a480af",
   "requirementsSource": [
     {
       "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
@@ -245,10 +247,15 @@
       "from": "S2-T022",
       "to": "S2-T023",
       "artifact": "candidate Diff explanation and accept/reject API",
-      "status": "BACKEND_CONTRACT_READY_T023_FRONTEND_PENDING",
+      "status": "BACKEND_AND_T023_FRONTEND_CONTRACT_INTEGRATED_PUBLIC_E2E_PENDING",
       "evidenceFiles": [
         "app/api/execution_replan_routes.py",
-        "frontend/src/api/API.md"
+        "frontend/src/api/API.md",
+        "frontend/src/api/tripApi.ts",
+        "frontend/src/domain/executionAdjustment.ts",
+        "frontend/src/services/executionAdjustment.ts",
+        "frontend/src/pages/WorkspacePage.tsx",
+        "frontend/tests/s2T023ExecutionReplan.test.ts"
       ]
     }
   ],
@@ -278,29 +285,40 @@
     "defaultCandidateSource": "DETERMINISTIC_EVENT_AWARE_TRUSTED_SUFFIX_PLANNER_PRESERVES_PROVIDER_FACTS_AND_FAILS_CLOSED_WHEN_FACTS_CANNOT_SATISFY_HARD_RULES",
     "readinessBinding": "V2_IDENTITY_AND_ISSUED_EVIDENCE_BIND_READINESS_DIGEST_AND_CURRENT_REVISION; DECISION_REVALIDATES_BOTH",
     "decisionAuthority": "DELAY_AND_FATIGUE_USE_DEDICATED_ORGANIZER_DECISION; GENERIC_ACCEPT_REJECT_CANNOT_BYPASS_T021_EVIDENCE",
-    "frontendScope": "T023_FRONTEND_INTEGRATION_PENDING_OUTSIDE_THIS_DELIVERY"
+    "frontendScope": "T023_FRONTEND_INTEGRATION_COMPLETE_AT_E4F9C50_PUBLIC_E2E_PENDING"
   },
   "knownGaps": {
     "s2T006ConcreteFactRefRegistry": "IMPLEMENTED",
     "s2T006FormalOnlineRouteBuilder": "EXTERNAL_PENDING",
     "s2T005TwoThreePersonPlanVersionChain": "BLOCKED_BY_S2_T005_UPSTREAM_DELIVERY",
-    "s2T023Frontend": "PENDING_OUTSIDE_THIS_DELIVERY",
+    "s2T023Frontend": "LOCAL_CONTRACT_AND_UI_INTEGRATION_PASS_PUBLIC_E2E_PENDING",
     "fatigueThresholds": "PO_CONFIRMATION_PENDING",
     "lateBeyondRemainingWindowPolicy": "PO_CONFIRMATION_PENDING",
     "onlineE2E": "NOT_CLAIMED"
   },
   "localVerification": {
-    "status": "PASS",
-    "focusedCommand": "python -m pytest -q backend/tests/test_s1_t017_event_replan.py backend/tests/test_s2_t019_t020_http.py backend/tests/test_s2_t003_readiness_guard.py backend/tests/test_s2_t021_t022_execution_replan.py",
-    "focusedResult": "42 passed",
-    "boundaryCommand": "python -m pytest -q backend/tests/test_s2_t003_planning_readiness.py backend/tests/test_s2_lin_canhan_t021_t022_traceability.py backend/tests/test_planning_http_boundaries.py backend/tests/test_s1_t024_golden_path.py backend/tests/test_day2_traceability.py",
-    "boundaryResult": "43 passed",
-    "backendCommand": "python -B -m pytest -p no:cacheprovider -q",
-    "backendResult": "528 passed",
-    "diffCheck": "PASS",
-    "frontendTest": "32 passed",
-    "frontendBuild": "PASS",
-    "frontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
+    "status": "LATEST_MAIN_FULL_REGRESSION_PASS",
+    "latestMainCommit": "012fa364894ffc7dd36a6dd91cdd21641550da06",
+    "latestMainTraceCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_s2_lin_canhan_t021_t022_traceability.py",
+    "latestMainTraceResult": "6 passed",
+    "historicalBaselineCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
+    "historicalFocusedCommand": "python -m pytest -q backend/tests/test_s1_t017_event_replan.py backend/tests/test_s2_t019_t020_http.py backend/tests/test_s2_t003_readiness_guard.py backend/tests/test_s2_t021_t022_execution_replan.py",
+    "historicalFocusedResult": "42 passed",
+    "historicalBoundaryCommand": "python -m pytest -q backend/tests/test_s2_t003_planning_readiness.py backend/tests/test_s2_lin_canhan_t021_t022_traceability.py backend/tests/test_planning_http_boundaries.py backend/tests/test_s1_t024_golden_path.py backend/tests/test_day2_traceability.py",
+    "historicalBoundaryResult": "43 passed",
+    "historicalBackendCommand": "python -B -m pytest -p no:cacheprovider -q",
+    "historicalBackendResult": "528 passed",
+    "historicalDiffCheck": "PASS",
+    "historicalFrontendTest": "32 passed",
+    "historicalFrontendBuild": "PASS",
+    "historicalFrontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
+    "latestMainClosureCommit": "1a7fcf7169f3e3656507be878e896bf4db1dd9fd",
+    "latestMainBackendResult": "633 passed in 78.57s",
+    "latestMainFrontendTest": "52 passed",
+    "latestMainFrontendBuild": "PASS",
+    "latestMainFrontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
+    "latestMainDiffCheck": "PASS",
+    "latestMainFunctionalRegression": "PASS",
     "onlineE2E": "NOT_RUN_NOT_CLAIMED"
   },
   "securityFix": {
@@ -310,7 +328,7 @@
   "externalAcceptanceStillNeeded": [
     "S2-T006 FactRef registry exists; the formal online Provider route builder still needs external delivery and public-network verification",
     "S2-T005 must deliver and verify the 2-person and 3-person PlanVersion chain",
-    "S2-T023 must consume the preview Diff and decision contracts in the frontend",
+    "S2-T023 is locally integrated; public browser evidence must still exercise preview, Diff and dedicated decision contracts",
     "PO must freeze fatigue thresholds and late-beyond-window behavior",
     "live Bailian smoke requires a valid rotated BAILIAN_API_KEY supplied only through deployment secrets"
   ]

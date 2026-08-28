@@ -61,7 +61,7 @@ def test_t024_committed_trace_documents_and_dependency_evidence_resolve() -> Non
     assert task["deliveryDay"] == "Day3"
     assert task["priority"] == "Must"
     assert task["storyPoints"] == 3
-    assert task["remainingHours"] == 2
+    assert task["remainingHours"] == 0
     assert task["dependsOn"] == "S2-T001~S2-T023"
     for key in (
         "documentationFiles",
@@ -138,29 +138,67 @@ def test_t024_pending_status_cannot_be_mistaken_for_public_pass() -> None:
     trace = _trace()
     base = trace["verifiedAgainstMainCommit"]
     assert re.fullmatch(r"[0-9a-f]{40}", base)
-    assert trace["deliveryBaseCommit"] == base
+    assert base == "012fa364894ffc7dd36a6dd91cdd21641550da06"
+    assert trace["deliveryBaseCommit"] == (
+        "77daffedde92cf33ddae2ff1c378fefc40962910"
+    )
 
     implementation = trace["implementationCommit"]
-    assert implementation == "67459279e57e666b9cd34918695483b1afd51914"
+    assert implementation == "1a7fcf7169f3e3656507be878e896bf4db1dd9fd"
+    assert trace["frontendIntegrationCommit"] == (
+        "e4f9c50f7c9ee6c058030c5d6e6739e9f1a480af"
+    )
+    assert trace["previousImplementationCommit"] == (
+        "67459279e57e666b9cd34918695483b1afd51914"
+    )
 
     verification = trace["localVerification"]
     assert verification["status"] == "PASS"
-    assert verification["traceabilityResult"] == "7 passed"
-    assert verification["backendFull"].startswith("625 passed")
-    assert verification["frontendTest"] == "48 passed"
+    assert verification["traceabilityResult"] == "8 passed"
+    assert verification["backendFull"] == "633 passed in 78.57s"
+    assert verification["frontendTest"] == "52 passed"
     assert trace["knownGaps"]["browserBackendMode"] == (
         "MOCKED_UI_INTEGRATION_NOT_A_CONTINUOUS_REAL_BACKEND_CHAIN"
     )
     assert verification["playwright375Result"] == "7 passed"
     assert verification["playwright768Result"] == "7 passed"
+    assert verification["playwrightAll"] == "14 passed in 31.4s"
     assert verification["frontendBuild"] == "PASS"
     assert verification["diffCheck"] == "PASS"
-    assert verification["onlineE2E"] in {
-        "NOT_RUN_NOT_CLAIMED",
-        "PASS_WITH_RESP_S2_001_EVIDENCE",
-    }
-    assert trace["uat"]["publicResult"] in {
-        "NOT_RUN_NOT_CLAIMED",
-        "PASS_WITH_RESP_S2_001_EVIDENCE",
-    }
+    assert verification["onlineE2E"] == (
+        "NOT_RUN_BLOCKED_TARGET_BUILD_AND_BAILIAN"
+    )
+    assert trace["uat"]["publicResult"] == (
+        "NOT_RUN_BLOCKED_TARGET_BUILD_AND_BAILIAN"
+    )
     assert trace["neededInputs"]
+
+
+def test_t024_closure_locks_full_backend_parent_fix_and_public_blockers() -> None:
+    trace = _trace()
+    task = trace["task"]
+    gaps = trace["knownGaps"]
+
+    assert "backend/tests/test_s2_t024_full_golden_path.py" in task["testFiles"]
+    assert "app/application/planning_boundary_service.py" in task["moduleFiles"]
+    assert gaps["localBackendGoldenPath"] == (
+        "PASS_REAL_ASGI_AND_SQLITE_SINGLE_PERSON_FULL_CHAIN_THROUGH_V2_AND_MEMORY"
+    )
+    assert gaps["parentPlanRestoreFix"] == (
+        "PASS_V2_RESTORE_USES_PLAN_PARENT_ID_NOT_NONEXISTENT_PARENT_PLAN_ID"
+    )
+    assert gaps["t023Frontend"] == (
+        "LOCAL_CONTRACT_AND_UI_INTEGRATION_PASS_PUBLIC_E2E_PENDING"
+    )
+    assert gaps["publicDeploymentBuild"] == (
+        "32bb112a5eb7ec1e0e3d052ec060defe9f3627c1_NOT_CLOSURE_COMMIT"
+    )
+    assert gaps["realAmapAndBailianEvidence"] == (
+        "BAILIAN_NOT_CONFIGURED_ON_CURRENT_PUBLIC_BUILD"
+    )
+
+    boundary_source = (
+        ROOT / "app" / "application" / "planning_boundary_service.py"
+    ).read_text(encoding="utf-8")
+    assert "current_plan_id=plan.parent_id" in boundary_source
+    assert "current_plan_id=plan.parent_plan_id" not in boundary_source

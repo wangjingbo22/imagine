@@ -3,9 +3,10 @@
   "sprint": "Sprint2",
   "deliveryDay": "Day2",
   "owner": "林粲涵",
-  "verifiedAgainstMainCommit": "10d1742885675694ea0b13c5d20d2e498ef67608",
+  "verifiedAgainstMainCommit": "012fa364894ffc7dd36a6dd91cdd21641550da06",
   "deliveryBaseCommit": "10d1742885675694ea0b13c5d20d2e498ef67608",
   "implementationCommit": "00f7ef692b5b3a5ef1b5d711af68456eeff41a66",
+  "compatibilityClosureCommit": "1a7fcf7169f3e3656507be878e896bf4db1dd9fd",
   "requirementsSource": [
     {
       "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
@@ -31,7 +32,7 @@
   "pbi": {
     "pbiId": "PBI-15-A",
     "acceptanceCriteriaId": "AC-15-B",
-    "coverage": "S2-T029_IMPLEMENTED_WITH_T002_PRODUCTION_PORT_PENDING",
+    "coverage": "S2-T029_LOCAL_SQLITE_ASGI_ACCEPTANCE_COMPLETE_PUBLIC_PENDING",
     "productAcceptance": "多人硬冲突明确返回成员、规则、原因和允许放宽项；冲突未解决时 READY_TO_PLAN 为假，放宽后的新修订必须全员重新确认。"
   },
   "task": {
@@ -41,8 +42,8 @@
     "owner": "林粲涵",
     "deliveryDay": "Day2",
     "priority": "Must",
-    "remainingHours": 2,
-    "status": "IMPLEMENTED_WITH_UPSTREAM_RUNTIME_PENDING",
+    "remainingHours": 0,
+    "status": "LOCAL_ACCEPTANCE_COMPLETE_PUBLIC_E2E_PENDING",
     "dependsOn": ["S2-T003"],
     "consumes": [
       "S2-T003.CollaborationAggregate",
@@ -53,7 +54,10 @@
     "consumedBy": ["S2-T028", "S2-T030", "S2-T031"],
     "moduleFiles": [
       "app/domain/collaboration.py",
-      "app/application/collaboration_service.py"
+      "app/application/collaboration_service.py",
+      "app/application/trip_draft_revision_service.py",
+      "app/infrastructure/collaboration_store.py",
+      "app/infrastructure/trip_draft_revision_store.py"
     ],
     "integrationFiles": [
       "frontend/src/domain/collaboration.ts",
@@ -85,6 +89,9 @@
       "relaxation-creates-a-new-revision-and-requires-every-member-to-reconfirm",
       "ready-to-plan-requires-zero-open-issues-all-confirmed-and-a-readiness-digest",
       "organizer-ui-uses-capability-version-idempotency-and-frozen-confirmation-item-route",
+      "real-trip-draft-revision-service-plus-shared-sqlite-asgi-happy-path-reaches-ready",
+      "deterministic-relaxation-creates-two-persisted-revisions-without-an-extra-llm-call",
+      "resolution-audit-persists-the-revision-one-to-two-transition",
       "375-and-768-layout-has-six-step-progress-no-horizontal-uuid-overflow-and-44px-actions"
     ]
   },
@@ -104,10 +111,13 @@
       "from": "S2-T027",
       "to": "S2-T029",
       "artifact": "participant ownership and member-session permission scope",
-      "status": "BACKEND_SCOPE_AVAILABLE_MEMBER_PAGE_UPSTREAM_PENDING",
+      "status": "MEMBER_SESSION_FRONTEND_INTEGRATED_LOCAL_PUBLIC_TWO_BROWSER_PENDING",
       "evidenceFiles": [
         "app/api/collaboration_routes.py",
-        "app/application/collaboration_service.py"
+        "app/application/collaboration_service.py",
+        "frontend/src/api/collaborationApi.ts",
+        "frontend/src/pages/MemberConversationPage.tsx",
+        "frontend/tests/collaborationFlow.test.ts"
       ]
     },
     {
@@ -141,24 +151,24 @@
     "readiness": "ALL_MEMBERS_CURRENT_REVISION_CONFIRMED_AND_ZERO_ISSUES_REQUIRED"
   },
   "knownGaps": {
-    "t002ProductionRevisionPort": "UNAVAILABLE_CREATE_CONVERSATION_RETURNS_503",
-    "memberConversationFrontendMigration": "OWNED_BY_UPSTREAM_S2_T027_AND_NOT_CLAIMED",
+    "t002ProductionRevisionPort": "AVAILABLE_DEFAULT_RUNTIME_SQLITE_ASGI_VERIFIED",
+    "memberConversationFrontendMigration": "INTEGRATED_LOCALLY_PUBLIC_TWO_BROWSER_E2E_PENDING",
     "publicNetworkE2E": "NOT_RUN_NOT_CLAIMED",
-    "crossStoreAtomicity": "T002_AND_COLLABORATION_SQLITE_TRANSACTION_BOUNDARY_UPSTREAM_PENDING"
+    "crossStoreAtomicity": "SHARED_SQLITE_HAPPY_PATH_VERIFIED_FAILURE_WINDOW_RECOVERY_NOT_CLAIMED"
   },
   "localVerification": {
     "status": "PASS",
-    "focusedBackendResult": "67 passed",
-    "backendResult": "537 passed",
-    "frontendTest": "37 passed",
+    "focusedBackendResult": "80 passed",
+    "backendResult": "633 passed in 78.57s",
+    "frontendTest": "52 passed",
     "frontendBuild": "PASS",
     "frontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
     "diffCheck": "PASS",
     "onlineE2E": "NOT_RUN_NOT_CLAIMED"
   },
   "neededInputs": [
-    "陈梓元交付可运行的 T002 TripDraftRevisionPort 与 applyRelaxation 持久化实现",
-    "王敬博或 T027 负责人把成员邀请/会话页面迁移到冻结的 member-session API",
+    "可访问的最新公网前后端部署与两组独立浏览器会话",
+    "公网环境所需百炼/Provider 密钥及真实网络条件",
     "非作者评审、QA 与 PO 的验收记录"
   ]
 }

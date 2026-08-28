@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
+import subprocess
 
 
 ROOT = Path(__file__).parents[2]
@@ -12,6 +14,12 @@ TRACE = (
     / "sprint2"
     / "lin_canhan_s2_t021_t022_day2.json"
 )
+LATEST_MAIN_COMMIT = "012fa364894ffc7dd36a6dd91cdd21641550da06"
+DELIVERY_BASE_COMMIT = "a43ad37a5c8b97d2b90507fa9966998bfee038b9"
+IMPLEMENTATION_COMMIT = "f376574a5c8c5c577d6ed43efd200293023b3b32"
+EVENT_HARDENING_COMMIT = "0856b745075156e3da5365e74852aaa192329325"
+CLOSURE_COMMIT = "1a7fcf7169f3e3656507be878e896bf4db1dd9fd"
+FRONTEND_INTEGRATION_COMMIT = "e4f9c50f7c9ee6c058030c5d6e6739e9f1a480af"
 
 
 def _trace() -> dict[str, object]:
@@ -37,18 +45,36 @@ def test_day2_trace_locks_owner_pbi_ac_and_latest_main_base() -> None:
     assert trace["sprint"] == "Sprint2"
     assert trace["deliveryDay"] == "Day2"
     assert trace["owner"] == "林粲涵"
-    assert trace["verifiedAgainstMainCommit"] == (
-        "a43ad37a5c8b97d2b90507fa9966998bfee038b9"
-    )
-    assert trace["deliveryBaseCommit"] == (
-        "a43ad37a5c8b97d2b90507fa9966998bfee038b9"
-    )
-    assert trace["implementationCommit"] == (
-        "f376574a5c8c5c577d6ed43efd200293023b3b32"
-    )
-    assert trace["eventContractHardeningCommit"] == (
-        "0856b745075156e3da5365e74852aaa192329325"
-    )
+    assert trace["verifiedAgainstMainCommit"] == LATEST_MAIN_COMMIT
+    assert trace["deliveryBaseCommit"] == DELIVERY_BASE_COMMIT
+    assert trace["implementationCommit"] == IMPLEMENTATION_COMMIT
+    assert trace["eventContractHardeningCommit"] == EVENT_HARDENING_COMMIT
+    assert trace["compatibilityClosureCommit"] == CLOSURE_COMMIT
+    assert trace["frontendIntegrationCommit"] == FRONTEND_INTEGRATION_COMMIT
+    for commit in (
+        LATEST_MAIN_COMMIT,
+        DELIVERY_BASE_COMMIT,
+        IMPLEMENTATION_COMMIT,
+        EVENT_HARDENING_COMMIT,
+        CLOSURE_COMMIT,
+        FRONTEND_INTEGRATION_COMMIT,
+    ):
+        assert re.fullmatch(r"[0-9a-f]{40}", commit)
+        subprocess.run(
+            ["git", "cat-file", "-e", f"{commit}^{{commit}}"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    for ancestor in (DELIVERY_BASE_COMMIT, IMPLEMENTATION_COMMIT, EVENT_HARDENING_COMMIT):
+        subprocess.run(
+            ["git", "merge-base", "--is-ancestor", ancestor, LATEST_MAIN_COMMIT],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
     assert trace["pbi"]["pbiId"] == "PBI-11-B"
     assert trace["pbi"]["acceptanceCriteriaId"] == "AC-11-B"
 
@@ -116,7 +142,7 @@ def test_pbi_linkage_is_complete_through_downstream_consumers() -> None:
         "VERIFIED_WITH_INLINE_MISMATCH_FAIL_CLOSED"
     )
     assert links[("S2-T022", "S2-T023")]["status"] == (
-        "BACKEND_CONTRACT_READY_T023_FRONTEND_PENDING"
+        "BACKEND_AND_T023_FRONTEND_CONTRACT_INTEGRATED_PUBLIC_E2E_PENDING"
     )
     for link in links.values():
         for path in link["evidenceFiles"]:
@@ -157,7 +183,7 @@ def test_acceptance_and_authority_boundaries_cannot_be_silently_weakened() -> No
         "DELAY_AND_FATIGUE_USE_DEDICATED_ORGANIZER_DECISION; GENERIC_ACCEPT_REJECT_CANNOT_BYPASS_T021_EVIDENCE"
     )
     assert boundaries["frontendScope"] == (
-        "T023_FRONTEND_INTEGRATION_PENDING_OUTSIDE_THIS_DELIVERY"
+        "T023_FRONTEND_INTEGRATION_COMPLETE_AT_E4F9C50_PUBLIC_E2E_PENDING"
     )
 
 
@@ -169,7 +195,9 @@ def test_known_upstream_and_external_gaps_are_explicit_not_claimed_done() -> Non
     assert gaps["s2T005TwoThreePersonPlanVersionChain"] == (
         "BLOCKED_BY_S2_T005_UPSTREAM_DELIVERY"
     )
-    assert gaps["s2T023Frontend"] == "PENDING_OUTSIDE_THIS_DELIVERY"
+    assert gaps["s2T023Frontend"] == (
+        "LOCAL_CONTRACT_AND_UI_INTEGRATION_PASS_PUBLIC_E2E_PENDING"
+    )
     assert gaps["fatigueThresholds"] == "PO_CONFIRMATION_PENDING"
     assert gaps["lateBeyondRemainingWindowPolicy"] == "PO_CONFIRMATION_PENDING"
     assert gaps["onlineE2E"] == "NOT_CLAIMED"
@@ -177,18 +205,28 @@ def test_known_upstream_and_external_gaps_are_explicit_not_claimed_done() -> Non
     assert trace["externalAcceptanceStillNeeded"]
 
 
-def test_verification_is_pending_or_contains_real_final_results() -> None:
+def test_verification_separates_latest_trace_from_historical_functional_runs() -> None:
     verification = _trace()["localVerification"]
-    assert verification["status"] in {"PENDING", "PASS"}
-    if verification["status"] == "PENDING":
-        assert verification["focusedResult"] == "PENDING"
-        assert verification["backendResult"] == "PENDING"
-        assert verification["diffCheck"] == "PENDING"
-    else:
-        assert verification["focusedResult"] == "42 passed"
-        assert verification["boundaryResult"] == "43 passed"
-        assert verification["backendResult"] == "528 passed"
-        assert verification["frontendTest"] == "32 passed"
-        assert verification["frontendBuild"] == "PASS"
-        assert verification["frontendLint"] == "PASS_WITH_2_EXISTING_WARNINGS"
-        assert verification["diffCheck"] == "PASS"
+    assert verification["status"] == "LATEST_MAIN_FULL_REGRESSION_PASS"
+    assert verification["latestMainCommit"] == LATEST_MAIN_COMMIT
+    assert verification["latestMainTraceResult"] == "6 passed"
+    assert verification["historicalBaselineCommit"] == DELIVERY_BASE_COMMIT
+    assert verification["historicalFocusedResult"] == "42 passed"
+    assert verification["historicalBoundaryResult"] == "43 passed"
+    assert verification["historicalBackendResult"] == "528 passed"
+    assert verification["historicalFrontendTest"] == "32 passed"
+    assert verification["historicalFrontendBuild"] == "PASS"
+    assert verification["historicalFrontendLint"] == (
+        "PASS_WITH_2_EXISTING_WARNINGS"
+    )
+    assert verification["historicalDiffCheck"] == "PASS"
+    assert verification["latestMainClosureCommit"] == CLOSURE_COMMIT
+    assert verification["latestMainBackendResult"] == "633 passed in 78.57s"
+    assert verification["latestMainFrontendTest"] == "52 passed"
+    assert verification["latestMainFrontendBuild"] == "PASS"
+    assert verification["latestMainFrontendLint"] == (
+        "PASS_WITH_2_EXISTING_WARNINGS"
+    )
+    assert verification["latestMainDiffCheck"] == "PASS"
+    assert verification["latestMainFunctionalRegression"] == "PASS"
+    assert verification["onlineE2E"] == "NOT_RUN_NOT_CLAIMED"

@@ -316,4 +316,4 @@ Schema 校验失败沿用人工确认结构：
 - 任何未解决确认项都令 `status=CONFLICT_REVIEW`、`canPlan=false`、`readinessDigest=null`，Provider、推荐和规划边界必须在调用下游前拒绝。
 - 放宽会创建新的 T002 revision。旧确认随即变为 `NEEDS_RECONFIRMATION`，状态进入 `COLLECTING_MEMBERS`；只有所有成员在新 revision 重新确认且硬冲突为零，才可进入 `READY_TO_PLAN`。
 - `MemberSessionView` 返回 `collaborationVersion`，确保成员解决自己的确认项时能提交严格 `expectedVersion`。
-- 当前生产 `POST /api/v2/trips/conversations` 仍等待 T002 `TripDraftRevision` 接入并返回 503；S2-T029 不得伪造该上游能力。
+- 生产 `POST /api/v2/trips/conversations` 已接入 T002 `TripDraftRevision`；S2-T029 必须复用该 revision、权限与 readiness 结果，任何失败均不得伪造 READY 或规划成功。

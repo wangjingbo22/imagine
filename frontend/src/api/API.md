@@ -313,7 +313,7 @@ src/api/tripContract.ts
 - `POST /api/v1/trips/{tripId}/replans/{planId}/decision`：请求 `{schemaVersion:"1.0", decision:"ACCEPT"|"REJECT"}`。接受原子切换唯一 CURRENT；拒绝保留原计划。
 - 预览会绑定当时的 `readinessDigest/currentRevision`；成员资料变化后旧候选决策会失败。迟到/疲劳候选不能改用通用 V2 accept/reject 绕过此检查。
 - 百炼解释是可选展示字段。`UNAVAILABLE` 只表示解释降级，页面仍必须使用完整结构化候选和 Diff；不得根据解释文案改写任务、价格或状态。
-- 协作 Trip 调用以上接口必须继续携带 `X-Organizer-Token`。S2-T023 页面尚未在本次后端交付中实现。
+- 协作 Trip 调用以上接口必须继续携带 `X-Organizer-Token`。S2-T023 页面已接入迟到/疲劳草稿、确认事件、结构化 Diff 与专用接受/拒绝；解释 `UNAVAILABLE` 不阻断结构化结果或决策。
 
 ## 13. 多人硬冲突与组织者处理
 
@@ -322,7 +322,7 @@ src/api/tripContract.ts
 - `POST /api/v2/trips/{tripId}/confirmation-items/{itemId}/resolve`：携带组织者凭证、`Idempotency-Key`，并提交当前 `baseRevision/expectedVersion/relaxationId`。
 - 组织者只能点击 `actorScope=ORGANIZER` 的选项；成员选项显示“需对应成员本人处理”，不得由前端绕过权限。
 - 页面只有在 `status=READY_TO_PLAN && canPlan=true && readinessDigest!=null` 时显示唯一推荐入口。冲突解决后若成员状态为 `NEEDS_RECONFIRMATION`，应继续显示等待重新确认，不得直接进入规划。
-- 当前组织者创建入口仍依赖上游 T002，未接入时会返回 503；前端不得伪造成功状态。
+- 组织者创建入口已接入 T002 `TripDraftRevision` 生产实现；任何 revision、权限或 readiness 校验失败仍必须 fail-closed，前端不得伪造成功状态。
 
 ## 14. 尚未登记的远端接口
 

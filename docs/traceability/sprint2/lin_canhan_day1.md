@@ -1,6 +1,6 @@
 # 林粲涵 Sprint 2 Day1：S2-T019 / S2-T020 追溯
 
-本追溯以团队 `main@a43ad37a5c8b97d2b90507fa9966998bfee038b9` 为验证基线，林粲涵 Day1/Day2 联动修复的核心实现提交为 `f376574a5c8c5c577d6ed43efd200293023b3b32`，`occurredAt` 必填与幂等合同加固提交为 `0856b745075156e3da5365e74852aaa192329325`。两者保留 Day1 的 T019/T020 边界，并补齐已确认事件到 T021 的 `eventId` 联动。
+本追溯已在团队 `main@012fa364894ffc7dd36a6dd91cdd21641550da06` 上重新核对；原交付基线仍为 `a43ad37a5c8b97d2b90507fa9966998bfee038b9`，林粲涵 Day1/Day2 联动修复的核心实现提交仍为 `f376574a5c8c5c577d6ed43efd200293023b3b32`，`occurredAt` 必填与幂等合同加固提交仍为 `0856b745075156e3da5365e74852aaa192329325`。两者保留 Day1 的 T019/T020 边界，并补齐已确认事件到 T021 的 `eventId` 联动。
 
 ## PBI / AC / Task
 
@@ -33,11 +33,10 @@ S2-T019 rawText/currentTask
 
 ## 验收结果
 
-- S2-T019/T020 专项：`24 passed`
-- 后端全量：`528 passed`
-- 前端 Node 测试：`32 passed`
-- 前端生产构建与 lint：PASS
-- `git diff --check`：PASS
+- 最新 `main@012fa36` 的 Day1 追溯专项：`4 passed`。
+- S2-T019/T020 专项 `24 passed`、后端全量 `528 passed`、前端 `32 passed`、build/lint 与 diff check，均是原交付时基于 `a43ad37` 的历史记录；本次没有把这些数字当作最新 main 的功能重跑结果。
+- 最新 main 加收口提交已重跑：后端全量 `633 passed in 78.57s`，前端 `52 passed`，build 通过，lint 通过并保留 2 条既有 warning，diff check 通过。
+- T023 前端已完成本地契约与页面接线；公网浏览器链路仍待部署验收。
 
 机器可读文件为 `docs/traceability/sprint2/lin_canhan_day1.json`；测试会逐项验证新版需求范围、提交哈希、模块与验收文件、已确认事件幂等、T019→T021 `eventId` 联动以及产品阈值的 `PENDING` 状态。
 
@@ -47,5 +46,6 @@ S2-T019 rawText/currentTask
 
 1. 待 PO 最终确认疲劳三级的总步行、单段步行和休息间隔阈值；当前项目值只能视为待确认默认值。
 2. 待 PO 确认迟到超过剩余时间时，是编译为 0 后交 T021 判无解，还是立即返回冲突。
-3. 待王敬博确认 T023 的接口调用方式和固定问题文案；本交付提供 HTTP 契约与 Fixture，不实现页面。
+3. T023 已按冻结 HTTP 契约完成本地页面接线；仍需在目标公网部署验证真实浏览器与组织者权限链。
 4. 在线百炼验收需要一枚已轮换的 Key，仅放部署 Secret；不要发送到聊天或提交仓库。
+5. 公网端到端证据、非作者 Review、QA 与 PO 签字仍未由本次追溯刷新覆盖。

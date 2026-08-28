@@ -3,11 +3,12 @@
   "sprint": "Sprint2",
   "deliveryDay": "Day1",
   "owner": "林粲涵",
-  "verifiedAgainstMainCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
-  "integratedWithMainCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
+  "verifiedAgainstMainCommit": "012fa364894ffc7dd36a6dd91cdd21641550da06",
+  "integratedWithMainCommit": "012fa364894ffc7dd36a6dd91cdd21641550da06",
   "deliveryBaseCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
   "implementationCommit": "f376574a5c8c5c577d6ed43efd200293023b3b32",
   "contractHardeningCommit": "0856b745075156e3da5365e74852aaa192329325",
+  "compatibilityClosureCommit": "1a7fcf7169f3e3656507be878e896bf4db1dd9fd",
   "relatedDeliveryTrace": "docs/traceability/sprint2/lin_canhan_s2_t008_day1.json",
   "requirementsSource": [
     {
@@ -30,7 +31,7 @@
     "pbiId": "PBI-11-B",
     "acceptanceCriteriaId": "AC-11-B",
     "day1Coverage": "S2-T019_AND_S2-T020_IMPLEMENTED",
-    "remainingTasks": ["S2-T021", "S2-T022"]
+    "outsideDay1TasksNowDelivered": ["S2-T021", "S2-T022"]
   },
   "tasks": [
     {
@@ -161,18 +162,35 @@
     "no frontend component is implemented by this delivery"
   ],
   "localVerification": {
-    "focusedCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_s2_t019_execution_event_draft.py backend/tests/test_s2_t020_event_constraint_compiler.py backend/tests/test_s2_t019_t020_http.py",
-    "focusedResult": "24 passed",
-    "backendCommand": "python -B -m pytest -p no:cacheprovider -q",
-    "backendResult": "528 passed",
-    "frontendTest": "32 passed",
-    "frontendBuild": "PASS",
-    "frontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
-    "diffCheck": "PASS"
+    "status": "LATEST_MAIN_FULL_REGRESSION_PASS",
+    "latestMainCommit": "012fa364894ffc7dd36a6dd91cdd21641550da06",
+    "latestMainTraceCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_s2_lin_canhan_day1_traceability.py",
+    "latestMainTraceResult": "4 passed",
+    "historicalBaselineCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
+    "historicalFocusedCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_s2_t019_execution_event_draft.py backend/tests/test_s2_t020_event_constraint_compiler.py backend/tests/test_s2_t019_t020_http.py",
+    "historicalFocusedResult": "24 passed",
+    "historicalBackendCommand": "python -B -m pytest -p no:cacheprovider -q",
+    "historicalBackendResult": "528 passed",
+    "historicalFrontendTest": "32 passed",
+    "historicalFrontendBuild": "PASS",
+    "historicalFrontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
+    "historicalDiffCheck": "PASS",
+    "latestMainClosureCommit": "1a7fcf7169f3e3656507be878e896bf4db1dd9fd",
+    "latestMainBackendResult": "633 passed in 78.57s",
+    "latestMainFrontendTest": "52 passed",
+    "latestMainFrontendBuild": "PASS",
+    "latestMainFrontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
+    "latestMainDiffCheck": "PASS",
+    "latestMainFunctionalRegression": "PASS"
   },
   "productDecisionsStillNeeded": [
     "PO must confirm MILD MODERATE SEVERE walking and rest thresholds",
     "PO must confirm whether lateMinutes beyond remaining time compiles to zero or returns an immediate conflict",
     "Wang Jingbo must confirm S2-T023 endpoint and fixed question copy consumption"
+  ],
+  "externalAcceptanceStillNeeded": [
+    "S2-T023 frontend consumption and public-browser acceptance remain outside this delivery",
+    "live Bailian acceptance requires a valid rotated BAILIAN_API_KEY supplied only through deployment secrets",
+    "public end-to-end evidence plus non-author review, QA and PO sign-off are not claimed by this trace refresh"
   ]
 }

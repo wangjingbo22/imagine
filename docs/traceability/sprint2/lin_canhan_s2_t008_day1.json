@@ -5,10 +5,11 @@
   "scope": "DAY_1",
   "verifiedAgainst": {
     "remoteBranch": "origin/main",
-    "remoteMainCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
+    "remoteMainCommit": "012fa364894ffc7dd36a6dd91cdd21641550da06",
     "implementationCommit": "f376574a5c8c5c577d6ed43efd200293023b3b32",
     "verifiedAt": "2026-08-28"
   },
+  "compatibilityClosureCommit": "1a7fcf7169f3e3656507be878e896bf4db1dd9fd",
   "requirementsSource": {
     "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
     "ranges": [
@@ -184,15 +185,26 @@
   ],
   "relatedDeliveryTrace": "docs/traceability/sprint2/lin_canhan_day1.json",
   "localVerification": {
-    "status": "VERIFIED_ON_IMPLEMENTATION_COMMIT_AGAINST_MAIN_BASELINE",
+    "status": "LATEST_MAIN_FULL_REGRESSION_PASS",
     "verifiedAt": "2026-08-28",
-    "focusedCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_s2_t006_provider_fact_registry.py backend/tests/test_s2_t008_candidate_selection_gateway.py backend/tests/test_s2_t009_recommendation_orchestration.py backend/tests/test_s2_t003_recommendation_readiness.py",
-    "focusedResult": "87 passed",
-    "fullCommand": "python -B -m pytest -p no:cacheprovider -q",
-    "fullResult": "528 passed",
-    "frontendTest": "npm test: 32 passed",
-    "frontendBuild": "npm run build passed",
-    "frontendLint": "npm run lint passed with 2 existing warnings"
+    "latestMainCommit": "012fa364894ffc7dd36a6dd91cdd21641550da06",
+    "latestMainTraceCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_s2_t008_traceability.py",
+    "latestMainTraceResult": "6 passed",
+    "historicalBaselineCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
+    "historicalFocusedCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_s2_t006_provider_fact_registry.py backend/tests/test_s2_t008_candidate_selection_gateway.py backend/tests/test_s2_t009_recommendation_orchestration.py backend/tests/test_s2_t003_recommendation_readiness.py",
+    "historicalFocusedResult": "87 passed",
+    "historicalFullCommand": "python -B -m pytest -p no:cacheprovider -q",
+    "historicalFullResult": "528 passed",
+    "historicalFrontendTest": "npm test: 32 passed",
+    "historicalFrontendBuild": "npm run build passed",
+    "historicalFrontendLint": "npm run lint passed with 2 existing warnings",
+    "latestMainClosureCommit": "1a7fcf7169f3e3656507be878e896bf4db1dd9fd",
+    "latestMainBackendResult": "633 passed in 78.57s",
+    "latestMainFrontendTest": "52 passed",
+    "latestMainFrontendBuild": "PASS",
+    "latestMainFrontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
+    "latestMainDiffCheck": "PASS",
+    "latestMainFunctionalRegression": "PASS"
   },
   "externalEvidence": {
     "pullRequest": null,

@@ -15,8 +15,10 @@ TRACE_PATH = (
     / "sprint2"
     / "lin_canhan_s2_t008_day1.json"
 )
-REMOTE_MAIN_COMMIT = "a43ad37a5c8b97d2b90507fa9966998bfee038b9"
+REMOTE_MAIN_COMMIT = "012fa364894ffc7dd36a6dd91cdd21641550da06"
 IMPLEMENTATION_COMMIT = "f376574a5c8c5c577d6ed43efd200293023b3b32"
+HISTORICAL_BASELINE_COMMIT = "a43ad37a5c8b97d2b90507fa9966998bfee038b9"
+CLOSURE_COMMIT = "1a7fcf7169f3e3656507be878e896bf4db1dd9fd"
 
 
 def _trace() -> dict[str, object]:
@@ -153,9 +155,15 @@ def test_requirements_commits_external_evidence_and_needed_inputs_are_truthful()
     assert trace["verifiedAgainst"]["remoteBranch"] == "origin/main"
     assert trace["verifiedAgainst"]["remoteMainCommit"] == REMOTE_MAIN_COMMIT
     assert trace["verifiedAgainst"]["implementationCommit"] == IMPLEMENTATION_COMMIT
+    assert trace["compatibilityClosureCommit"] == CLOSURE_COMMIT
     assert re.fullmatch(r"[0-9a-f]{40}", REMOTE_MAIN_COMMIT)
     assert re.fullmatch(r"[0-9a-f]{40}", IMPLEMENTATION_COMMIT)
-    for commit in (REMOTE_MAIN_COMMIT, IMPLEMENTATION_COMMIT):
+    for commit in (
+        REMOTE_MAIN_COMMIT,
+        IMPLEMENTATION_COMMIT,
+        HISTORICAL_BASELINE_COMMIT,
+        CLOSURE_COMMIT,
+    ):
         subprocess.run(
             ["git", "cat-file", "-e", f"{commit}^{{commit}}"],
             cwd=REPO_ROOT,
@@ -168,8 +176,8 @@ def test_requirements_commits_external_evidence_and_needed_inputs_are_truthful()
             "git",
             "merge-base",
             "--is-ancestor",
-            REMOTE_MAIN_COMMIT,
             IMPLEMENTATION_COMMIT,
+            REMOTE_MAIN_COMMIT,
         ],
         cwd=REPO_ROOT,
         check=True,
@@ -213,19 +221,33 @@ def test_responsibility_boundary_forbids_planning_decisions() -> None:
 
 def test_local_verification_records_the_actual_acceptance_run() -> None:
     assert _trace()["localVerification"] == {
-        "status": "VERIFIED_ON_IMPLEMENTATION_COMMIT_AGAINST_MAIN_BASELINE",
+        "status": "LATEST_MAIN_FULL_REGRESSION_PASS",
         "verifiedAt": "2026-08-28",
-        "focusedCommand": (
+        "latestMainCommit": REMOTE_MAIN_COMMIT,
+        "latestMainTraceCommand": (
+            "python -B -m pytest -p no:cacheprovider -q "
+            "backend/tests/test_s2_t008_traceability.py"
+        ),
+        "latestMainTraceResult": "6 passed",
+        "historicalBaselineCommit": HISTORICAL_BASELINE_COMMIT,
+        "historicalFocusedCommand": (
             "python -B -m pytest -p no:cacheprovider -q "
             "backend/tests/test_s2_t006_provider_fact_registry.py "
             "backend/tests/test_s2_t008_candidate_selection_gateway.py "
             "backend/tests/test_s2_t009_recommendation_orchestration.py "
             "backend/tests/test_s2_t003_recommendation_readiness.py"
         ),
-        "focusedResult": "87 passed",
-        "fullCommand": "python -B -m pytest -p no:cacheprovider -q",
-        "fullResult": "528 passed",
-        "frontendTest": "npm test: 32 passed",
-        "frontendBuild": "npm run build passed",
-        "frontendLint": "npm run lint passed with 2 existing warnings",
+        "historicalFocusedResult": "87 passed",
+        "historicalFullCommand": "python -B -m pytest -p no:cacheprovider -q",
+        "historicalFullResult": "528 passed",
+        "historicalFrontendTest": "npm test: 32 passed",
+        "historicalFrontendBuild": "npm run build passed",
+        "historicalFrontendLint": "npm run lint passed with 2 existing warnings",
+        "latestMainClosureCommit": CLOSURE_COMMIT,
+        "latestMainBackendResult": "633 passed in 78.57s",
+        "latestMainFrontendTest": "52 passed",
+        "latestMainFrontendBuild": "PASS",
+        "latestMainFrontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
+        "latestMainDiffCheck": "PASS",
+        "latestMainFunctionalRegression": "PASS",
     }

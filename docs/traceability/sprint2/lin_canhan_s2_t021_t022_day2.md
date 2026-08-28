@@ -4,7 +4,8 @@
 
 - 负责人：林粲涵
 - PBI / AC：`PBI-11-B` / `AC-11-B`
-- 验证基线：远端 `main` 的 `a43ad37a5c8b97d2b90507fa9966998bfee038b9`
+- 最新兼容性验证基线：远端 `main` 的 `012fa364894ffc7dd36a6dd91cdd21641550da06`
+- 原交付基线：`a43ad37a5c8b97d2b90507fa9966998bfee038b9`
 - 实现提交：`f376574a5c8c5c577d6ed43efd200293023b3b32`
 - 事件合同加固提交：`0856b745075156e3da5365e74852aaa192329325`（`occurredAt` 必填，确保同一幂等请求可稳定重放）
 - Day 2：`S2-T021` 与 `S2-T022`（均为 Must；修订表当前剩余工时均为 0h）
@@ -16,7 +17,7 @@
 
 ## 模块联动
 
-`S2-T019 adjustmentEventId` → `S2-T020 EventConstraintSet` → `S2-T021 事件感知 PROPOSED V2 + readiness 绑定 + HARD 重验` → `S2-T022 专用接受/拒绝 + Diff` → `S2-T018` 版本回忆与待接入的 `S2-T023` 页面。
+`S2-T019 adjustmentEventId` → `S2-T020 EventConstraintSet` → `S2-T021 事件感知 PROPOSED V2 + readiness 绑定 + HARD 重验` → `S2-T022 专用接受/拒绝 + Diff` → 已本地接入的 `S2-T023` 页面与 `S2-T018` 版本回忆。
 
 ### S2-T021
 
@@ -70,12 +71,12 @@ DELAY/FATIGUE 候选不能经通用 `/accept` 或 `/reject` 绕过专用证据�
 - `backend/tests/test_bailian_replan_explanation.py`：模型严格输入/输出和失败降级。
 - `backend/tests/test_s2_lin_canhan_t021_t022_traceability.py`：PBI、依赖、边界和证据路径机器校验。
 
-本次记录的聚焦回归分别为 `42 passed` 和 `43 passed`；全量后端为 `528 passed`；前端测试 `32 passed`，生产构建与 lint 均通过。本文不声称公网在线 E2E 已完成。
+最新 `main@012fa36` 的 Day2 追溯专项为 `6 passed`。聚焦回归 `42 passed`、边界回归 `43 passed`、全量后端 `528 passed`、前端 `32 passed` 是原交付时基于 `a43ad37` 的历史记录；统一收口提交 `1a7fcf7169f3e3656507be878e896bf4db1dd9fd` 与 T023 前端接线提交 `e4f9c50f7c9ee6c058030c5d6e6739e9f1a480af` 已重新验证后端全量 `633 passed in 78.57s`、前端 `52 passed`、build 通过、lint 通过并保留 2 条既有 warning、diff check 通过。本文仍不声称公网在线 E2E 已完成。
 
 ## 仍需要的外部输入
 
 1. `S2-T006` 的具体 FactRef 注册表已经存在，但正式在线 Provider 路线构建器和公网事实验证仍是外部缺口；当前 planner 不会用推测路线冒充高德事实。
 2. `S2-T005` 的 2 人和 3 人 PlanVersion 共享链仍受上游单人快照契约阻塞，本交付没有擅自扩大该契约。
-3. `S2-T023` 仍需在前端消费预览、Diff 和专用接受/拒绝接口。
+3. `S2-T023` 已在本地前端消费预览、Diff 和专用接受/拒绝接口；仍需目标公网环境的真实浏览器证据。
 4. PO 仍需冻结 `MILD / MODERATE / SEVERE` 疲劳阈值，以及迟到超过剩余窗口时的最终产品口径。
 5. 如需真实千问或公网 E2E，请只通过部署 secrets 提供已轮换密钥，不要把明文 Key 写入聊天、代码或日志。

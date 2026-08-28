@@ -1,6 +1,6 @@
 # S2-T024 公网黄金路径与响应式验收
 
-> 当前状态：`LOCAL PASS / PUBLIC NOT_RUN`
+> 当前状态：`LOCAL PASS / PUBLIC NOT_RUN-BLOCKED`
 >
 > 负责人：林粲涵
 > 追溯链：`PBI-13-A -> AC-13-A -> S2-T024 -> UAT-S2-012 -> RESP-S2-001`
@@ -59,6 +59,8 @@ S2-T024 只验收 Sprint 2 既有主链在公网和移动视口中的可用性�
 
 第 3 项只是“Mock 阶段响应式 Fixture”，不代表这些阶段通过真实后端串成同一个行程。真实串链仍由第 2.2 节公网验收提供证据。
 
+后端另有 `backend/tests/test_s2_t024_full_golden_path.py`，在一个真实 ASGI app 和 SQLite 文件中验证同一单人 Trip 从六问、READY、Provider/FactRef 推荐、V1、GPS/照片、LATE/FATIGUE、V2 接受到 MemoryTimeline 的连续状态与持久化血缘。该测试同时回归 `planning_boundary_service.py` 使用 `plan.parent_id` 恢复被确认的调整事件。T023 前端已完成本地契约与页面接线；这些本地证据仍不替代真实浏览器和公网服务证据。
+
 自动化由下列文件承载：
 
 - `frontend/playwright.config.ts`
@@ -72,17 +74,19 @@ S2-T024 只验收 Sprint 2 既有主链在公网和移动视口中的可用性�
 
 | 门禁 | 内容 | 当前状态 | 主要证据 |
 |---|---|---|---|
-| T024-L01 | 响应式合同单测：无横向滚动、44px、状态可见、reduced-motion | PASS | 4 项 T024 合同测试；前端共 48 passed |
+| T024-L01 | 响应式合同单测：无横向滚动、44px、状态可见、reduced-motion | PASS | 4 项 T024 合同测试；前端共 52 passed |
 | T024-L02 | 375px 本地 Mock 浏览器合同 | PASS | 六问 → 推荐确认 → 生成路线 → 进入工作台；Mock 执行/V2/回忆仅作分阶段 UI 检查；公网视频仍待录制 |
 | T024-L03 | 768px 本地 Mock 浏览器合同 | PASS | 六问 → 推荐确认 → 生成路线 → 进入工作台；Mock 执行/V2/回忆仅作分阶段 UI 检查；公网视频仍待录制 |
-| T024-L04 | 前端全量 test/lint/build | PASS | 48 passed；build PASS；lint PASS（2 个既有 warning） |
-| T024-L05 | 后端可信单人链与门禁回归 | PASS | 聚焦 23 passed；全量 625 passed |
-| T024-P01 | 公网页面和同源 API 使用目标提交 | NOT_RUN | URL、health、build SHA |
+| T024-L04 | 前端全量 test/lint/build | PASS | 52 passed；build PASS；lint PASS（2 个既有 warning） |
+| T024-L05 | 后端可信单人全链与门禁回归 | PASS | 新增真实 ASGI/SQLite full golden path；全量 633 passed in 78.57s；含 `parent_id` 修复回归 |
+| T024-P01 | 公网页面和同源 API 使用目标提交 | BLOCKED | 当前 build `32bb112`，不是关闭提交 `1a7fcf7` |
 | T024-P02 | 375/768 真实浏览器连续验收 | NOT_RUN | `RESP-S2-001` 录屏和截图 |
-| T024-P03 | 真实高德/缓存事实和百炼降级边界 | NOT_RUN | 脱敏 Network/服务日志 |
+| T024-P03 | 真实高德/缓存事实和百炼降级边界 | BLOCKED | 当前公网未配置 `BAILIAN_API_KEY`；脱敏 Network/服务日志待补 |
 | T024-P04 | 验收签字 | NOT_RUN | 验收人、时间、结论 |
 
 只有所有本地门禁通过、目标提交已部署且公网门禁有真实证据时，才能把 S2-T024 标记为 `PASS`。旧部署、Mock 页面、源码截图或历史测试数字不能替代本轮证据。
+
+本轮本地记录：backend `633 passed in 78.57s`；frontend `52 passed`；lint 通过并保留 2 条既有 warning；build PASS；Playwright `14 passed in 31.4s`。T023 前端本地闭环；T032 明确排除。
 
 ## 4. 建议执行命令
 

@@ -3,9 +3,11 @@
   "sprint": "Sprint2",
   "deliveryDay": "Day3",
   "owner": "林粲涵",
-  "verifiedAgainstMainCommit": "61aee2c529ddbac7e573eed6cff73edf7e067b6e",
-  "deliveryBaseCommit": "61aee2c529ddbac7e573eed6cff73edf7e067b6e",
-  "implementationCommit": "67459279e57e666b9cd34918695483b1afd51914",
+  "verifiedAgainstMainCommit": "012fa364894ffc7dd36a6dd91cdd21641550da06",
+  "deliveryBaseCommit": "77daffedde92cf33ddae2ff1c378fefc40962910",
+  "implementationCommit": "1a7fcf7169f3e3656507be878e896bf4db1dd9fd",
+  "frontendIntegrationCommit": "e4f9c50f7c9ee6c058030c5d6e6739e9f1a480af",
+  "previousImplementationCommit": "67459279e57e666b9cd34918695483b1afd51914",
   "requirementsSource": [
     {
       "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
@@ -36,7 +38,7 @@
   "pbi": {
     "pbiId": "PBI-13-A",
     "acceptanceCriteriaId": "AC-13-A",
-    "coverage": "S2_T024_BACKEND_SINGLE_GOLDEN_AND_LOCAL_MOCK_UI_CONTRACT_PASS_PUBLIC_EVIDENCE_PENDING",
+    "coverage": "S2_T024_FULL_BACKEND_GOLDEN_AND_LOCAL_MOCK_UI_CONTRACT_PASS_PUBLIC_BLOCKED",
     "productAcceptance": "在 375px、768px 和公网环境完成六问、唯一推荐、执行、照片、V2 与回忆，文本不遮挡、操作可达、关键数字可读。"
   },
   "task": {
@@ -47,8 +49,8 @@
     "deliveryDay": "Day3",
     "priority": "Must",
     "storyPoints": 3,
-    "remainingHours": 2,
-    "status": "IMPLEMENTED_BACKEND_SINGLE_GOLDEN_AND_LOCAL_UI_CONTRACT_PASS_PUBLIC_EVIDENCE_PENDING",
+    "remainingHours": 0,
+    "status": "IMPLEMENTED_FULL_BACKEND_GOLDEN_AND_LOCAL_UI_CONTRACT_PASS_PUBLIC_BLOCKED",
     "dependsOn": "S2-T001~S2-T023",
     "journeyPhases": [
       "SIX_QUESTION_CONFIRMATION",
@@ -68,12 +70,19 @@
     "testFiles": [
       "backend/tests/test_s2_lin_canhan_s2_t024_traceability.py",
       "backend/tests/test_s2_t024_single_golden_path.py",
+      "backend/tests/test_s2_t024_full_golden_path.py",
       "backend/tests/test_s2_t003_readiness_guard.py",
+      "frontend/tests/s2T023ExecutionReplan.test.ts",
       "frontend/tests/s2T024ResponsiveContract.test.ts",
       "frontend/e2e/s2-t024-responsive.spec.ts"
     ],
     "moduleFiles": [
       "app/application/collaboration_planning_bridge.py",
+      "app/application/planning_boundary_service.py",
+      "frontend/src/api/tripApi.ts",
+      "frontend/src/domain/executionAdjustment.ts",
+      "frontend/src/services/executionAdjustment.ts",
+      "frontend/src/pages/WorkspacePage.tsx",
       "frontend/src/services/collaborationDraft.ts",
       "frontend/src/services/s2T024Acceptance.ts"
     ],
@@ -134,7 +143,7 @@
       "KEYBOARD_FOCUS_ORDER_VISIBLE",
       "REDUCED_MOTION_SUPPORTED"
     ],
-    "publicResult": "NOT_RUN_NOT_CLAIMED"
+    "publicResult": "NOT_RUN_BLOCKED_TARGET_BUILD_AND_BAILIAN"
   },
   "plannedFiles": [
     {
@@ -203,8 +212,10 @@
       "from": "S2-T019~S2-T023",
       "to": "S2-T024",
       "artifact": "LATE/FATIGUE proposed V2, structured Diff and organizer decision",
-      "status": "UPSTREAM_CONSUMED_NOT_REIMPLEMENTED",
+      "status": "FULL_BACKEND_AND_T023_FRONTEND_CONTRACT_VERIFIED_PUBLIC_PENDING",
       "evidenceFiles": [
+        "app/application/planning_boundary_service.py",
+        "backend/tests/test_s2_t024_full_golden_path.py",
         "frontend/src/services/executionReplan.ts",
         "docs/traceability/sprint2/lin_canhan_s2_t021_t022_day2.json"
       ]
@@ -213,7 +224,7 @@
       "from": "S2-T024",
       "to": "PBI-13-A",
       "artifact": "UAT-S2-012 plus RESP-S2-001 acceptance package",
-      "status": "LOCAL_AUTOMATION_VERIFIED_PUBLIC_EXECUTION_PENDING",
+      "status": "LOCAL_AUTOMATION_VERIFIED_PUBLIC_EXECUTION_BLOCKED",
       "evidenceFiles": [
         "docs/testing/s2_t024_public_acceptance.md",
         "docs/testing/evidence/s2_t024/README.md"
@@ -248,28 +259,32 @@
   "knownGaps": {
     "plannedFrontendFiles": "IMPLEMENTED",
     "localResponsiveAutomation": "PASS_14_MOCK_UI_CONTRACT_TESTS_AT_375_AND_768",
-    "localBackendGoldenPath": "PASS_REAL_ASGI_AND_SQLITE_SINGLE_PERSON_CHAIN",
+    "localBackendGoldenPath": "PASS_REAL_ASGI_AND_SQLITE_SINGLE_PERSON_FULL_CHAIN_THROUGH_V2_AND_MEMORY",
+    "parentPlanRestoreFix": "PASS_V2_RESTORE_USES_PLAN_PARENT_ID_NOT_NONEXISTENT_PARENT_PLAN_ID",
     "browserBackendMode": "MOCKED_UI_INTEGRATION_NOT_A_CONTINUOUS_REAL_BACKEND_CHAIN",
-    "publicNetworkE2E": "NOT_RUN_NOT_CLAIMED",
-    "realAmapAndBailianEvidence": "EXTERNAL_RUNTIME_INPUT_PENDING",
+    "t023Frontend": "LOCAL_CONTRACT_AND_UI_INTEGRATION_PASS_PUBLIC_E2E_PENDING",
+    "publicDeploymentBuild": "32bb112a5eb7ec1e0e3d052ec060defe9f3627c1_NOT_CLOSURE_COMMIT",
+    "publicNetworkE2E": "NOT_RUN_BLOCKED_TARGET_BUILD_AND_BAILIAN",
+    "realAmapAndBailianEvidence": "BAILIAN_NOT_CONFIGURED_ON_CURRENT_PUBLIC_BUILD",
     "teacherSignoff": "PENDING",
     "t032": "EXCLUDED_SEPARATE_TASK_NOT_CLAIMED"
   },
   "localVerification": {
     "status": "PASS",
     "traceabilityCommand": "python -m pytest -q backend/tests/test_s2_lin_canhan_s2_t024_traceability.py",
-    "traceabilityResult": "7 passed",
+    "traceabilityResult": "8 passed",
     "focusedCommand": "npm test -- s2T024ResponsiveContract.test.ts && npx playwright test e2e/s2-t024-responsive.spec.ts",
-    "focusedResult": "23 backend focused passed in 2.67s; 8 readiness/cache closure passed in 2.31s; 14 Playwright passed in 30.5s",
-    "backendFull": "625 passed in 71.21s",
+    "focusedResult": "full backend golden path passed inside the 633-test backend suite; 14 Playwright passed in 31.4s",
+    "backendFull": "633 passed in 78.57s",
     "frontendContractResult": "4 T024 contract tests passed within 48 frontend tests",
     "playwright375Result": "7 passed",
     "playwright768Result": "7 passed",
-    "frontendTest": "48 passed",
+    "playwrightAll": "14 passed in 31.4s",
+    "frontendTest": "52 passed",
     "frontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
     "frontendBuild": "PASS",
     "diffCheck": "PASS",
-    "onlineE2E": "NOT_RUN_NOT_CLAIMED"
+    "onlineE2E": "NOT_RUN_BLOCKED_TARGET_BUILD_AND_BAILIAN"
   },
   "neededInputs": [
     "target-build public frontend and backend URLs",

@@ -3,10 +3,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
+import subprocess
 
 
 ROOT = Path(__file__).parents[2]
 TRACE = ROOT / "docs" / "traceability" / "sprint2" / "lin_canhan_day1.json"
+LATEST_MAIN_COMMIT = "012fa364894ffc7dd36a6dd91cdd21641550da06"
+DELIVERY_BASE_COMMIT = "a43ad37a5c8b97d2b90507fa9966998bfee038b9"
+IMPLEMENTATION_COMMIT = "f376574a5c8c5c577d6ed43efd200293023b3b32"
+CONTRACT_HARDENING_COMMIT = "0856b745075156e3da5365e74852aaa192329325"
+CLOSURE_COMMIT = "1a7fcf7169f3e3656507be878e896bf4db1dd9fd"
 
 
 def _trace() -> dict[str, object]:
@@ -32,21 +38,36 @@ def test_trace_identifies_latest_main_delivery_base_and_real_implementation() ->
     assert trace["owner"] == "林粲涵"
     assert trace["sprint"] == "Sprint2"
     assert trace["deliveryDay"] == "Day1"
-    assert trace["verifiedAgainstMainCommit"] == (
-        "a43ad37a5c8b97d2b90507fa9966998bfee038b9"
-    )
+    assert trace["verifiedAgainstMainCommit"] == LATEST_MAIN_COMMIT
     assert trace["integratedWithMainCommit"] == trace["verifiedAgainstMainCommit"]
-    assert trace["deliveryBaseCommit"] == (
-        "a43ad37a5c8b97d2b90507fa9966998bfee038b9"
-    )
-    assert trace["implementationCommit"] == (
-        "f376574a5c8c5c577d6ed43efd200293023b3b32"
-    )
-    assert trace["contractHardeningCommit"] == (
-        "0856b745075156e3da5365e74852aaa192329325"
-    )
+    assert trace["deliveryBaseCommit"] == DELIVERY_BASE_COMMIT
+    assert trace["implementationCommit"] == IMPLEMENTATION_COMMIT
+    assert trace["contractHardeningCommit"] == CONTRACT_HARDENING_COMMIT
+    assert trace["compatibilityClosureCommit"] == CLOSURE_COMMIT
     assert re.fullmatch(r"[0-9a-f]{40}", trace["implementationCommit"])
     assert re.fullmatch(r"[0-9a-f]{40}", trace["contractHardeningCommit"])
+    for commit in (
+        LATEST_MAIN_COMMIT,
+        DELIVERY_BASE_COMMIT,
+        IMPLEMENTATION_COMMIT,
+        CONTRACT_HARDENING_COMMIT,
+        CLOSURE_COMMIT,
+    ):
+        subprocess.run(
+            ["git", "cat-file", "-e", f"{commit}^{{commit}}"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    for ancestor in (DELIVERY_BASE_COMMIT, IMPLEMENTATION_COMMIT, CONTRACT_HARDENING_COMMIT):
+        subprocess.run(
+            ["git", "merge-base", "--is-ancestor", ancestor, LATEST_MAIN_COMMIT],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
 
 def test_pbi_ac_tasks_and_all_evidence_paths_are_machine_resolvable() -> None:
@@ -55,7 +76,7 @@ def test_pbi_ac_tasks_and_all_evidence_paths_are_machine_resolvable() -> None:
         "pbiId": "PBI-11-B",
         "acceptanceCriteriaId": "AC-11-B",
         "day1Coverage": "S2-T019_AND_S2-T020_IMPLEMENTED",
-        "remainingTasks": ["S2-T021", "S2-T022"],
+        "outsideDay1TasksNowDelivered": ["S2-T021", "S2-T022"],
     }
     tasks = {task["taskId"]: task for task in trace["tasks"]}
     assert set(tasks) == {"S2-T019", "S2-T020"}
@@ -135,12 +156,27 @@ def test_runtime_linkages_are_explicit_and_honest_about_day2_boundary() -> None:
 def test_verification_and_required_acceptance_artifacts_are_locked() -> None:
     trace = _trace()
     verification = trace["localVerification"]
-    assert verification["focusedResult"] == "24 passed"
-    assert verification["backendResult"] == "528 passed"
-    assert verification["frontendTest"] == "32 passed"
-    assert verification["frontendBuild"] == "PASS"
-    assert verification["frontendLint"] == "PASS_WITH_2_EXISTING_WARNINGS"
-    assert verification["diffCheck"] == "PASS"
+    assert verification["status"] == "LATEST_MAIN_FULL_REGRESSION_PASS"
+    assert verification["latestMainCommit"] == LATEST_MAIN_COMMIT
+    assert verification["latestMainTraceResult"] == "4 passed"
+    assert verification["historicalBaselineCommit"] == DELIVERY_BASE_COMMIT
+    assert verification["historicalFocusedResult"] == "24 passed"
+    assert verification["historicalBackendResult"] == "528 passed"
+    assert verification["historicalFrontendTest"] == "32 passed"
+    assert verification["historicalFrontendBuild"] == "PASS"
+    assert verification["historicalFrontendLint"] == (
+        "PASS_WITH_2_EXISTING_WARNINGS"
+    )
+    assert verification["historicalDiffCheck"] == "PASS"
+    assert verification["latestMainClosureCommit"] == CLOSURE_COMMIT
+    assert verification["latestMainBackendResult"] == "633 passed in 78.57s"
+    assert verification["latestMainFrontendTest"] == "52 passed"
+    assert verification["latestMainFrontendBuild"] == "PASS"
+    assert verification["latestMainFrontendLint"] == (
+        "PASS_WITH_2_EXISTING_WARNINGS"
+    )
+    assert verification["latestMainDiffCheck"] == "PASS"
+    assert verification["latestMainFunctionalRegression"] == "PASS"
 
     tasks = {task["taskId"]: task for task in trace["tasks"]}
     assert "backend/schemas/execution_event_draft.schema.json" in (
@@ -150,3 +186,7 @@ def test_verification_and_required_acceptance_artifacts_are_locked() -> None:
         tasks["S2-T020"]["fixtureFiles"]
     )
     assert trace["productDecisionsStillNeeded"]
+    external = trace["externalAcceptanceStillNeeded"]
+    assert any("S2-T023" in item for item in external)
+    assert any("BAILIAN_API_KEY" in item for item in external)
+    assert any("public end-to-end" in item for item in external)
