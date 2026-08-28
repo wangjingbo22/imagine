@@ -7,6 +7,7 @@
   "integratedWithMainCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
   "deliveryBaseCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
   "implementationCommit": "f376574a5c8c5c577d6ed43efd200293023b3b32",
+  "contractHardeningCommit": "0856b745075156e3da5365e74852aaa192329325",
   "relatedDeliveryTrace": "docs/traceability/sprint2/lin_canhan_s2_t008_day1.json",
   "requirementsSource": [
     {

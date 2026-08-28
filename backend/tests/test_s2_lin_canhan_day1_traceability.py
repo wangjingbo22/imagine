@@ -42,7 +42,11 @@ def test_trace_identifies_latest_main_delivery_base_and_real_implementation() ->
     assert trace["implementationCommit"] == (
         "f376574a5c8c5c577d6ed43efd200293023b3b32"
     )
+    assert trace["contractHardeningCommit"] == (
+        "0856b745075156e3da5365e74852aaa192329325"
+    )
     assert re.fullmatch(r"[0-9a-f]{40}", trace["implementationCommit"])
+    assert re.fullmatch(r"[0-9a-f]{40}", trace["contractHardeningCommit"])
 
 
 def test_pbi_ac_tasks_and_all_evidence_paths_are_machine_resolvable() -> None:

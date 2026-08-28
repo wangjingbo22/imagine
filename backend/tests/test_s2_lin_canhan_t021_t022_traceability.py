@@ -46,6 +46,9 @@ def test_day2_trace_locks_owner_pbi_ac_and_latest_main_base() -> None:
     assert trace["implementationCommit"] == (
         "f376574a5c8c5c577d6ed43efd200293023b3b32"
     )
+    assert trace["eventContractHardeningCommit"] == (
+        "0856b745075156e3da5365e74852aaa192329325"
+    )
     assert trace["pbi"]["pbiId"] == "PBI-11-B"
     assert trace["pbi"]["acceptanceCriteriaId"] == "AC-11-B"
 

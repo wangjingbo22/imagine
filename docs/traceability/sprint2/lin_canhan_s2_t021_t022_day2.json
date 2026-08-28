@@ -6,6 +6,7 @@
   "verifiedAgainstMainCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
   "deliveryBaseCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
   "implementationCommit": "f376574a5c8c5c577d6ed43efd200293023b3b32",
+  "eventContractHardeningCommit": "0856b745075156e3da5365e74852aaa192329325",
   "requirementsSource": [
     {
       "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
