@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from itertools import combinations
 from typing import Literal, Protocol
+from unicodedata import normalize
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import ValidationError
@@ -14,6 +15,7 @@ from app.application.collaboration_ports import (
     CollaborationReadinessGuard,
     PlanningAccess,
     PlanningOperation,
+    TripDraftRevisionView,
 )
 from app.application.llm_gateway import CandidateSelectionGateway
 from app.core.errors import AppError
@@ -26,6 +28,8 @@ from app.domain.recommendation import (
     RecommendationBundle,
     TrustedPlan,
 )
+from app.domain.models import Place, SourceStatus
+from app.domain.hard_conflicts import assistance_profile_from_care
 from app.services.fairness import (
     DeterministicFairRecommendationService,
     FairRecommendationCandidate,
@@ -43,6 +47,8 @@ from app.services.recommendation import (
     ProviderCandidateSelectionRequest,
     ProviderCandidateFactView,
     ProviderFactBundle,
+    ProviderFactIssueDraft,
+    ProviderFactSetSummary,
     RecommendationOrchestrationRequest,
     RecommendationOrchestrationResult,
 )
@@ -50,7 +56,18 @@ from app.schemas.llm import (
     ConfirmedTripSummary,
     ProviderCandidateFact,
 )
-from app.schemas.trip import PreferenceType
+from app.schemas.constraint import Constraint
+from app.schemas.trip import (
+    CityContext,
+    Participant,
+    Preference,
+    PreferenceType,
+    Trip,
+    TripDayInput,
+    TripMode,
+    TripStatus,
+)
+from app.services.planning.models import CandidateEndpointFact
 
 
 class RecommendationOrchestrationError(ValueError):
@@ -96,6 +113,8 @@ class ProviderFactRegistryPort(Protocol):
         fact_set_id: str,
     ) -> ProviderFactBundle: ...
 
+    def issue(self, draft: ProviderFactIssueDraft) -> ProviderFactSetSummary: ...
+
 
 class CandidateProposalGatewayPort(Protocol):
     """T008 seam: one Qwen call returning an untrusted strict-JSON payload."""
@@ -120,6 +139,12 @@ class RouteCandidateBuilderPort(Protocol):
 class _BuiltCandidates:
     candidates: tuple[FairRecommendationCandidate, ...]
     selected_ids_by_candidate: dict[str, tuple[str, ...]]
+
+
+@dataclass(frozen=True, slots=True)
+class IssuedProviderCandidates:
+    summary: ProviderFactSetSummary
+    facts: tuple[FactRef, ...]
 
 
 class RecommendationOrchestrationService:
@@ -374,6 +399,49 @@ class RecommendationOrchestrationService:
 
         bundle = trusted.rank(candidates, ranking)
         return trusted.choose_single_plan(bundle, facts, members)
+
+    def issue_provider_candidate_facts(
+        self,
+        *,
+        trip: Trip,
+        start_location: CandidateEndpointFact,
+        end_location: CandidateEndpointFact,
+        confirmed_constraints: tuple[Constraint, ...],
+        confirmed_trip_summary: dict[str, object],
+        provider_places: Sequence[Place],
+    ) -> IssuedProviderCandidates:
+        """Filter and sign the T030 allowlist before any LLM sees it."""
+
+        places = TrustedRecommendationService.pre_filter_provider_places(
+            provider_places,
+            trip=trip,
+        )
+        draft = ProviderFactIssueDraft(
+            trip=trip,
+            start_location=start_location,
+            end_location=end_location,
+            confirmed_constraints=confirmed_constraints,
+            confirmed_trip_summary=confirmed_trip_summary,
+            places=tuple(places),
+            routes=(),
+        )
+        summary = self._fact_registry.issue(draft)
+        places_by_id = {item.placeId: item for item in places}
+        facts = tuple(
+            FactRef(
+                fact_ref_id=reference.fact_ref_id,
+                place=places_by_id[reference.provider_object_id],
+            )
+            for reference in summary.references
+            if reference.kind == "PLACE"
+        )
+        if not 6 <= len(facts) <= 8:
+            raise RecommendationOrchestrationError(
+                "PROVIDER_FACT_ISSUANCE_INVALID",
+                "服务端 FactRef 签发结果必须包含 6–8 个地点候选",
+                http_status=500,
+            )
+        return IssuedProviderCandidates(summary=summary, facts=facts)
 
     def _restore_facts(
         self,
@@ -655,6 +723,137 @@ def _stable_unique_text(values: Sequence[str], *, limit: int) -> tuple[str, ...]
     return tuple(result)
 
 
+def _normalized_text(value: str) -> str:
+    return " ".join(normalize("NFKC", value).strip().casefold().split())
+
+
+def _place_matches_label(place: Place, label: str) -> bool:
+    expected = _normalized_text(label)
+    if not expected:
+        return False
+    name = _normalized_text(place.name)
+    provider_id = _normalized_text(place.placeId)
+    return (
+        expected == provider_id
+        or expected in name
+        or name in expected
+    )
+
+
+def project_collaboration_recommendation_trip(
+    revision: TripDraftRevisionView,
+    city_context: CityContext,
+) -> Trip:
+    """Project a READY 1–3 member revision without writing planning state."""
+
+    shared = revision.understanding.trip
+    required_shared = {
+        "trip.cityName": shared.city_name,
+        "trip.travelDate": shared.travel_date,
+        "trip.startTime": shared.start_time,
+        "trip.endTime": shared.end_time,
+        "trip.startLocationText": shared.start_location_text,
+        "trip.endLocationText": shared.end_location_text,
+        "trip.budgetCents": shared.budget_cents,
+    }
+    missing = [path for path, value in required_shared.items() if value is None]
+    projected_participants: list[Participant] = []
+    for index, item in enumerate(revision.understanding.participants):
+        participant_id = revision.member_bindings.get(item.member_key)
+        fields = {
+            f"participants[{index}].participantId": participant_id,
+            f"participants[{index}].nickname": item.nickname,
+            f"participants[{index}].budgetCapCents": item.budget_cap_cents,
+            f"participants[{index}].careDraft": item.care_draft,
+        }
+        missing.extend(path for path, value in fields.items() if value is None)
+        if any(value is None for value in fields.values()):
+            continue
+        assert isinstance(participant_id, UUID)
+        assert item.nickname is not None
+        assert item.budget_cap_cents is not None
+        assert item.care_draft is not None
+        preferences = [
+            Preference(
+                type=PreferenceType.INTEREST,
+                value=value,
+                weight=4,
+                is_hard=False,
+            )
+            for value in item.interests
+        ]
+        preferences.extend(
+            Preference(
+                type=PreferenceType.MUST_VISIT,
+                value=value,
+                weight=5,
+                is_hard=True,
+            )
+            for value in item.must_visit
+        )
+        preferences.extend(
+            Preference(
+                type=PreferenceType.AVOID_PLACE,
+                value=value,
+                weight=5,
+                is_hard=True,
+            )
+            for value in item.avoid_places
+        )
+        projected_participants.append(
+            Participant(
+                participant_id=participant_id,
+                nickname=item.nickname,
+                budget_cap_cents=item.budget_cap_cents,
+                preferences=preferences,
+                assistance_profile=assistance_profile_from_care(item.care_draft),
+            )
+        )
+    if missing:
+        raise AppError(
+            "COLLABORATION_CANONICAL_TRIP_INCOMPLETE",
+            "READY 协作版本缺少签发 Provider FactRef 所需字段",
+            409,
+            False,
+            errors=[{"path": path, "message": "required"} for path in missing],
+        )
+
+    assert shared.travel_date is not None
+    assert shared.start_time is not None and shared.end_time is not None
+    assert shared.start_location_text is not None
+    assert shared.end_location_text is not None
+    assert shared.budget_cents is not None
+    return Trip(
+        schema_version="1.0",
+        trip_id=revision.trip_id,
+        mode=(
+            TripMode.SINGLE
+            if len(projected_participants) == 1
+            else TripMode.GROUP
+        ),
+        status=TripStatus.CONSTRAINT_CONFIRMED,
+        city_context=city_context,
+        start_date=shared.travel_date,
+        end_date=shared.travel_date,
+        currency="CNY",
+        total_budget_cents=shared.budget_cents,
+        participants=projected_participants,
+        days=[
+            TripDayInput(
+                day_index=0,
+                date=shared.travel_date,
+                daily_budget_cents=shared.budget_cents,
+                start_location_text=shared.start_location_text,
+                end_location_text=shared.end_location_text,
+                time_window={
+                    "start": f"{shared.start_time}:00",
+                    "end": f"{shared.end_time}:00",
+                },
+            )
+        ],
+    )
+
+
 def _proposal_orders(selected: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
     candidates: list[tuple[str, ...]] = [selected, tuple(reversed(selected))]
     if len(selected) == 3:
@@ -714,6 +913,98 @@ class MemberPreference:
 
 class TrustedRecommendationService:
     """Issues only provider-backed FactRefs and accepts only an ID whitelist."""
+
+    @staticmethod
+    def pre_filter_provider_places(
+        places: Sequence[Place],
+        *,
+        trip: Trip,
+    ) -> list[Place]:
+        """Apply only deterministic, Provider-observable HARD constraints.
+
+        Route-only care limits remain for the route planner.  At the place
+        issuance boundary we can already fail closed on city/source, hard
+        avoid labels, duplicate Provider IDs, missing must-visits and a known
+        single-place price that exceeds any confirmed trip/member budget cap.
+        """
+
+        must_visit: list[str] = []
+        avoid_places: list[str] = []
+        interests: list[str] = []
+        for participant in trip.participants:
+            for preference in participant.preferences:
+                target = (
+                    interests
+                    if preference.type is PreferenceType.INTEREST
+                    else must_visit
+                    if preference.type is PreferenceType.MUST_VISIT
+                    else avoid_places
+                )
+                target.append(preference.value)
+
+        required = _stable_unique_text(must_visit, limit=9)
+        if len(required) > 8:
+            raise RecommendationOrchestrationError(
+                "TOO_MANY_HARD_MUST_VISIT_PLACES",
+                "硬性必去地点超过 8 个，无法签发 6–8 个可信候选",
+            )
+        avoided = _stable_unique_text(avoid_places, limit=24)
+        interest_words = tuple(_normalized_text(item) for item in interests)
+        budget_limit = min(
+            trip.total_budget_cents,
+            *(participant.budget_cap_cents for participant in trip.participants),
+        )
+        trusted_statuses = {SourceStatus.ONLINE, SourceStatus.VERIFIED_CACHE}
+        unique: dict[str, Place] = {}
+        for place in places:
+            if place.placeId in unique:
+                continue
+            if place.cityCode != trip.city_context.city_code:
+                continue
+            if place.provenance.sourceStatus not in trusted_statuses:
+                continue
+            if any(_place_matches_label(place, label) for label in avoided):
+                continue
+            amount = place.priceReference.amountCents
+            if amount is not None and amount > budget_limit:
+                continue
+            unique[place.placeId] = place
+
+        filtered = list(unique.values())
+        missing_required = [
+            label
+            for label in required
+            if not any(_place_matches_label(place, label) for place in filtered)
+        ]
+        if missing_required:
+            raise RecommendationOrchestrationError(
+                "HARD_MUST_VISIT_FACT_MISSING",
+                "高德/缓存事实未覆盖全部硬性必去地点："
+                + "、".join(missing_required),
+            )
+
+        def sort_key(place: Place) -> tuple[int, int, int, int, str]:
+            is_required = any(
+                _place_matches_label(place, label) for label in required
+            )
+            haystack = _normalized_text(f"{place.name} {place.category or ''}")
+            interest_matches = sum(word in haystack for word in interest_words)
+            amount = place.priceReference.amountCents
+            return (
+                0 if is_required else 1,
+                -interest_matches,
+                0 if place.provenance.sourceStatus is SourceStatus.ONLINE else 1,
+                amount if amount is not None else 10**12,
+                place.placeId,
+            )
+
+        selected = sorted(filtered, key=sort_key)[:8]
+        if len(selected) < 6:
+            raise RecommendationOrchestrationError(
+                "INSUFFICIENT_TRUSTED_PROVIDER_CANDIDATES",
+                "硬约束预过滤后不足 6 个高德/缓存地点，禁止签发 FactRef",
+            )
+        return selected
 
     @staticmethod
     def issue_candidates(
@@ -895,6 +1186,7 @@ class TrustedRecommendationService:
 __all__ = [
     "CandidateProposalGatewayError",
     "CandidateProposalGatewayPort",
+    "IssuedProviderCandidates",
     "MemberPreference",
     "ProviderFactRegistryPort",
     "ProviderFactRestoreError",
@@ -904,4 +1196,5 @@ __all__ = [
     "RouteCandidateBuildError",
     "RouteCandidateBuilderPort",
     "TrustedRecommendationService",
+    "project_collaboration_recommendation_trip",
 ]

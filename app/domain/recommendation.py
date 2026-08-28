@@ -5,10 +5,12 @@ an LLM can never authorise planning facts or workflow state.
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import Field
 
 from app.domain.collaboration import CollaborationModel
-from app.domain.models import Place
+from app.domain.models import Place, SourceStatus
 
 
 class FactRef(CollaborationModel):
@@ -26,6 +28,14 @@ class CandidatePlace(CollaborationModel):
 class CandidateRecommendation(CollaborationModel):
     place_id: str
     reason: str = Field(min_length=1, max_length=80)
+
+
+class CandidateFactProvenance(CollaborationModel):
+    fact_ref_id: str = Field(min_length=1, max_length=160)
+    provider_object_id: str = Field(min_length=1, max_length=160)
+    source_status: SourceStatus
+    fetched_at: datetime
+    is_stale: bool
 
 
 class LlmRanking(CollaborationModel):
@@ -58,9 +68,18 @@ class RecommendationBundle(CollaborationModel):
     recommendations: list[CandidateRecommendation] = Field(min_length=1, max_length=8)
     used_deterministic_fallback: bool
     trusted_plan: TrustedPlan | None = None
+    fact_set_id: str | None = Field(default=None, min_length=1, max_length=160)
+    provider_fact_digest: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    provenance: list[CandidateFactProvenance] = Field(
+        default_factory=list,
+        max_length=8,
+    )
 
 
 __all__ = [
-    "CandidatePlace", "CandidateRecommendation", "FactRef", "LlmRanking", "MemberScore",
-    "RecommendationBundle", "TrustedPlan",
+    "CandidateFactProvenance", "CandidatePlace", "CandidateRecommendation",
+    "FactRef", "LlmRanking", "MemberScore", "RecommendationBundle", "TrustedPlan",
 ]

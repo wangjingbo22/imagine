@@ -111,7 +111,7 @@ class SqliteProviderFactRegistry:
     def _reference_for_place(place: Place) -> ProviderFactReferenceSummary:
         payload_digest = _sha256(place)
         return ProviderFactReferenceSummary(
-            fact_ref_id=f"fact-place-{payload_digest[:24]}",
+            fact_ref_id=f"AMAP:{payload_digest[:24]}",
             kind="PLACE",
             provider_object_id=place.placeId,
             payload_digest=payload_digest,
