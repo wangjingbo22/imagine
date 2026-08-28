@@ -100,7 +100,7 @@ class ExecutionEventDraftService:
         code: str,
     ) -> ExecutionEventDraftOutcome:
         # Never log the raw utterance, model response, or credentials.
-        logger.warning("执行调整草稿已回退到固定表单: %s", code)
+        logging.getLogger().warning("执行调整草稿已回退到固定表单: %s", code)
         return ExecutionEventDraftOutcome(
             draft=_deterministic_draft(request.raw_text, request.task_id),
             recognition_source="DEGRADED_FORM",

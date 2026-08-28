@@ -4,7 +4,7 @@
 
 ## 已验证
 
-- 前端：`npm test` 32 passed、`npm run build` 通过；测试运行器使用临时 Rolldown 产物，不依赖 Node 的 TypeScript strip-types 支持。
+- 前端：`npm test` 32 passed、`npm run build` 通过；测试运行器使用临时 Rolldown 产物，不依赖 Node 的 TypeScript strip-types 支持。后端全量：582 passed。
 - 协作：组织者创建、成员邀请兑换、成员会话提交与确认、版本化冲突处理已对齐 S2-T002/T003 契约；后端定向测试 43 passed。
 - 到达：一次 `getCurrentPosition` 保存定位证据并调用服务端到达判断；成功、过远、拒绝、超时和低精度均由服务端确定性返回，浏览器不可定位时保留人工完成任务路径；到达/回忆/重规划后端专项 43 passed。
 - 照片与回忆：媒体生命周期 API 覆盖上传替换、每趟 8 张守卫、软删除和删除后不可读取；回忆时间线由专项回归覆盖。
