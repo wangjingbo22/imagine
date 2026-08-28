@@ -1,6 +1,6 @@
 import { ArrowRight, CalendarDays, Check, Clock3, MapPin, Sparkles, UsersRound, WalletCards } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import { request } from '../api/client'
 import { AppShell } from '../components/AppShell'
 
@@ -13,13 +13,13 @@ const questions = [
   ['confirm', '请确认以上描述；还有什么不能妥协的限制？'],
 ] as const
 
-type Invitation = { tripId: string; participantId: string; expiresAt: string; status: string; sharedTrip: { cityName: string | null; travelDate: string | null; startTime: string | null; endTime: string | null; startLocationText: string | null; endLocationText: string | null; budgetCents: number | null; interests: string[]; mustVisit: string[]; avoidPlaces: string[] } }
+type Invitation = { tripId: string; participantId: string; currentRevision: number; collaborationVersion: number; sharedTrip: { cityName: string | null; travelDate: string | null; startTime: string | null; endTime: string | null; startLocationText: string | null; endLocationText: string | null; budgetCents: number | null; interests: string[]; mustVisit: string[]; avoidPlaces: string[] } }
 type State = { status: string; conflicts: Array<{ message: string; suggestion: string }> }
 type Parse = { parsed: { cityName: string | null; travelDate: string | null; interests: string[]; mustVisit: string[]; avoidPlaces: string[] }; canPlan: boolean; confirmationItems: Array<{ message: string }> }
-type SubmittedMember = { state: State; parse: Parse }
 
 export function MemberConversationPage() {
   const { token = '' } = useParams()
+  const location = useLocation()
   const [invitation, setInvitation] = useState<Invitation | null>(null)
   const [description, setDescription] = useState('')
   const [answers, setAnswers] = useState<string[]>(Array(questions.length).fill(''))
@@ -32,8 +32,14 @@ export function MemberConversationPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    request<Invitation>(`/api/v2/participant-invitations/${token}`)
-      .then((result) => {
+    const invitationToken = token || new URLSearchParams(location.hash.slice(1)).get('token') || ''
+    request<any>('/api/v2/participant-invitations/redeem', { method: 'POST', headers: { 'Idempotency-Key': `redeem-${crypto.randomUUID()}` }, body: JSON.stringify({ schemaVersion: '1.0', token: invitationToken }) })
+      .then((redeemed) => {
+        const session = redeemed.data.participantSessionToken
+        if (!session) throw new Error('邀请已被使用，请在原浏览器继续填写。')
+        window.sessionStorage.setItem(`participant-session:${redeemed.data.tripId}`, session)
+        return request<any>('/api/v2/member-session', { headers: { 'X-Participant-Session': session } })
+      }).then((result) => {
         setInvitation(result.data)
         const shared = result.data.sharedTrip
         setTripFields({
@@ -56,7 +62,7 @@ export function MemberConversationPage() {
       })
       .catch((caught) => setError(caught instanceof Error ? caught.message : '邀请链接无效。'))
       .finally(() => setLoading(false))
-  }, [token])
+  }, [location.hash, token])
 
   const ready = description.trim() && answers.every((answer) => answer.trim())
   const currentStepReady = step === 0
@@ -95,9 +101,11 @@ export function MemberConversationPage() {
     if (!ready) return
     setLoading(true); setError('')
     try {
-      const result = await request<SubmittedMember>(`/api/v2/participant-invitations/${token}/conversation`, { method: 'PUT', body: JSON.stringify(body()) })
-      setState(result.data.state)
-      setParse(result.data.parse)
+      if (!invitation) return
+      const session = window.sessionStorage.getItem(`participant-session:${invitation.tripId}`)
+      const result = await request<any>('/api/v2/member-session/conversation', { method: 'PUT', headers: { 'X-Participant-Session': session ?? '', 'Idempotency-Key': `member-conversation-${crypto.randomUUID()}` }, body: JSON.stringify({ schemaVersion: '1.0', baseRevision: invitation.currentRevision, expectedVersion: invitation.collaborationVersion, ...body() }) })
+      setInvitation(result.data)
+      setParse({ parsed: { cityName: result.data.sharedTrip.cityName, travelDate: result.data.sharedTrip.travelDate, interests: result.data.participant.interests ?? [], mustVisit: result.data.participant.mustVisit ?? [], avoidPlaces: result.data.participant.avoidPlaces ?? [] }, canPlan: true, confirmationItems: result.data.confirmationItems.map((item: any) => ({ message: item.reason })) })
     } catch (caught) { setError(caught instanceof Error ? caught.message : '资料整理失败。') }
     finally { setLoading(false) }
   }
@@ -105,8 +113,10 @@ export function MemberConversationPage() {
   async function confirm() {
     setLoading(true); setError('')
     try {
-      const result = await request<State>(`/api/v2/participant-invitations/${token}/confirm`, { method: 'POST' })
-      setState(result.data)
+      if (!invitation) return
+      const session = window.sessionStorage.getItem(`participant-session:${invitation.tripId}`)
+      const result = await request<any>('/api/v2/member-session/confirm', { method: 'POST', headers: { 'X-Participant-Session': session ?? '', 'Idempotency-Key': `member-confirm-${crypto.randomUUID()}` }, body: JSON.stringify({ schemaVersion: '1.0', baseRevision: invitation.currentRevision, expectedVersion: invitation.collaborationVersion }) })
+      setState({ status: result.data.status, conflicts: result.data.confirmationItems.map((item: any) => ({ message: item.reason, suggestion: '' })) })
       setParse(null)
     } catch (caught) { setError(caught instanceof Error ? caught.message : '确认失败。') }
     finally { setLoading(false) }
@@ -118,7 +128,7 @@ export function MemberConversationPage() {
   return <AppShell compact><main className="planner-layout"><section className="planner-panel" data-reveal="panel">
     <span className="section-kicker">MEMBER CONVERSATION</span>
     <h1>填写你的旅行偏好</h1>
-    <p>已复制组织者填写的共同信息，你可以逐项改成自己的需求；你的修改不会影响其他成员。邀请有效至 {new Date(invitation.expiresAt).toLocaleString('zh-CN')}。</p>
+    <p>已复制组织者填写的共同信息，你可以逐项改成自己的需求；你的修改不会影响其他成员。确认后邀请链接将失效。</p>
     <section className="shared-trip-card"><div className="shared-trip-card__head"><span><UsersRound size={18} /></span><div><strong>已从组织者复制共同信息</strong><p>下面内容是草稿，你仍可在问答中改动。</p></div></div><div className="shared-trip-card__grid"><article><MapPin size={15} /><span>目的城市</span><strong>{invitation.sharedTrip.cityName || '待补充'}</strong></article><article><CalendarDays size={15} /><span>出行日期</span><strong>{invitation.sharedTrip.travelDate || '待补充'}</strong></article><article><Clock3 size={15} /><span>可用时间</span><strong>{invitation.sharedTrip.startTime && invitation.sharedTrip.endTime ? `${invitation.sharedTrip.startTime} — ${invitation.sharedTrip.endTime}` : '待补充'}</strong></article><article><MapPin size={15} /><span>起终点</span><strong>{invitation.sharedTrip.startLocationText || '待补充'} → {invitation.sharedTrip.endLocationText || '待补充'}</strong></article><article><WalletCards size={15} /><span>共享预算</span><strong>{invitation.sharedTrip.budgetCents === null ? '待补充' : `¥${invitation.sharedTrip.budgetCents / 100}`}</strong></article></div></section>
     {error && <p className="form-error">{error}</p>}
     {!parse && state?.status !== 'READY_TO_PLAN' && <>

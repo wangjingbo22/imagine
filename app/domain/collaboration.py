@@ -300,6 +300,7 @@ class MemberSessionView(CollaborationModel):
     trip_id: UUID
     participant_id: UUID
     current_revision: int = Field(ge=1)
+    collaboration_version: int = Field(ge=1)
     shared_trip: TripUnderstandingTrip
     participant: ParticipantUnderstanding
     access_status: ParticipantAccessStatus

@@ -375,6 +375,7 @@ class CollaborationService:
             tripId=actor.trip_id,
             participantId=actor.participant_id,
             currentRevision=revision.revision,
+            collaborationVersion=stored.version,
             sharedTrip=revision.understanding.trip,
             participant=participant,
             accessStatus=progress.access_status,
