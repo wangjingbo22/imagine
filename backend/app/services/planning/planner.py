@@ -37,7 +37,7 @@ from app.schemas.plan import (
     PlanVersionStatus,
     ProposedPlanVersion,
 )
-from app.schemas.trip import PlanReviewTripSnapshot, TripMode, TripStatus
+from app.schemas.trip import PlanReviewTripSnapshot, TripStatus
 from app.services.assistance_constraints import (
     DeterministicAssistanceConstraintCompiler,
     FIELD_NAP_WINDOW,
@@ -638,7 +638,6 @@ def candidate_to_proposed_plan_version(
     unrelated object from being registered through this bridge.
     """
 
-    _reject_group_plan_version(request)
     valid_candidate, valid_request = _validated_complete_candidate(
         candidate,
         request,
@@ -664,7 +663,6 @@ def candidate_to_proposed_plan_version_v2(
 ) -> ProposedPlanVersion:
     """Create a deterministic V2 tied to one immutable CURRENT V1 snapshot."""
 
-    _reject_group_plan_version(request)
     current = _validated_current_plan(current_plan)
     if not isinstance(reason, PlanVersionReason):
         raise CandidatePlanInputError(
@@ -744,18 +742,6 @@ def generate_proposed_plan_version_v2(
         reason=reason,
         identity_digest=identity_digest,
     )
-
-
-def _reject_group_plan_version(request: CandidatePlanRequest) -> None:
-    if (
-        isinstance(request, CandidatePlanRequest)
-        and request.trip.mode is TripMode.GROUP
-    ):
-        raise CandidatePlanInputError(
-            code="GROUP_PLAN_VERSION_UNSUPPORTED",
-            field="request.trip.mode",
-            message="GROUP candidates cannot become ProposedPlanVersion",
-        )
 
 
 def _validated_request(request: CandidatePlanRequest) -> CandidatePlanRequest:

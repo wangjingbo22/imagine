@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from copy import deepcopy
-import json
-from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -12,7 +9,6 @@ from app.application.collaboration_ports import PlanningAccess, PlanningOperatio
 from app.application.planning_boundary_service import PlanningBoundaryService
 from app.core.errors import AppError
 from app.services.replanning import DeterministicRetainedSuffixPlanner
-from app.services.planning.models import CandidatePlanRequest
 
 
 TRIP_ID = UUID("66666666-6666-4666-8666-666666666666")
@@ -28,20 +24,6 @@ class RejectingReadinessGuard:
             False,
         )
         yield
-
-
-class AllowingReadinessGuard:
-    @contextmanager
-    def operation(self, access: PlanningAccess):
-        yield
-
-
-class NoopWorkflow:
-    def require_constraint_confirmed(self, trip_id, profile) -> None:
-        return None
-
-    def require_confirmed_trip(self, trip_id, trip) -> None:
-        return None
 
 
 def _access(operation: PlanningOperation) -> PlanningAccess:
@@ -143,44 +125,3 @@ def test_access_operation_mismatch_is_rejected_before_planning() -> None:
         service.generate_v1(TRIP_ID, None, access=access)
 
     assert captured.value.code == "PLANNING_ACCESS_INVALID"
-
-
-def test_ready_group_still_stops_at_existing_t005_boundary() -> None:
-    fixture = json.loads(
-        (
-            Path(__file__).parent
-            / "fixtures"
-            / "planning"
-            / "golden_candidate_plan.json"
-        ).read_text(encoding="utf-8")
-    )["request"]
-    group = deepcopy(fixture)
-    group["trip"]["mode"] = "GROUP"
-    group["trip"]["participants"].append(
-        {
-            **deepcopy(group["trip"]["participants"][0]),
-            "participantId": "77777777-7777-4777-8777-777777777777",
-            "nickname": "第二成员",
-            "assistanceProfile": None,
-        }
-    )
-    request = CandidatePlanRequest.model_validate_json(
-        json.dumps(group, ensure_ascii=False),
-        strict=True,
-    )
-    service = PlanningBoundaryService(
-        plan_service=object(),  # type: ignore[arg-type]
-        workflow_service=NoopWorkflow(),  # type: ignore[arg-type]
-        trust_repository=object(),  # type: ignore[arg-type]
-        suffix_planner=DeterministicRetainedSuffixPlanner(),
-        readiness_guard=AllowingReadinessGuard(),
-    )
-
-    with pytest.raises(AppError) as captured:
-        service.generate_v1(
-            TRIP_ID,
-            request.model_copy(update={"trip": request.trip.model_copy(update={"trip_id": TRIP_ID})}),
-            access=_access(PlanningOperation.GENERATE_V1),
-        )
-
-    assert captured.value.code == "GROUP_PLAN_VERSION_UNSUPPORTED"

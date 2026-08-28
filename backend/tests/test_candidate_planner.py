@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import UTC, datetime
 import json
 from pathlib import Path
 
@@ -10,7 +11,7 @@ import pytest
 from app.application.plan_service import PlanVersionService
 from app.domain.models import FacilityType
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
-from app.schemas.plan import PlanVersionStatus, ProposedPlanVersion
+from app.schemas.plan import PlanVersion, PlanVersionStatus, ProposedPlanVersion
 from app.services.planning import (
     CandidatePlan,
     CandidatePlanInputError,
@@ -137,24 +138,38 @@ def test_group_candidate_plan_is_deterministic_for_two_or_three_members(
     assert len(request.trip.participants) == participant_count
 
 
-def test_group_candidate_cannot_be_bridged_to_plan_version() -> None:
-    request = _group_request()
+@pytest.mark.parametrize("participant_count", [2, 3])
+def test_group_candidate_can_be_bridged_to_plan_version(
+    participant_count: int,
+) -> None:
+    request = _group_request(participant_count)
     candidate = generate_candidate_plan(request)
 
-    with pytest.raises(CandidatePlanInputError) as captured:
-        candidate_to_proposed_plan_version(candidate, request)
+    proposal = candidate_to_proposed_plan_version(candidate, request)
 
-    assert captured.value.code == "GROUP_PLAN_VERSION_UNSUPPORTED"
+    assert proposal.trip_snapshot.mode.value == "GROUP"
+    assert [item.participant_id for item in proposal.trip_snapshot.participants] == [
+        item.participant_id for item in request.trip.participants
+    ]
 
 
-def test_group_candidate_cannot_enter_the_v2_plan_version_bridge() -> None:
-    request = _group_request()
+@pytest.mark.parametrize("participant_count", [2, 3])
+def test_group_candidate_can_enter_the_v2_plan_version_bridge(
+    participant_count: int,
+) -> None:
+    request = _group_request(participant_count)
     candidate = generate_candidate_plan(request)
+    v1 = candidate_to_proposed_plan_version(candidate, request)
+    current = PlanVersion.model_validate({
+        **v1.model_dump(),
+        "status": PlanVersionStatus.CURRENT,
+        "created_at": datetime.now(UTC),
+    })
 
-    with pytest.raises(CandidatePlanInputError) as captured:
-        candidate_to_proposed_plan_version_v2(candidate, request, None)  # type: ignore[arg-type]
+    proposal = candidate_to_proposed_plan_version_v2(candidate, request, current)
 
-    assert captured.value.code == "GROUP_PLAN_VERSION_UNSUPPORTED"
+    assert proposal.version == 2
+    assert proposal.trip_snapshot == current.trip_snapshot
 
 
 def test_golden_same_city_facts_produce_the_reviewed_candidate() -> None:

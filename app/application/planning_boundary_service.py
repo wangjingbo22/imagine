@@ -6,6 +6,7 @@ from datetime import datetime
 from hashlib import sha256
 import json
 from typing import Any, ContextManager, Literal
+from unicodedata import normalize
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import ValidationError
@@ -15,6 +16,7 @@ from app.application.collaboration_ports import (
     PlanningAccess,
     PlanningOperation,
     ReadinessPermit,
+    TripDraftRevisionView,
 )
 from app.application.plan_service import PlanVersionService
 from app.application.workflow_service import WorkflowService
@@ -44,7 +46,8 @@ from app.schemas.plan import (
     PlanVersionStatus,
     ProposedPlanVersion,
 )
-from app.schemas.trip import TripStatus
+from app.schemas.trip import PreferenceType, TripStatus
+from app.domain.hard_conflicts import assistance_profile_from_care
 from app.schemas.planning import (
     EventDrivenReplanRequest,
     RegisteredReplan,
@@ -147,6 +150,206 @@ class PlanningBoundaryService:
             current_revision=permit.current_revision,
             flow_kind=permit.flow_kind,
         )
+
+    @staticmethod
+    def _projection_text(value: str) -> str:
+        return normalize("NFKC", value).strip().casefold()
+
+    @classmethod
+    def _projection_time(cls, value: object) -> str:
+        if hasattr(value, "strftime"):
+            return value.strftime("%H:%M")
+        return cls._projection_text(str(value))[:5]
+
+    @staticmethod
+    def _assistance_projection(profile: object) -> dict[str, Any] | None:
+        if profile is None:
+            return None
+        return profile.model_dump(mode="json", by_alias=True)
+
+    @classmethod
+    def _participant_projection(
+        cls,
+        *,
+        member_key: str,
+        participant_id: UUID,
+        nickname: str | None,
+        budget_cap_cents: int | None,
+        interests: Sequence[str],
+        must_visit: Sequence[str],
+        avoid_places: Sequence[str],
+        assistance_profile: object,
+    ) -> dict[str, Any]:
+        return {
+            "memberKey": member_key,
+            "participantId": str(participant_id),
+            "nickname": (
+                cls._projection_text(nickname) if nickname is not None else None
+            ),
+            "budgetCents": budget_cap_cents,
+            "interests": [cls._projection_text(value) for value in interests],
+            "mustVisit": [cls._projection_text(value) for value in must_visit],
+            "avoidPlaces": [cls._projection_text(value) for value in avoid_places],
+            "assistanceProfile": cls._assistance_projection(assistance_profile),
+        }
+
+    @classmethod
+    def _revision_planning_projection(
+        cls,
+        revision: TripDraftRevisionView,
+    ) -> dict[str, Any]:
+        participants_by_key = {
+            participant.member_key: participant
+            for participant in revision.understanding.participants
+        }
+        participants: list[dict[str, Any]] = []
+        for member_key in sorted(revision.member_bindings):
+            participant = participants_by_key.get(member_key)
+            participant_id = revision.member_bindings.get(member_key)
+            if participant is None or participant_id is None:
+                continue
+            participants.append(
+                cls._participant_projection(
+                    member_key=member_key,
+                    participant_id=participant_id,
+                    nickname=participant.nickname,
+                    budget_cap_cents=participant.budget_cap_cents,
+                    interests=participant.interests,
+                    must_visit=participant.must_visit,
+                    avoid_places=participant.avoid_places,
+                    assistance_profile=(
+                        assistance_profile_from_care(participant.care_draft)
+                        if participant.care_draft is not None
+                        else None
+                    ),
+                )
+            )
+        trip = revision.understanding.trip
+        return {
+            "tripId": str(revision.trip_id),
+            "mode": "SINGLE" if len(participants) == 1 else "GROUP",
+            "date": trip.travel_date.isoformat() if trip.travel_date else None,
+            "time": {
+                "start": cls._projection_time(trip.start_time),
+                "end": cls._projection_time(trip.end_time),
+            },
+            "location": {
+                "start": cls._projection_text(trip.start_location_text or ""),
+                "end": cls._projection_text(trip.end_location_text or ""),
+            },
+            "budget": {"totalCents": trip.budget_cents},
+            "participants": participants,
+        }
+
+    @classmethod
+    def _request_planning_projection(
+        cls,
+        request: CandidatePlanRequest,
+    ) -> dict[str, Any]:
+        trip = request.trip
+        day = trip.days[0]
+        participants: list[dict[str, Any]] = []
+        for index, participant in enumerate(trip.participants, start=1):
+            values: dict[PreferenceType, list[str]] = {
+                PreferenceType.INTEREST: [],
+                PreferenceType.MUST_VISIT: [],
+                PreferenceType.AVOID_PLACE: [],
+            }
+            for preference in participant.preferences:
+                values[preference.type].append(preference.value)
+            participants.append(
+                cls._participant_projection(
+                    member_key=f"member-{index}",
+                    participant_id=participant.participant_id,
+                    nickname=participant.nickname,
+                    budget_cap_cents=participant.budget_cap_cents,
+                    interests=values[PreferenceType.INTEREST],
+                    must_visit=values[PreferenceType.MUST_VISIT],
+                    avoid_places=values[PreferenceType.AVOID_PLACE],
+                    assistance_profile=participant.assistance_profile,
+                )
+            )
+        return {
+            "tripId": str(trip.trip_id),
+            "mode": trip.mode.value,
+            "date": trip.start_date.isoformat(),
+            "time": {
+                "start": cls._projection_time(day.time_window.start),
+                "end": cls._projection_time(day.time_window.end),
+            },
+            "location": {
+                "start": cls._projection_text(day.start_location_text),
+                "end": cls._projection_text(day.end_location_text),
+            },
+            "budget": {"totalCents": trip.total_budget_cents},
+            "participants": participants,
+        }
+
+    @staticmethod
+    def _projection_mismatch_paths(
+        expected: object,
+        actual: object,
+        path: str = "",
+    ) -> list[str]:
+        if isinstance(expected, dict) and isinstance(actual, dict):
+            paths: list[str] = []
+            for key in sorted(set(expected) | set(actual)):
+                child = f"{path}.{key}" if path else key
+                if key not in expected or key not in actual:
+                    paths.append(child)
+                else:
+                    paths.extend(
+                        PlanningBoundaryService._projection_mismatch_paths(
+                            expected[key], actual[key], child
+                        )
+                    )
+            return paths
+        if isinstance(expected, list) and isinstance(actual, list):
+            paths = []
+            for index in range(max(len(expected), len(actual))):
+                child = f"{path}[{index}]"
+                if index >= len(expected) or index >= len(actual):
+                    paths.append(child)
+                else:
+                    paths.extend(
+                        PlanningBoundaryService._projection_mismatch_paths(
+                            expected[index], actual[index], child
+                        )
+                    )
+            return paths
+        return [] if expected == actual else [path or "trip"]
+
+    def _require_collaboration_request_matches_revision(
+        self,
+        request: CandidatePlanRequest,
+        permit: ReadinessPermit,
+    ) -> None:
+        revision = permit.revision
+        if (
+            permit.flow_kind.value != "COLLABORATION_V2"
+            or revision is None
+            or revision.trip_id != permit.trip_id
+            or permit.current_revision != revision.revision
+            or request.trip.trip_id != permit.trip_id
+        ):
+            raise AppError(
+                code="COLLABORATION_PLAN_SNAPSHOT_MISMATCH",
+                message="规划请求与当前协作修订快照不一致",
+                http_status=409,
+                retryable=False,
+                errors=[{"field": "trip.tripId"}],
+            )
+        expected = self._revision_planning_projection(revision)
+        actual = self._request_planning_projection(request)
+        paths = self._projection_mismatch_paths(expected, actual)
+        if paths:
+            raise AppError(
+                code="COLLABORATION_PLAN_SNAPSHOT_MISMATCH",
+                message="规划请求与当前协作修订快照不一致",
+                http_status=409,
+                retryable=False,
+                errors=[{"field": path} for path in paths],
+            )
 
     @staticmethod
     def _adjustment_identity_digest(

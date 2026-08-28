@@ -331,9 +331,8 @@ def validate_single_day_policy(
 class PlanReviewTripSnapshot(Trip):
     """A single-day Trip snapshot admitted to Plan review."""
 
-    mode: Literal[TripMode.SINGLE]
     status: Literal[TripStatus.PLAN_REVIEW]
-    participants: list[Participant] = Field(min_length=1, max_length=1)
+    participants: list[Participant] = Field(min_length=1, max_length=3)
     days: list[TripDayInput] = Field(min_length=1, max_length=1)
 
     @model_validator(mode="after")
