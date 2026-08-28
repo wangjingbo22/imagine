@@ -89,6 +89,8 @@ class PlanVersionService:
                 permit.readiness_digest != "legacy"
                 or permit.current_revision is not None
                 or permit.revision is not None
+                or proposal.trip_snapshot.mode.value != "SINGLE"
+                or len(proposal.trip_snapshot.participants) != 1
             ):
                 raise cls._invalid_readiness()
         elif permit.flow_kind is TripFlowKind.COLLABORATION_V2:
@@ -99,6 +101,22 @@ class PlanVersionService:
                 or revision.trip_id != proposal.trip_snapshot.trip_id
                 or permit.current_revision != revision.revision
                 or re.fullmatch(r"[0-9a-f]{64}", permit.readiness_digest) is None
+            ):
+                raise cls._invalid_readiness()
+            expected_member_ids = tuple(
+                revision.member_bindings[member_key]
+                for member_key in sorted(revision.member_bindings)
+            )
+            actual_participants = proposal.trip_snapshot.participants
+            if (
+                proposal.trip_snapshot.mode.value
+                != ("SINGLE" if len(expected_member_ids) == 1 else "GROUP")
+                or len(actual_participants) != len(expected_member_ids)
+                or tuple(
+                    participant.participant_id
+                    for participant in actual_participants
+                )
+                != expected_member_ids
             ):
                 raise cls._invalid_readiness()
         else:

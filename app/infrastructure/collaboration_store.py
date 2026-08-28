@@ -280,29 +280,25 @@ class SqliteCollaborationRepository:
                         or existing["operation"] != access.operation.value
                     ):
                         raise CollaborationStoreError("COLLABORATION_OPERATION_STALE")
-                    existing_expires_at = datetime.fromisoformat(
-                        existing["expires_at"]
+                    existing_expires_at = datetime.fromisoformat(existing["expires_at"])
+                    if existing["completed_at"] is None:
+                        if existing_expires_at > now:
+                            raise CollaborationStoreError(
+                                "COLLABORATION_OPERATION_IN_PROGRESS"
+                            )
+                        raise CollaborationStoreError("COLLABORATION_OPERATION_STALE")
+                    self._assert_mutation_allowed_connection(
+                        connection,
+                        access.trip_id,
+                        now,
                     )
-                    if (
-                        existing["completed_at"] is not None
-                        or existing_expires_at <= now
-                    ):
-                        # A completed/expired operation id may be retried with
-                        # the same immutable readiness context.  Re-open its
-                        # lease before returning so collaboration mutations
-                        # remain blocked for the entire retried operation.
-                        self._assert_mutation_allowed_connection(
-                            connection,
-                            access.trip_id,
-                            now,
-                        )
-                        connection.execute(
-                            "UPDATE collaboration_operation_leases "
-                            "SET expires_at=?, completed_at=NULL "
-                            "WHERE operation_id=?",
-                            (expires_at.isoformat(), access.operation_id),
-                        )
-                        existing_expires_at = expires_at
+                    if expires_at <= existing_expires_at:
+                        expires_at = existing_expires_at + timedelta(microseconds=1)
+                    connection.execute(
+                        "UPDATE collaboration_operation_leases "
+                        "SET expires_at=?, completed_at=NULL WHERE operation_id=?",
+                        (expires_at.isoformat(), access.operation_id),
+                    )
                     connection.execute("COMMIT")
                     return ReadinessPermit(
                         trip_id=UUID(existing["trip_id"]),
@@ -310,7 +306,7 @@ class SqliteCollaborationRepository:
                         operation_id=access.operation_id,
                         operation=PlanningOperation(existing["operation"]),
                         flow_kind=TripFlowKind.COLLABORATION_V2,
-                        expires_at=existing_expires_at,
+                        expires_at=expires_at,
                     )
                 self._assert_mutation_allowed_connection(connection, access.trip_id, now)
                 connection.execute(
@@ -339,12 +335,20 @@ class SqliteCollaborationRepository:
             expires_at=expires_at,
         )
 
-    def complete_lease(self, operation_id: str) -> None:
+    def complete_lease(
+        self,
+        operation_id: str,
+        *,
+        expires_at: datetime,
+    ) -> None:
         with self._connect() as connection:
+            # The lease expiry is the no-migration generation fence.  A
+            # finally block from an older generation therefore cannot complete
+            # a reactivated lease with the same operation id.
             connection.execute(
                 "UPDATE collaboration_operation_leases SET completed_at=? "
-                "WHERE operation_id=? AND completed_at IS NULL",
-                (self._clock().isoformat(), operation_id),
+                "WHERE operation_id=? AND expires_at=? AND completed_at IS NULL",
+                (self._clock().isoformat(), operation_id, expires_at.isoformat()),
             )
 
     def active_lease(self, trip_id: UUID) -> LeaseRecord | None:

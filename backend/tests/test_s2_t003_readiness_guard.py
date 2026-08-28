@@ -57,6 +57,14 @@ class SequencedCollaboration:
         return "a" * 64
 
 
+class FixedClock:
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
 class FakeLeaseRepository:
     def __init__(self) -> None:
         self.leases: dict[str, ReadinessPermit] = {}
@@ -73,8 +81,18 @@ class FakeLeaseRepository:
         self.leases[permit.operation_id] = permit
         return permit
 
-    def complete_lease(self, operation_id: str) -> None:
+    def complete_lease(
+        self,
+        operation_id: str,
+        *,
+        expires_at: datetime,
+    ) -> None:
         self.leases.pop(operation_id, None)
+
+
+class FailingLeaseRepository(FakeLeaseRepository):
+    def acquire_lease(self, *, access, readiness_digest, ttl):
+        raise CollaborationStoreError("COLLABORATION_OPERATION_IN_PROGRESS")
 
 
 def _access(operation: PlanningOperation = PlanningOperation.PROVIDER_FACTS) -> PlanningAccess:
@@ -222,10 +240,16 @@ def test_revision_change_between_ready_check_and_lease_never_enters_body() -> No
     assert repository.leases == {}
 
 
-def test_same_operation_lease_retry_is_stable_and_digest_reuse_is_stale(tmp_path) -> None:
+def test_same_active_operation_key_is_in_progress_and_completed_key_reactivates(
+    tmp_path,
+) -> None:
     from app.infrastructure.collaboration_store import SqliteCollaborationRepository
 
-    repository = SqliteCollaborationRepository(tmp_path / "leases.sqlite3")
+    clock = FixedClock(datetime(2026, 8, 28, 12, 0, tzinfo=UTC))
+    repository = SqliteCollaborationRepository(
+        tmp_path / "leases.sqlite3",
+        clock=clock,
+    )
     access = _access()
     first = repository.acquire_lease(
         access=access,
@@ -233,12 +257,12 @@ def test_same_operation_lease_retry_is_stable_and_digest_reuse_is_stale(tmp_path
         ttl=timedelta(minutes=1),
     )
 
-    retry = repository.acquire_lease(
-        access=access,
-        readiness_digest="a" * 64,
-        ttl=timedelta(minutes=1),
-    )
-    assert retry == first
+    with pytest.raises(CollaborationStoreError, match="COLLABORATION_OPERATION_IN_PROGRESS"):
+        repository.acquire_lease(
+            access=access,
+            readiness_digest="a" * 64,
+            ttl=timedelta(minutes=1),
+        )
 
     with pytest.raises(CollaborationStoreError, match="COLLABORATION_OPERATION_STALE"):
         repository.acquire_lease(
@@ -247,17 +271,107 @@ def test_same_operation_lease_retry_is_stable_and_digest_reuse_is_stale(tmp_path
             ttl=timedelta(minutes=1),
         )
 
-    repository.complete_lease(access.operation_id)
-    assert repository.active_lease(access.trip_id) is None
-    reopened = repository.acquire_lease(
+    repository.complete_lease(access.operation_id, expires_at=first.expires_at)
+    clock.now += timedelta(seconds=1)
+    reactivated = repository.acquire_lease(
         access=access,
         readiness_digest="a" * 64,
         ttl=timedelta(minutes=1),
     )
-    assert reopened.operation_id == first.operation_id
+    assert reactivated.operation_id == first.operation_id
     assert repository.active_lease(access.trip_id) is not None
     with pytest.raises(
         CollaborationStoreError,
         match="COLLABORATION_OPERATION_IN_PROGRESS",
     ):
         repository.assert_mutation_allowed(access.trip_id)
+    assert reactivated.expires_at > first.expires_at
+
+
+def test_expired_unfinished_operation_key_is_stale_but_new_key_can_acquire(
+    tmp_path,
+) -> None:
+    from app.infrastructure.collaboration_store import SqliteCollaborationRepository
+
+    clock = FixedClock(datetime(2026, 8, 28, 12, 0, tzinfo=UTC))
+    repository = SqliteCollaborationRepository(
+        tmp_path / "leases.sqlite3",
+        clock=clock,
+    )
+    first_access = _access()
+    repository.acquire_lease(
+        access=first_access,
+        readiness_digest="a" * 64,
+        ttl=timedelta(seconds=1),
+    )
+    clock.now += timedelta(seconds=2)
+
+    with pytest.raises(CollaborationStoreError, match="COLLABORATION_OPERATION_STALE"):
+        repository.acquire_lease(
+            access=first_access,
+            readiness_digest="a" * 64,
+            ttl=timedelta(minutes=1),
+        )
+
+    second_access = PlanningAccess(
+        trip_id=first_access.trip_id,
+        organizer_capability=first_access.organizer_capability,
+        operation_id="op-new-key-0001",
+        operation=first_access.operation,
+    )
+    second = repository.acquire_lease(
+        access=second_access,
+        readiness_digest="a" * 64,
+        ttl=timedelta(minutes=1),
+    )
+    assert second.operation_id == second_access.operation_id
+
+
+def test_complete_lease_does_not_release_reactivated_same_key(tmp_path) -> None:
+    from app.infrastructure.collaboration_store import SqliteCollaborationRepository
+
+    clock = FixedClock(datetime(2026, 8, 28, 12, 0, tzinfo=UTC))
+    repository = SqliteCollaborationRepository(
+        tmp_path / "leases.sqlite3",
+        clock=clock,
+    )
+    access = _access()
+    first = repository.acquire_lease(
+        access=access,
+        readiness_digest="a" * 64,
+        ttl=timedelta(minutes=1),
+    )
+    repository.complete_lease(access.operation_id, expires_at=first.expires_at)
+    second = repository.acquire_lease(
+        access=access,
+        readiness_digest="a" * 64,
+        ttl=timedelta(minutes=1),
+    )
+    assert second.expires_at != first.expires_at
+
+    repository.complete_lease(
+        access.operation_id,
+        expires_at=first.expires_at,
+    )
+    assert repository.active_lease(access.trip_id) is not None
+    repository.complete_lease(
+        access.operation_id,
+        expires_at=second.expires_at,
+    )
+    assert repository.active_lease(access.trip_id) is None
+
+
+def test_readiness_guard_maps_lease_store_error_to_stable_app_error() -> None:
+    guard = SqliteCollaborationReadinessGuard(
+        database_path=None,
+        repository=FailingLeaseRepository(),
+        collaboration=FakeCollaboration(),
+        flow_registry=FakeFlowRegistry(TripFlowKind.COLLABORATION_V2),
+    )
+
+    with pytest.raises(AppError) as captured:
+        with guard.operation(_access()):
+            raise AssertionError("lease failure must prevent body entry")
+
+    assert captured.value.code == "COLLABORATION_OPERATION_IN_PROGRESS"
+    assert captured.value.http_status == 409

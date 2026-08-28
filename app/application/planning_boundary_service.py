@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
-from datetime import datetime
+from datetime import UTC, datetime
 from hashlib import sha256
 import json
 from typing import Any, ContextManager, Literal
@@ -143,6 +143,16 @@ class PlanningBoundaryService:
         return self.readiness_guard.operation(access)
 
     @staticmethod
+    def _require_unexpired_permit(permit: ReadinessPermit) -> None:
+        if permit.expires_at <= datetime.now(UTC):
+            raise AppError(
+                "PLANNING_ACCESS_INVALID",
+                "规划操作租约已过期，不能执行状态迁移",
+                409,
+                False,
+            )
+
+    @staticmethod
     def _readiness_binding(
         permit: ReadinessPermit,
     ) -> ExecutionReplanReadinessBinding:
@@ -229,6 +239,7 @@ class PlanningBoundaryService:
         return {
             "tripId": str(revision.trip_id),
             "mode": "SINGLE" if len(participants) == 1 else "GROUP",
+            "cityName": cls._projection_text(trip.city_name or ""),
             "date": trip.travel_date.isoformat() if trip.travel_date else None,
             "time": {
                 "start": cls._projection_time(trip.start_time),
@@ -273,6 +284,7 @@ class PlanningBoundaryService:
         return {
             "tripId": str(trip.trip_id),
             "mode": trip.mode.value,
+            "cityName": cls._projection_text(trip.city_context.city_name),
             "date": trip.start_date.isoformat(),
             "time": {
                 "start": cls._projection_time(day.time_window.start),
@@ -1875,6 +1887,7 @@ class PlanningBoundaryService:
             access=access,
             expected=PlanningOperation.PLAN_DECISION,
         ) as permit:
+            self._require_unexpired_permit(permit)
             self._require_v1_confirmation_ready(
                 trip_id,
                 plan_id,
@@ -1893,6 +1906,7 @@ class PlanningBoundaryService:
             access=access,
             expected=PlanningOperation.PLAN_DECISION,
         ) as permit:
+            self._require_unexpired_permit(permit)
             self._require_v1_confirmation_ready(
                 trip_id,
                 plan_id,
@@ -1927,6 +1941,7 @@ class PlanningBoundaryService:
             access=access,
             expected=PlanningOperation.PLAN_DECISION,
         ) as permit:
+            self._require_unexpired_permit(permit)
             self._require_v2_acceptance_ready(
                 trip_id,
                 plan_id,
@@ -1974,6 +1989,7 @@ class PlanningBoundaryService:
             access=access,
             expected=PlanningOperation.PLAN_DECISION,
         ) as permit:
+            self._require_unexpired_permit(permit)
             self._require_v2_acceptance_ready(
                 trip_id,
                 plan_id,
@@ -1997,6 +2013,7 @@ class PlanningBoundaryService:
             access=access,
             expected=PlanningOperation.PLAN_DECISION,
         ) as permit:
+            self._require_unexpired_permit(permit)
             self._require_adjustment_v2_decision_ready(
                 trip_id,
                 plan_id,
@@ -2018,6 +2035,7 @@ class PlanningBoundaryService:
             access=access,
             expected=PlanningOperation.PLAN_DECISION,
         ) as permit:
+            self._require_unexpired_permit(permit)
             self._require_adjustment_v2_decision_ready(
                 trip_id,
                 plan_id,

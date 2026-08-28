@@ -15,7 +15,10 @@ from app.application.collaboration_ports import (
 from app.application.collaboration_service import CollaborationService
 from app.core.errors import AppError
 from app.domain.collaboration import TripFlowKind
-from app.infrastructure.collaboration_store import SqliteCollaborationRepository
+from app.infrastructure.collaboration_store import (
+    CollaborationStoreError,
+    SqliteCollaborationRepository,
+)
 from app.infrastructure.trip_flow_store import SqliteTripFlowRegistry
 
 
@@ -77,11 +80,20 @@ class SqliteCollaborationReadinessGuard:
             access.trip_id,
             access.organizer_capability,
         )
-        permit = self.repository.acquire_lease(
-            access=access,
-            readiness_digest=digest,
-            ttl=self.lease_ttl,
-        )
+        try:
+            permit = self.repository.acquire_lease(
+                access=access,
+                readiness_digest=digest,
+                ttl=self.lease_ttl,
+            )
+        except CollaborationStoreError as error:
+            code = str(error)
+            raise AppError(
+                code,
+                "协作规划租约无法获取",
+                409,
+                code == "COLLABORATION_OPERATION_IN_PROGRESS",
+            ) from error
         try:
             # A collaboration mutation can race between the initial readiness
             # check and lease acquisition.  Once the lease exists, mutations
@@ -112,7 +124,10 @@ class SqliteCollaborationReadinessGuard:
                 revision=leased_revision,
             )
         finally:
-            self.repository.complete_lease(permit.operation_id)
+            self.repository.complete_lease(
+                permit.operation_id,
+                expires_at=permit.expires_at,
+            )
 
 
 __all__ = [
