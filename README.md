@@ -17,7 +17,7 @@
 </div>
 
 <p align="center">
-  <img src="docs/testing/evidence/s1_t002_confirmation_desktop.jpg" alt="行知旅伴需求输入与关怀画像确认页面" width="900">
+  <img src="docs/assets/readme/hero-home.png" alt="行知旅伴项目首页，展示预算约束、关怀出行与高德事实核验流程" width="1100">
 </p>
 
 > 当前阶段：**Sprint 2 Beta** —— 单人单日正式计划与执行闭环保持稳定，2—3 人需求理解、成员确认、冲突处理、候选规划和公平评分已进入主线；多人正式 PlanVersion 与执行链仍保持失败关闭。
@@ -64,14 +64,23 @@ Sprint 2 在此基础上增加 2—3 人草稿修订、邀请与成员确认、�
 
 ## 产品演示
 
-以下图片均来自仓库内已核验的验收证据，不含 API Key 或临时调试页。
+首屏由当前 `main` 的项目首页直接截取；以下业务状态图由当前前端结合无敏感信息的本地验收 Fixture 渲染，用于稳定复现 UI 能力，不代表公网数据，也不表示多人候选已经签发为正式 PlanVersion。所有图片均不含 API Key 或临时调试页。
+
+### 多人候选与公平推荐
 
 <p align="center">
-  <img src="docs/testing/evidence/s1_t010_facility_confirmation_desktop.png" alt="行知旅伴计划与设施确认页面" width="48%">
-  <img src="docs/testing/evidence/s1_t016_expense_refresh_desktop.png" alt="行知旅伴执行与实际消费页面" width="48%">
+  <img src="docs/assets/readme/collaboration-review.png" alt="行知旅伴两人成员公平评分、照顾点与妥协说明页面" width="1100">
 </p>
 
-路线相关视图已接入高德地点、路线事实、道路底图、地点标记和真实 Polyline。上述截图来自稳定提交的验收证据；公网入口提供独立演示快照，二者的版本状态应分别核对。
+候选层按最低成员分优先排序，并同时展示各成员得分、照顾点和妥协说明。该能力当前止于多人候选与唯一推荐，尚未进入多人正式 PlanVersion 和执行状态机。
+
+### 执行总结与旅途回忆
+
+<p align="center">
+  <img src="docs/assets/readme/execution-memory.png" alt="行知旅伴旅行总结、费用、事件、版本历史与旅途回忆页面" width="1100">
+</p>
+
+单人执行闭环会汇总任务完成数、实际费用、服务端事件与版本历史；任务照片存在时进入回忆时间线，无照片时保留明确空态。路线相关视图已接入高德地点、路线事实、道路底图、地点标记和真实 Polyline；公网入口是独立演示快照，应与当前 `main` 的本地验收状态分别核对。
 
 ## 技术架构与技术栈
 
