@@ -65,24 +65,31 @@ def get_provider_fact_registry(request: Request) -> SqliteProviderFactRegistry:
 async def get_provider_fact_set_summary(
     trip_id: UUID,
     fact_set_id: str,
+    request: Request,
     provider_fact_digest: str = Query(alias="providerFactDigest"),
     registry: SqliteProviderFactRegistry = Depends(get_provider_fact_registry),
 ) -> ApiResponse[ProviderFactSetSummary]:
-    try:
-        snapshot = registry.restore_snapshot(trip_id, fact_set_id)
-    except ProviderFactRestoreError as error:
-        raise AppError(
-            code=error.code,
-            message=error.message,
-            http_status=409,
-        ) from error
-    if snapshot.provider_fact_digest != provider_fact_digest:
-        raise AppError(
-            code="PROVIDER_FACT_DIGEST_MISMATCH",
-            message="请求摘要与服务端签发的 FactRef 摘要不一致",
-            http_status=409,
-        )
-    return ApiResponse[ProviderFactSetSummary](data=snapshot.summary())
+    access = build_planning_access(
+        request,
+        trip_id,
+        PlanningOperation.PROVIDER_FACTS,
+    )
+    with request.app.state.collaboration_readiness_guard.operation(access):
+        try:
+            snapshot = registry.restore_snapshot(trip_id, fact_set_id)
+        except ProviderFactRestoreError as error:
+            raise AppError(
+                code=error.code,
+                message=error.message,
+                http_status=409,
+            ) from error
+        if snapshot.provider_fact_digest != provider_fact_digest:
+            raise AppError(
+                code="PROVIDER_FACT_DIGEST_MISMATCH",
+                message="请求摘要与服务端签发的 FactRef 摘要不一致",
+                http_status=409,
+            )
+        return ApiResponse[ProviderFactSetSummary](data=snapshot.summary())
 
 
 @router.post(
