@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, alias_generators
 
 from app.core.errors import AppError
 from app.domain.models import ApiResponse
@@ -16,13 +16,14 @@ router = APIRouter(prefix="/api/v2", tags=["S2 任务照片"])
 
 
 class MediaUpload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", alias_generator=alias_generators.to_camel, populate_by_name=True)
     data_url: str = Field(min_length=20, max_length=2_100_000)
     mime_type: str = Field(pattern=r"^image/(jpeg|webp)$")
     byte_size: int = Field(gt=0, le=1_500_000)
 
 
 class TaskMedia(BaseModel):
+    model_config = ConfigDict(alias_generator=alias_generators.to_camel, populate_by_name=True)
     media_id: str
     task_id: str
     data_url: str
