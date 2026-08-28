@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -189,6 +189,12 @@ class _NeverReadinessGuard:
         raise AssertionError("invalid client facts reached readiness guard")
 
 
+class _AllowReadinessGuard:
+    @contextmanager
+    def operation(self, access):
+        yield
+
+
 @pytest.mark.asyncio
 async def test_http_client_cannot_embed_place_route_price_or_provenance(
     tmp_path: Path,
@@ -257,6 +263,7 @@ async def test_http_summary_restores_only_matching_server_digest(
         ),
         service=object(),  # type: ignore[arg-type]
         provider_fact_registry=registry,
+        collaboration_readiness_guard=_AllowReadinessGuard(),
     )
 
     url = (
