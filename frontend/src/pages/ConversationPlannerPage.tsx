@@ -31,9 +31,12 @@ type CollaborationState = {
   tripId: string
   status: string
   expectedParticipants: number
+  currentRevision: number
+  collaborationVersion: number
   participants: Array<{ participantId: string; status: string; isOrganizer: boolean }>
-  conflicts: Array<{ conflictId: string; message: string; suggestion: string; allowedRelaxations: string[] }>
+  conflicts: Array<{ conflictId: string; message: string; suggestion: string; allowedRelaxations: Array<{ id: string; label: string }> }>
 }
+function toCollaborationState(value: any): CollaborationState { return { tripId: value.tripId, status: value.status, expectedParticipants: value.progress.expectedCount, currentRevision: value.currentRevision, collaborationVersion: value.collaborationVersion, participants: value.participants.map((item: any) => ({ participantId: item.participantId, status: item.confirmationStatus, isOrganizer: item.role === 'ORGANIZER' })), conflicts: value.confirmationItems.map((item: any) => ({ conflictId: item.itemId, message: item.reason, suggestion: item.candidates.join('、'), allowedRelaxations: item.relaxations.map((choice: any) => ({ id: choice.relaxationId, label: choice.label })) })) } }
 
 function idempotencyKey(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`
@@ -70,7 +73,7 @@ export function ConversationPlannerPage() {
     const refresh = async () => {
       try {
         const state = await request<CollaborationState>(`/api/v2/trips/${result.state?.tripId}/collaboration`)
-        if (active) setCollaboration(state.data)
+        if (active) setCollaboration(toCollaborationState(state.data))
       } catch (caught) { if (active) setError(caught instanceof Error ? caught.message : '无法刷新成员状态。') }
     }
     void refresh()
@@ -131,7 +134,7 @@ export function ConversationPlannerPage() {
       const compatible: ConversationResult = { state: { tripId: revision.tripId, expectedParticipants: collaborationState.progress.expectedCount, participants: collaborationState.participants }, parse: { parsed, canPlan: false, confirmationItems: [], trip: null }, organizerAccessToken: organizerToken }
       setResult(compatible)
       window.sessionStorage.setItem(`organizer-token:${revision.tripId}`, organizerToken)
-      setCollaboration(collaborationState)
+      setCollaboration(toCollaborationState(collaborationState))
       const invitations = await Promise.all(collaborationState.participants.filter((item: any) => item.participantId !== collaborationState.organizerParticipantId).map((item: any) => request<Invitation>(`/api/v2/trips/${revision.tripId}/participants/${item.participantId}/invitations`, { method: 'POST', headers: { 'X-Organizer-Token': organizerToken, 'Idempotency-Key': idempotencyKey('participant-invitation') }, body: JSON.stringify({ schemaVersion: '1.0', expectedVersion: collaborationState.collaborationVersion }) })))
       setLinks(invitations.map((item) => `${window.location.origin}${item.data.invitationUrl ?? ''}`))
     } catch (caught) {
@@ -143,10 +146,10 @@ export function ConversationPlannerPage() {
     if (!result?.state || !organizerToken) return
     setLoading(true); setError('')
     try {
-      const updated = await request<CollaborationState>(`/api/v2/trips/${result.state.tripId}/conflicts/${conflictId}/resolve`, {
-        method: 'POST', headers: { 'X-Organizer-Token': organizerToken }, body: JSON.stringify({ relaxation }),
+      const updated = await request<any>(`/api/v2/trips/${result.state.tripId}/confirmation-items/${conflictId}/resolve`, {
+        method: 'POST', headers: { 'X-Organizer-Token': organizerToken, 'Idempotency-Key': idempotencyKey('organizer-resolve') }, body: JSON.stringify({ schemaVersion: '1.0', baseRevision: collaboration?.currentRevision, expectedVersion: collaboration?.collaborationVersion, relaxationId: relaxation }),
       })
-      setCollaboration(updated.data)
+      setCollaboration(toCollaborationState(updated.data))
     } catch (caught) { setError(caught instanceof Error ? caught.message : '冲突处理失败。') }
     finally { setLoading(false) }
   }
@@ -185,7 +188,7 @@ export function ConversationPlannerPage() {
         <div><strong>需要更正？</strong><p>{questions.map(([, question], index) => <button className="button button--soft" type="button" key={question} onClick={() => editAnswer(index)}>修改第 {index + 1} 问</button>)}</p></div>
         {links.length > 0 && <div className="invite-card"><strong>成员邀请链接</strong><p>每个链接只对应一名成员，资料确认后自动失效。</p>{links.map((link, index) => <div className="invite-row" key={link}><span>成员 {index + 1}</span><code>{link}</code><button type="button" className="button button--soft" onClick={() => navigator.clipboard.writeText(link)}><Copy size={14} />复制</button></div>)}</div>}
         {collaboration && <div className="draft-confirmation"><div className="draft-confirmation__heading"><span><UsersRound size={18} /></span><div><strong>协作进度</strong><p>{collaboration.participants.filter((item) => item.status === 'CONFIRMED').length} / {collaboration.expectedParticipants} 位成员已确认 · {collaboration.status}</p></div></div>
-          {collaboration.conflicts.map((conflict) => <div key={conflict.conflictId}><p className="form-error">{conflict.message}。{conflict.suggestion}</p>{conflict.allowedRelaxations.map((relaxation) => <button className="button button--soft" disabled={loading} key={relaxation} onClick={() => void resolveConflict(conflict.conflictId, relaxation)}>采用：{relaxation}</button>)}</div>)}
+          {collaboration.conflicts.map((conflict) => <div key={conflict.conflictId}><p className="form-error">{conflict.message}。{conflict.suggestion}</p>{conflict.allowedRelaxations.map((relaxation) => <button className="button button--soft" disabled={loading} key={relaxation.id} onClick={() => void resolveConflict(conflict.conflictId, relaxation.id)}>采用：{relaxation.label}</button>)}</div>)}
           {collaboration.status === 'READY_TO_PLAN' && <button className="button button--primary" onClick={() => navigate(`/recommendation/${collaboration.tripId}`)}>查看唯一推荐 <ArrowRight size={18} /></button>}
         </div>}
       </section>}
