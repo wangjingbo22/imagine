@@ -38,11 +38,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .topbar__nav, .topbar__back, .brand-mark, .topbar__status { display: flex; align-items: center; }
 .brand-mark { gap: 10px; font-size: 17px; font-weight: 700; letter-spacing: -0.03em; }
 .brand-mark__icon { width: 34px; height: 34px; display: grid; place-items: center; color: white; background: linear-gradient(145deg, #1d6b52, #0d4735); border-radius: 12px; box-shadow: 0 9px 20px rgba(29, 107, 82, 0.22); }
-.topbar__back { gap: 12px; color: var(--muted); }
+.topbar__back { min-height: 44px; gap: 12px; color: var(--muted); }
 .topbar__nav { gap: 12px; }
 .topbar__status { gap: 8px; padding: 8px 12px; color: var(--muted); font-size: 13px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.62); }
 .status-dot { width: 7px; height: 7px; display: inline-block; border-radius: 50%; background: #35a873; box-shadow: 0 0 0 4px rgba(53,168,115,.12); }
 .icon-button, .avatar { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; }
+.icon-button { width: 44px; height: 44px; }
 .icon-button { border: 0; color: var(--muted); background: transparent; }
 .avatar { color: white; background: #17211d; }
 
@@ -348,7 +349,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .expense-field div { display: flex; align-items: center; }.expense-field b { color: var(--green); }.expense-field input { width: 44px; border: 0; outline: 0; font-weight: 700; }
 .budget-alert { margin: 11px 0; padding: 11px 12px; display: flex; gap: 9px; color: #a56b25; background: #fff5e6; border-radius: 13px; }
 .budget-alert div { display: flex; flex-direction: column; }.budget-alert strong { font-size: 10px; }.budget-alert small { margin-top: 2px; font-size: 8px; }
-.phone-shell .button { min-height: 43px; font-size: 11px; }
+.phone-shell .button { min-height: 44px; font-size: 11px; }
 .phone-secondary { width: 100%; margin-top: 7px; color: #85908a; font-size: 9px; border: 0; background: transparent; }
 .execution-copy h2 { margin: 20px 0; font-size: clamp(36px, 5vw, 58px); line-height: 1.15; letter-spacing: -.06em; }
 .execution-copy > p { max-width: 590px; color: var(--muted); line-height: 1.9; }

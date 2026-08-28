@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node --test --experimental-strip-types tests/restClock.test.ts tests/assistanceConstraints.test.ts tests/routeRiskFacts.test.ts tests/replanPolicy.test.ts tests/planningFacts.test.ts tests/candidateRequestBuilder.test.ts tests/eventReplan.test.ts tests/executionProgress.test.ts tests/tripDraftRecognition.test.ts tests/collaborationConflictReview.test.ts",
+    "test": "node --test --experimental-strip-types tests/restClock.test.ts tests/assistanceConstraints.test.ts tests/routeRiskFacts.test.ts tests/replanPolicy.test.ts tests/planningFacts.test.ts tests/candidateRequestBuilder.test.ts tests/eventReplan.test.ts tests/executionProgress.test.ts tests/tripDraftRecognition.test.ts tests/collaborationConflictReview.test.ts tests/collaborationFlow.test.ts tests/s2T024ResponsiveContract.test.ts",
+    "test:e2e": "playwright test",
+    "test:t024": "playwright test s2-t024-responsive.spec.ts",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -17,6 +19,7 @@
     "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",

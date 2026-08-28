@@ -453,7 +453,7 @@ body {
 }
 
 .workspace-tabs button {
-  min-height: 38px;
+  min-height: 44px;
   padding: 0 15px;
   color: rgba(244, 240, 231, 0.48);
   border-radius: 7px;

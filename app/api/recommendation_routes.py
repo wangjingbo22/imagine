@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.api.planning_access import build_planning_access
 from app.application.collaboration_ports import PlanningOperation
@@ -134,6 +134,13 @@ async def recommendations(trip_id: UUID, request: Request) -> ApiResponse:
         city = await request.app.state.location_service.resolve_city(
             trip.city_name or ""
         )
+        # A READY one-person collaboration can reuse the existing trusted
+        # Trip/constraint/PlanVersion pipeline.  The projection is deterministic
+        # and idempotent; group projection remains owned by S2-T032.
+        request.app.state.collaboration_planning_bridge.materialize(
+            revision,
+            city.cityContext,
+        )
         members = revision.understanding.participants
         interests = [interest for item in members for interest in item.interests]
         must_visit = [place for item in members for place in item.must_visit]
@@ -185,6 +192,57 @@ async def recommendations(trip_id: UUID, request: Request) -> ApiResponse:
                 http_status=error.http_status,
             ) from error
         return ApiResponse(data=bundle)
+
+
+@router.get("/api/v2/trips/{trip_id}/planning-trip")
+async def collaboration_planning_trip(
+    trip_id: UUID,
+    request: Request,
+    response: Response,
+) -> ApiResponse:
+    """Return the server-materialized Trip for the READY single flow.
+
+    The browser must not rebuild or reconfirm a collaboration-owned Trip.  The
+    same readiness lease used by recommendation/planning binds this response to
+    the current confirmed revision, while the bridge keeps persistence and
+    constraint confirmation deterministic and idempotent.
+    """
+
+    organizer_token = request.headers.get("X-Organizer-Token")
+    access = build_planning_access(
+        request,
+        trip_id,
+        PlanningOperation.GENERATE_V1,
+    )
+    guard = request.app.state.collaboration_readiness_guard
+    collaboration = request.app.state.collaboration_service
+    with guard.operation(access):
+        revision = collaboration.ready_revision(trip_id, organizer_token)
+        if len(revision.understanding.participants) != 1:
+            raise AppError(
+                code="COLLABORATION_SINGLE_PLANNING_UNAVAILABLE",
+                message="多人协作 Trip 的规划投影由 S2-T032 提供",
+                http_status=409,
+                retryable=False,
+            )
+        shared = revision.understanding.trip
+        city = await request.app.state.location_service.resolve_city(
+            shared.city_name or ""
+        )
+        trip = request.app.state.collaboration_planning_bridge.materialize(
+            revision,
+            city.cityContext,
+        )
+        if trip is None:
+            raise AppError(
+                code="COLLABORATION_SINGLE_PLANNING_UNAVAILABLE",
+                message="当前协作 Trip 无法投影为单人规划输入",
+                http_status=409,
+                retryable=False,
+            )
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Vary"] = "X-Organizer-Token"
+        return ApiResponse(data=trip)
 
 
 __all__ = ["router"]

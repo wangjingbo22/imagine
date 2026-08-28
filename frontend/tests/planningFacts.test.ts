@@ -82,14 +82,14 @@ test('signed planning facts restore search inputs after a browser refresh', () =
   })
 })
 
-test('missing optional assistance data restores an ordinary search profile', () => {
+test('missing optional assistance data stays unconstrained instead of inventing limits', () => {
   const request = requestFixture()
   request.trip.participants[0].assistanceProfile = null
   const restored = restoreDraftFromPlanningFacts(request)
   assert.equal(restored.assistanceMode, 'standard')
   assert.deepEqual(restored.assistanceProfile, {
-    maxSegmentWalkMeters: 500,
-    maxTransfers: 2,
-    restIntervalMinutes: 90,
+    maxSegmentWalkMeters: null,
+    maxTransfers: null,
+    restIntervalMinutes: null,
   })
 })

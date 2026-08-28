@@ -64,9 +64,9 @@ export interface TripDraftInput {
   avoidPlaces: string[]
   assistanceMode: AssistanceMode
   assistanceProfile: {
-    maxSegmentWalkMeters: number
-    maxTransfers: number
-    restIntervalMinutes: number
+    maxSegmentWalkMeters: number | null
+    maxTransfers: number | null
+    restIntervalMinutes: number | null
   }
   naturalLanguageRequest: string
 }

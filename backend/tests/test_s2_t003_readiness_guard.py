@@ -239,8 +239,16 @@ def test_same_operation_lease_retry_is_stable_and_digest_reuse_is_stale(tmp_path
         )
 
     repository.complete_lease(access.operation_id)
-    assert repository.acquire_lease(
+    assert repository.active_lease(access.trip_id) is None
+    reopened = repository.acquire_lease(
         access=access,
         readiness_digest="a" * 64,
         ttl=timedelta(minutes=1),
-    ) == first
+    )
+    assert reopened.operation_id == first.operation_id
+    assert repository.active_lease(access.trip_id) is not None
+    with pytest.raises(
+        CollaborationStoreError,
+        match="COLLABORATION_OPERATION_IN_PROGRESS",
+    ):
+        repository.assert_mutation_allowed(access.trip_id)

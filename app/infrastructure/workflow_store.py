@@ -209,11 +209,21 @@ class SqliteWorkflowRepository:
         )
 
     @staticmethod
-    def _confirmed_trip_semantic_json(trip: CreateSingleDayTrip) -> str:
-        """Canonical comparison that ignores only the parser-owned participant UUID."""
+    def _confirmed_trip_semantic_json(
+        trip: CreateSingleDayTrip,
+        *,
+        ignore_participant_id: bool = True,
+    ) -> str:
+        """Canonical comparison for an immutable confirmed single-person Trip.
+
+        The legacy parser owned a retry-variant participant UUID, so its old
+        confirmation path keeps ignoring that one field.  Collaboration member
+        bindings are authoritative and must remain part of the semantic digest.
+        """
 
         payload = trip.model_dump(mode="json", by_alias=True)
-        payload["participants"][0].pop("participantId")
+        if ignore_participant_id:
+            payload["participants"][0].pop("participantId")
         return json.dumps(
             payload,
             ensure_ascii=False,
@@ -235,12 +245,21 @@ class SqliteWorkflowRepository:
             sort_keys=True,
         )
 
-    def confirm_trip(self, trip: CreateSingleDayTrip) -> CreateSingleDayTrip:
-        """Persist one authoritative Trip, with semantic retry idempotency."""
+    def _confirm_trip(
+        self,
+        trip: CreateSingleDayTrip,
+        *,
+        flow_kind: TripFlowKind,
+        ignore_participant_id: bool,
+    ) -> CreateSingleDayTrip:
+        """Persist one authoritative Trip without changing its registered flow."""
 
         trip_text = str(trip.trip_id)
         trip_json = trip.model_dump_json(by_alias=True)
-        semantic_json = self._confirmed_trip_semantic_json(trip)
+        semantic_json = self._confirmed_trip_semantic_json(
+            trip,
+            ignore_participant_id=ignore_participant_id,
+        )
         confirmed_at = datetime.now(UTC).isoformat()
         with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -267,7 +286,7 @@ class SqliteWorkflowRepository:
                         "CONFIRMED_TRIP_CONFLICT",
                         "同一 tripId 已确认过不同的 Trip 内容，不允许覆盖",
                     )
-                register_trip_flow(connection, trip.trip_id, TripFlowKind.LEGACY_SINGLE)
+                register_trip_flow(connection, trip.trip_id, flow_kind)
                 connection.execute("COMMIT")
             except Exception:
                 if connection.in_transaction:
@@ -278,6 +297,27 @@ class SqliteWorkflowRepository:
         return CreateSingleDayTrip.model_validate_json(
             row["trip_json"],
             strict=True,
+        )
+
+    def confirm_trip(self, trip: CreateSingleDayTrip) -> CreateSingleDayTrip:
+        """Persist the legacy parser-owned single-person Trip."""
+
+        return self._confirm_trip(
+            trip,
+            flow_kind=TripFlowKind.LEGACY_SINGLE,
+            ignore_participant_id=True,
+        )
+
+    def confirm_collaboration_trip(
+        self,
+        trip: CreateSingleDayTrip,
+    ) -> CreateSingleDayTrip:
+        """Project one READY collaboration revision into the existing planner store."""
+
+        return self._confirm_trip(
+            trip,
+            flow_kind=TripFlowKind.COLLABORATION_V2,
+            ignore_participant_id=False,
         )
 
     def require_confirmed_trip(

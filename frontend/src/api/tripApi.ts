@@ -50,6 +50,13 @@ export const tripApi = {
     })
   },
 
+  getCollaborationPlanningTrip(tripId: string, organizerToken: string) {
+    return request<CreateSingleDayTrip>(
+      `/api/v2/trips/${tripId}/planning-trip`,
+      { headers: { 'X-Organizer-Token': organizerToken } },
+    )
+  },
+
   saveConstraintDraft(tripId: string, profile: AssistanceProfile) {
     return request<ConstraintProfileState>(`/api/v1/trips/${tripId}/constraints`, {
       method: 'PUT',

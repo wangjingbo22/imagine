@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { request } from '../api/client'
 import { tripApi } from '../api/tripApi'
 import { AppShell } from '../components/AppShell'
-import type { CreateSingleDayTrip, TripDraftInput } from '../domain/trip'
+import type { TripDraftInput } from '../domain/trip'
 import { loadAmapPlan } from '../services/amapPlan'
 
 type Recommendation = { placeId: string; reason: string }
@@ -50,19 +50,14 @@ export function RecommendationPage() {
     const saved = window.sessionStorage.getItem(`s2-plan-context:${tripId}`)
     if (!token || !saved) { setError('当前浏览器缺少已确认的行程上下文。请返回对话页重新创建行程后继续。'); return }
     try {
-      const context = JSON.parse(saved) as { draft: TripDraftInput; trip: CreateSingleDayTrip }
+      const context = JSON.parse(saved) as { draft: TripDraftInput }
       setBuilding(true); setError('')
-      // Idempotently confirm the exact Trip used for this route.  This also
-      // repairs browser sessions that were created before the S2 workflow
-      // hand-off existed.
-      const confirmed = await tripApi.confirmDraft({ ...context.draft, tripId })
-      const confirmedTrip = confirmed.data
-      // The organizer already confirmed care needs in question 5. Mirror that
-      // confirmation into the existing deterministic planning boundary.
-      const profile = confirmedTrip.participants[0]?.assistanceProfile
-      if (!profile) throw new Error('已确认行程缺少关怀配置，请返回对话页重新创建。')
-      await tripApi.saveConstraintDraft(tripId, profile)
-      await tripApi.confirmConstraints(tripId)
+      // The collaboration revision owns participant ids, care facts and the
+      // immutable Trip.  Fetch that guarded server projection instead of
+      // calling the legacy browser-draft confirmation path a second time.
+      const confirmedTrip = (
+        await tripApi.getCollaborationPlanningTrip(tripId, token)
+      ).data
       const result = await loadAmapPlan(tripId, context.draft, undefined, { confirmedTrip, organizerToken: token })
       navigate(`/workspace?tripId=${tripId}`, { state: { tripId, draft: context.draft, trip: confirmedTrip, amapPlanResult: result } })
     } catch (caught) { setError(caught instanceof Error ? caught.message : '路线生成失败，请检查地点和高德服务。') }

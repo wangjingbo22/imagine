@@ -49,6 +49,7 @@ function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/plan" element={<ConversationPlannerPage />} />
+        <Route path="/join" element={<MemberConversationPage />} />
         <Route path="/join/:token" element={<MemberConversationPage />} />
         <Route path="/recommendation/:tripId" element={<RecommendationPage />} />
         <Route path="/generating" element={<AgentProcessPage />} />

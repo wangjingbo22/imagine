@@ -61,6 +61,15 @@ class WorkflowService:
         except PlanStoreError as error:
             raise self._as_app_error(error) from error
 
+    def confirm_collaboration_trip(
+        self,
+        trip: CreateSingleDayTrip,
+    ) -> CreateSingleDayTrip:
+        try:
+            return self.repository.confirm_collaboration_trip(trip)
+        except PlanStoreError as error:
+            raise self._as_app_error(error) from error
+
     def require_confirmed_trip(self, trip_id: UUID, trip: Trip) -> None:
         try:
             self.repository.require_confirmed_trip(trip_id, trip)
