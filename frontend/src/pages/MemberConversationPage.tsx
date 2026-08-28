@@ -16,6 +16,9 @@ const questions = [
 type Invitation = { tripId: string; participantId: string; currentRevision: number; collaborationVersion: number; sharedTrip: { cityName: string | null; travelDate: string | null; startTime: string | null; endTime: string | null; startLocationText: string | null; endLocationText: string | null; budgetCents: number | null; interests: string[]; mustVisit: string[]; avoidPlaces: string[] } }
 type State = { status: string; conflicts: Array<{ message: string; suggestion: string }> }
 type Parse = { parsed: { cityName: string | null; travelDate: string | null; interests: string[]; mustVisit: string[]; avoidPlaces: string[] }; canPlan: boolean; confirmationItems: Array<{ message: string }> }
+function toInvitation(value: any): Invitation {
+  return { tripId: value.tripId, participantId: value.participantId, currentRevision: value.currentRevision, collaborationVersion: value.collaborationVersion, sharedTrip: { ...value.sharedTrip, interests: value.participant.interests ?? [], mustVisit: value.participant.mustVisit ?? [], avoidPlaces: value.participant.avoidPlaces ?? [] } }
+}
 
 export function MemberConversationPage() {
   const { token = '' } = useParams()
@@ -40,8 +43,9 @@ export function MemberConversationPage() {
         window.sessionStorage.setItem(`participant-session:${redeemed.data.tripId}`, session)
         return request<any>('/api/v2/member-session', { headers: { 'X-Participant-Session': session } })
       }).then((result) => {
-        setInvitation(result.data)
-        const shared = result.data.sharedTrip
+        const invitation = toInvitation(result.data)
+        setInvitation(invitation)
+        const shared = invitation.sharedTrip
         setTripFields({
           city: shared.cityName ?? '', date: shared.travelDate ?? '',
           startTime: shared.startTime ?? '', endTime: shared.endTime ?? '',
@@ -104,7 +108,7 @@ export function MemberConversationPage() {
       if (!invitation) return
       const session = window.sessionStorage.getItem(`participant-session:${invitation.tripId}`)
       const result = await request<any>('/api/v2/member-session/conversation', { method: 'PUT', headers: { 'X-Participant-Session': session ?? '', 'Idempotency-Key': `member-conversation-${crypto.randomUUID()}` }, body: JSON.stringify({ schemaVersion: '1.0', baseRevision: invitation.currentRevision, expectedVersion: invitation.collaborationVersion, ...body() }) })
-      setInvitation(result.data)
+      setInvitation(toInvitation(result.data))
       setParse({ parsed: { cityName: result.data.sharedTrip.cityName, travelDate: result.data.sharedTrip.travelDate, interests: result.data.participant.interests ?? [], mustVisit: result.data.participant.mustVisit ?? [], avoidPlaces: result.data.participant.avoidPlaces ?? [] }, canPlan: true, confirmationItems: result.data.confirmationItems.map((item: any) => ({ message: item.reason })) })
     } catch (caught) { setError(caught instanceof Error ? caught.message : '资料整理失败。') }
     finally { setLoading(false) }
