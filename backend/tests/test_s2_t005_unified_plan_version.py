@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 import json
 from copy import deepcopy
@@ -18,11 +19,33 @@ from app.core.errors import AppError
 from app.domain.collaboration import TripFlowKind
 from app.domain.trip_draft import CareDraft, CareNapWindow, CareWalkLimits
 from app.application.collaboration_ports import PlanningOperation
+from app.application.workflow_service import WorkflowService
 from app.schemas.trip import PlanReviewTripSnapshot
 from app.schemas.execution_replan import ExecutionReplanReadinessBinding
+from app.schemas.execution import CreateExecutionEvent, ExecutionEventType
+from app.schemas.execution_adjustment import (
+    ConfirmedExecutionAdjustment,
+    ExecutionAdjustmentType,
+)
+from app.schemas.execution_replan import (
+    ExecutionAdjustmentReplanRequest,
+)
+from app.schemas.plan import PlanVersion, PlanVersionReason, PlanVersionStatus
+from app.schemas.planning import (
+    EventDrivenReplanRequest,
+    ReplanGenerationRequest,
+    ReplanRequestCandidate,
+)
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
+from app.infrastructure.workflow_store import SqliteWorkflowRepository
 from app.services.planning.models import CandidatePlanRequest
-from app.services.planning.planner import generate_proposed_plan_version
+from app.services.planning.planner import (
+    candidate_to_proposed_plan_version,
+    candidate_to_proposed_plan_version_v2,
+    generate_candidate_plan,
+    generate_proposed_plan_version,
+)
+from app.services.replanning import SuffixPlanningInput
 from backend.tests.s2_t003_support import FakeRevision
 from backend.tests.test_candidate_planner import (
     _payload,
@@ -182,6 +205,17 @@ def _collaboration_permit(revision: FakeRevision) -> ReadinessPermit:
     )
 
 
+def _legacy_permit(trip_id: UUID, operation: PlanningOperation) -> ReadinessPermit:
+    return ReadinessPermit(
+        trip_id=trip_id,
+        readiness_digest="legacy",
+        operation_id="unified-state-legacy-0001",
+        operation=operation,
+        flow_kind=TripFlowKind.LEGACY_SINGLE,
+        expires_at=datetime.now(UTC) + timedelta(minutes=1),
+    )
+
+
 def _boundary() -> PlanningBoundaryService:
     return PlanningBoundaryService.__new__(PlanningBoundaryService)
 
@@ -237,6 +271,343 @@ def test_missing_historical_legacy_readiness_is_normalized() -> None:
         boundary_kind="V1",
         current=current,
     )
+
+
+def _state_machine_request(mode: str, participant_count: int) -> CandidatePlanRequest:
+    payload = deepcopy(_payload_for_trip_shape(mode, participant_count))
+    payload["request"]["taskFacts"][0]["title"] = "调整后的首个任务"
+    return _request(payload)
+
+
+@pytest.mark.parametrize(
+    ("mode", "participant_count"),
+    [("SINGLE", 1), ("GROUP", 2), ("GROUP", 3)],
+    ids=["single-one", "group-two", "group-three"],
+)
+@pytest.mark.parametrize("decision", ["reject", "accept"])
+def test_unified_state_events_diff_and_current_invariant(
+    tmp_path,
+    mode: str,
+    participant_count: int,
+    decision: str,
+) -> None:
+    request = _state_machine_request(mode, participant_count)
+    database_path = tmp_path / f"{mode.lower()}-{participant_count}-{decision}.sqlite3"
+    plan_service = PlanVersionService(
+        SqlitePlanVersionRepository(database_path)
+    )
+    v1_proposal = generate_proposed_plan_version(request)
+    v1 = plan_service.register_proposed(
+        v1_proposal,
+        readiness_permit=_legacy_permit(
+            v1_proposal.trip_snapshot.trip_id,
+            PlanningOperation.GENERATE_V1,
+        ),
+    )
+    trip_id = v1.trip_snapshot.trip_id
+    assert v1.status is PlanVersionStatus.PROPOSED
+    plan_service.confirm(trip_id, v1.plan_id)
+    plan_service.start_execution(trip_id)
+    current = plan_service.get_trip_state(trip_id).current_plan
+    assert current is not None and current.status is PlanVersionStatus.CURRENT
+
+    workflow = WorkflowService(SqliteWorkflowRepository(database_path))
+    plan_service.workflow_service = workflow
+    first_task = current.days[0].tasks[0]
+    if decision == "reject":
+        event_request = CreateExecutionEvent(
+            task_id=first_task.task_id,
+            plan_version_id=current.plan_id,
+            event_type=ExecutionEventType.START,
+            idempotency_key=f"t005-state-start-{participant_count}",
+            occurred_at=datetime.now(UTC),
+        )
+    else:
+        event_request = CreateExecutionEvent(
+            task_id=first_task.task_id,
+            plan_version_id=current.plan_id,
+            event_type=ExecutionEventType.EXPENSE,
+            amount_cents=100,
+            idempotency_key=f"t005-state-expense-{participant_count}",
+            occurred_at=datetime.now(UTC),
+        )
+    first_event = workflow.create_event(trip_id, event_request)
+    replayed_event = workflow.create_event(trip_id, event_request)
+    assert replayed_event.event_id == first_event.event_id
+    assert len(workflow.list_events(trip_id)) == 1
+
+    candidate = generate_candidate_plan(request)
+    v2_proposal = candidate_to_proposed_plan_version_v2(
+        candidate,
+        request,
+        current,
+        reason=PlanVersionReason.USER_FEEDBACK,
+    )
+    v2 = plan_service.register_proposed(
+        v2_proposal,
+        readiness_permit=_legacy_permit(
+            trip_id,
+            PlanningOperation.GENERATE_V2,
+        ),
+    )
+    before_decision = plan_service.get_trip_state(trip_id)
+    assert before_decision.current_plan is not None
+    assert before_decision.current_plan.plan_id == v1.plan_id
+    assert [item.status for item in plan_service.list_plan_versions(trip_id)] == [
+        PlanVersionStatus.CURRENT,
+        PlanVersionStatus.PROPOSED,
+    ]
+    assert len(plan_service.get_diff(trip_id, v2.plan_id).items) >= 0
+
+    if decision == "reject":
+        result = plan_service.reject_v2(trip_id, v2.plan_id)
+        assert result.candidate_status is PlanVersionStatus.REJECTED
+        assert result.previous_current_status is PlanVersionStatus.CURRENT
+        expected_current = v1.plan_id
+    else:
+        result = plan_service.accept_v2(trip_id, v2.plan_id)
+        assert result.candidate_status is PlanVersionStatus.CURRENT
+        assert result.previous_current_status is PlanVersionStatus.SUPERSEDED
+        expected_current = v2.plan_id
+
+    versions = plan_service.list_plan_versions(trip_id)
+    assert sum(item.status is PlanVersionStatus.CURRENT for item in versions) == 1
+    assert plan_service.get_trip_state(trip_id).current_plan is not None
+    assert plan_service.get_trip_state(trip_id).current_plan.plan_id == expected_current
+    assert len(plan_service.get_trip_state(trip_id).events) == 1
+
+
+def test_generate_v2_keeps_one_permit_through_unified_registration() -> None:
+    request = _request_for_shape("SINGLE", 1)
+    proposal = generate_proposed_plan_version(request)
+    current = PlanVersion.model_validate(
+        {
+            **proposal.model_dump(),
+            "status": PlanVersionStatus.CURRENT,
+            "created_at": datetime.now(UTC),
+        },
+        strict=True,
+    )
+    generation = ReplanGenerationRequest(
+        schema_version="1.0",
+        reason=PlanVersionReason.USER_FEEDBACK,
+        candidates=(
+            ReplanRequestCandidate(request=request, satisfaction_loss=0),
+        ),
+    )
+    permit = _legacy_permit(
+        current.trip_snapshot.trip_id,
+        PlanningOperation.GENERATE_V2,
+    )
+    boundary = _boundary()
+    boundary._load_current_v1_context = lambda _trip_id: (current, ())
+    captured: dict[str, object] = {}
+
+    def select(**kwargs):
+        captured.update(kwargs)
+        return "registered"
+
+    boundary._select_and_register_v2 = select
+
+    assert boundary._generate_v2_ready(
+        current.trip_snapshot.trip_id,
+        generation,
+        readiness_permit=permit,
+    ) == "registered"
+    assert captured["registration_permit"] is permit
+    assert captured["readiness_binding"] == boundary._readiness_binding(permit)
+
+
+def test_generate_v2_from_events_uses_same_registration_permit() -> None:
+    request = _request_for_shape("SINGLE", 1)
+    proposal = generate_proposed_plan_version(request)
+    current = PlanVersion.model_validate(
+        {
+            **proposal.model_dump(),
+            "status": PlanVersionStatus.CURRENT,
+            "created_at": datetime.now(UTC),
+        },
+        strict=True,
+    )
+    trigger = EventDrivenReplanRequest(
+        schemaVersion="1.0",
+        reason=PlanVersionReason.EXPENSE_CHANGE,
+    )
+    permit = _legacy_permit(
+        current.trip_snapshot.trip_id,
+        PlanningOperation.GENERATE_V2,
+    )
+    boundary = _boundary()
+    boundary._load_current_v1_context = lambda _trip_id: (current, ())
+    boundary._load_current_candidate_request = lambda _trip_id, _current: request
+    boundary._event_driven_candidate_request = lambda **_kwargs: (request, ())
+    captured: dict[str, object] = {}
+
+    def select(**kwargs):
+        captured.update(kwargs)
+        return "registered"
+
+    boundary._select_and_register_v2 = select
+
+    assert boundary._generate_v2_from_events_ready(
+        current.trip_snapshot.trip_id,
+        trigger,
+        readiness_permit=permit,
+    ) == "registered"
+    assert captured["registration_permit"] is permit
+
+
+def test_generic_v2_revision_mismatch_rejects_before_candidate_planner(monkeypatch) -> None:
+    request = _request_for_shape("GROUP", 2)
+    revision = _revision_for_request(request)
+    permit = _collaboration_permit(revision)
+    proposal = generate_proposed_plan_version(request)
+    current = PlanVersion.model_validate(
+        {
+            **proposal.model_dump(),
+            "status": PlanVersionStatus.CURRENT,
+            "created_at": datetime.now(UTC),
+        },
+        strict=True,
+    )
+    mismatched = request.model_copy(update={
+        "trip": request.trip.model_copy(
+            update={"total_budget_cents": request.trip.total_budget_cents + 1}
+        )
+    })
+    boundary = _boundary()
+    boundary._require_issued_readiness = lambda *args, **kwargs: None
+    planner_calls = 0
+
+    def forbidden(_request):
+        nonlocal planner_calls
+        planner_calls += 1
+        raise AssertionError("candidate planner must not run")
+
+    monkeypatch.setattr(
+        "app.application.planning_boundary_service.generate_candidate_plan",
+        forbidden,
+    )
+    with pytest.raises(AppError) as captured:
+        boundary._select_and_register_v2(
+            trip_id=current.trip_snapshot.trip_id,
+            current=current,
+            events=(),
+            reason=PlanVersionReason.USER_FEEDBACK,
+            locked_task_ids=(),
+            candidate_inputs=((mismatched, 0),),
+            readiness_binding=boundary._readiness_binding(permit),
+            registration_permit=permit,
+        )
+
+    assert captured.value.code == "COLLABORATION_PLAN_SNAPSHOT_MISMATCH"
+    assert planner_calls == 0
+
+
+def test_adjustment_readiness_stale_rejects_before_suffix_planner() -> None:
+    request = _request_for_shape("SINGLE", 1)
+    proposal = generate_proposed_plan_version(request)
+    current = PlanVersion.model_validate(
+        {
+            **proposal.model_dump(),
+            "status": PlanVersionStatus.CURRENT,
+            "created_at": datetime.now(UTC),
+        },
+        strict=True,
+    )
+    revision = _revision_for_request(request)
+    permit = _collaboration_permit(revision)
+    adjustment_request = ExecutionAdjustmentReplanRequest(
+        schemaVersion="1.0",
+        adjustment=ConfirmedExecutionAdjustment(
+            schemaVersion="1.0",
+            eventType=ExecutionAdjustmentType.LATE,
+            taskId=current.days[0].tasks[0].task_id,
+            lateMinutes=30,
+            fatigueLevel=None,
+        ),
+    )
+
+    class RecordingSuffixPlanner:
+        calls = 0
+
+        def plan_suffix(self, _planning_input: SuffixPlanningInput):
+            self.calls += 1
+            return ()
+
+    suffix_planner = RecordingSuffixPlanner()
+    boundary = _boundary()
+    boundary.suffix_planner = suffix_planner
+    boundary._require_adjustment_execution_state = lambda _trip_id: None
+    boundary._load_current_v1_context = lambda _trip_id: (current, ())
+    boundary.plan_service = SimpleNamespace(
+        get_plan_version=lambda _trip_id, _plan_id: current,
+    )
+    boundary.trust_repository = SimpleNamespace(
+        get_issued_validation=lambda **_kwargs: {
+            "collaborationReadiness": {
+                "flowKind": "COLLABORATION_V2",
+                "readinessDigest": "b" * 64,
+                "currentRevision": 1,
+            }
+        },
+    )
+
+    with pytest.raises(AppError) as captured:
+        boundary._generate_v2_from_adjustment_ready(
+            current.trip_snapshot.trip_id,
+            adjustment_request,
+            readiness_permit=permit,
+            readiness=boundary._readiness_binding(permit),
+        )
+
+    assert captured.value.code == "PLAN_READINESS_BINDING_CHANGED"
+    assert suffix_planner.calls == 0
+
+
+@pytest.mark.parametrize("accept", [True, False], ids=["accept", "reject"])
+def test_generic_v2_decision_revalidates_readiness_before_state_transition(
+    accept: bool,
+) -> None:
+    plan = SimpleNamespace(
+        reason=PlanVersionReason.USER_FEEDBACK,
+        plan_id=UUID("55555555-5555-4555-8555-555555555555"),
+    )
+    permit = _legacy_permit(
+        UUID("11111111-1111-4111-8111-111111111111"),
+        PlanningOperation.PLAN_DECISION,
+    )
+    boundary = _boundary()
+    boundary._planning_operation = lambda **_kwargs: nullcontext(permit)
+    boundary._require_issued = lambda *args, **kwargs: None
+    boundary.plan_service = SimpleNamespace(
+        get_plan_version=lambda _trip_id, _plan_id: plan,
+        accept_v2=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("stale V2 must not be accepted")
+        ),
+        reject_v2=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("stale V2 must not be rejected")
+        ),
+    )
+    boundary.trust_repository = SimpleNamespace(
+        get_issued_validation=lambda **_kwargs: {
+            "collaborationReadiness": {
+                "flowKind": "COLLABORATION_V2",
+                "readinessDigest": "a" * 64,
+                "currentRevision": 1,
+            }
+        },
+    )
+
+    with pytest.raises(AppError) as captured:
+        boundary.decide_v2(
+            permit.trip_id,
+            plan.plan_id,
+            accept=accept,
+            access=object(),
+        )
+
+    assert captured.value.code == "PLAN_READINESS_BINDING_CHANGED"
 
 
 @pytest.mark.parametrize(
