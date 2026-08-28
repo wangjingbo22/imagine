@@ -81,6 +81,15 @@ from app.schemas.validation_error import TripSchemaError, issues_from_pydantic
 from app.services.replanning import SuffixPlanner
 
 
+def _requires_no_store(request: Request) -> bool:
+    path = request.url.path
+    return path in {
+        "/api/v2/trips/conversations",
+        "/api/v2/member-session/conversation",
+        "/api/v2/member-session/confirm",
+    } or (path.startswith("/api/v2/trips/") and path.endswith("/confirm"))
+
+
 SWAGGER_CHINESE_SCRIPT = """
 <script>
 (() => {
@@ -533,14 +542,19 @@ def create_app(
         return HTMLResponse(content=html)
 
     @app.exception_handler(AppError)
-    async def handle_app_error(_: Request, error: AppError) -> JSONResponse:
+    async def handle_app_error(request: Request, error: AppError) -> JSONResponse:
         body = ErrorResponse(
             code=error.code,
             message=error.message,
             retryable=error.retryable,
             errors=error.errors,
         )
-        return JSONResponse(status_code=error.http_status, content=body.model_dump(mode="json"))
+        headers = {"Cache-Control": "no-store"} if _requires_no_store(request) else None
+        return JSONResponse(
+            status_code=error.http_status,
+            content=body.model_dump(mode="json"),
+            headers=headers,
+        )
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(

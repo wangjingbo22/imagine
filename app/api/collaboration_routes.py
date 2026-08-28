@@ -145,8 +145,10 @@ async def submit_member(
 async def confirm_member(
     payload: ParticipantMutationRequest,
     request: Request,
+    response: Response,
     current: CollaborationService = Depends(service),
 ) -> ApiResponse:
+    response.headers["Cache-Control"] = "no-store"
     return ApiResponse(data=current.confirm_member(
         session_token=require_member_session(request),
         request=payload,
@@ -177,8 +179,10 @@ async def confirm_organizer(
     participant_id: UUID,
     payload: ParticipantMutationRequest,
     request: Request,
+    response: Response,
     current: CollaborationService = Depends(service),
 ) -> ApiResponse:
+    response.headers["Cache-Control"] = "no-store"
     return ApiResponse(data=current.confirm_organizer(
         trip_id=trip_id,
         participant_id=participant_id,

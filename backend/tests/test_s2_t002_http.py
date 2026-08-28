@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from copy import deepcopy
 from pathlib import Path
 
 import httpx
@@ -181,6 +182,26 @@ async def test_conversations_replay_reuses_revision_without_replaying_organizer_
     assert replay_data["revision"] == first_data["revision"]
     assert replay_data["organizerAccess"]["organizerToken"] is None
     assert replay_data["organizerAccess"]["organizerTokenAvailable"] is False
+    assert gateway.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_conversations_reused_key_with_new_payload_is_answer_revision_stale(
+    tmp_path: Path,
+) -> None:
+    gateway = CountingGateway(_proposal())
+    app = _app(tmp_path, gateway)
+    payload = _conversation_payload()
+    changed = deepcopy(payload)
+    changed["naturalLanguageRequest"] = "a materially different answer set"
+
+    first = await _request_conversation(app, payload, "t002-http-stale-key-0001")
+    second = await _request_conversation(app, changed, "t002-http-stale-key-0001")
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["code"] == "ANSWER_REVISION_STALE"
+    assert second.json()["retryable"] is False
     assert gateway.calls == 1
 
 

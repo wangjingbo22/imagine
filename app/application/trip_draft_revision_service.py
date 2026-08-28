@@ -91,6 +91,7 @@ class TripDraftRevisionService(TripDraftRevisionPort):
     def _app_error(code: str) -> AppError:
         details = {
             "IDEMPOTENCY_KEY_REUSED": ("相同幂等键对应不同请求", 409, False),
+            "ANSWER_REVISION_STALE": ("答案版本已经变化", 409, False),
             "DRAFT_REVISION_STALE": ("草稿版本已经变化", 409, False),
             "DRAFT_BINDINGS_IMMUTABLE": ("草稿成员绑定不可变更", 409, False),
             "PARTICIPANT_SCOPE_VIOLATION": ("成员只能修改自己的草稿字段", 403, False),

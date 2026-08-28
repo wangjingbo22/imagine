@@ -212,6 +212,92 @@ def test_shared_change_invalidates_every_confirmation(tmp_path) -> None:
     }
 
 
+def _advance_harness_revision(harness: ReadyHarness, revision: FakeRevision) -> None:
+    harness.repository.advance_revision(
+        trip_id=harness.revision.trip_id,
+        before_revision=1,
+        after_revision=2,
+        expected_version=3,
+        actor_scope="PARTICIPANT",
+        actor_id=str(harness.revision.member_bindings["member-2"]),
+        idempotency_key="d020-revision-advance",
+    )
+    harness.revisions.current = replace(revision, revision=2, source_digest="b" * 64)
+
+
+def _reconfirm_members(
+    harness: ReadyHarness,
+    member_keys: tuple[str, ...],
+) -> None:
+    version = harness.repository.get_stored(harness.revision.trip_id).version
+    revision = harness.revisions.current
+    for member_key in member_keys:
+        harness.repository.record_confirmation(
+            trip_id=revision.trip_id,
+            participant_id=revision.member_bindings[member_key],
+            revision=revision.revision,
+            source_digest=revision.source_digest,
+            shared_digest=shared_digest(revision),
+            member_digest=member_digest(revision, member_key),
+            expected_version=version,
+            idempotency_key=f"d020-reconfirm-{member_key}",
+        )
+        version += 1
+
+
+def test_member_only_new_revision_preserves_readiness_for_unaffected_member(
+    tmp_path,
+) -> None:
+    harness = _ready_harness(tmp_path)
+    changed = revision_with_member_budget(harness.revision, "member-2", 31_000)
+    _advance_harness_revision(harness, changed)
+
+    state = harness.service.organizer_state(
+        harness.revision.trip_id,
+        harness.organizer_token,
+    )
+    statuses = {item.member_key: item.confirmation_status for item in state.participants}
+    assert statuses == {
+        "member-1": ParticipantConfirmationStatus.CONFIRMED,
+        "member-2": ParticipantConfirmationStatus.NEEDS_RECONFIRMATION,
+    }
+    with pytest.raises(AppError) as captured:
+        harness.service.require_ready(harness.revision.trip_id, harness.organizer_token)
+    assert captured.value.code == "COLLABORATION_NOT_READY"
+
+    _reconfirm_members(harness, ("member-2",))
+    assert harness.service.require_ready(
+        harness.revision.trip_id,
+        harness.organizer_token,
+    )
+
+
+def test_shared_new_revision_requires_and_recovers_all_confirmations(tmp_path) -> None:
+    harness = _ready_harness(tmp_path)
+    changed = revision_with_trip_budget(harness.revision, 31_000)
+    _advance_harness_revision(harness, changed)
+
+    state = harness.service.organizer_state(
+        harness.revision.trip_id,
+        harness.organizer_token,
+    )
+    assert {item.confirmation_status for item in state.participants} == {
+        ParticipantConfirmationStatus.NEEDS_RECONFIRMATION
+    }
+    with pytest.raises(AppError) as captured:
+        harness.service.require_ready(harness.revision.trip_id, harness.organizer_token)
+    assert captured.value.code == "COLLABORATION_NOT_READY"
+
+    _reconfirm_members(harness, ("member-1",))
+    with pytest.raises(AppError, match="全部成员确认"):
+        harness.service.require_ready(harness.revision.trip_id, harness.organizer_token)
+    _reconfirm_members(harness, ("member-2",))
+    assert harness.service.require_ready(
+        harness.revision.trip_id,
+        harness.organizer_token,
+    )
+
+
 def test_stale_expected_version_rejects_before_t002(tmp_path, monkeypatch) -> None:
     harness = _ready_harness(tmp_path)
     calls = 0

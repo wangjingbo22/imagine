@@ -212,9 +212,16 @@ class CollaborationService:
         revision: TripDraftRevisionView,
         member_key: str,
         participant_id: UUID,
+        issues: tuple[CollaborationIssue, ...],
     ) -> ParticipantProgress:
         confirmation = stored.confirmations.get(participant_id)
         current_member = member_digest(revision, member_key)
+        relevant_issue = any(
+            issue.participant_id is None
+            or issue.participant_id == participant_id
+            or participant_id in issue.related_participant_ids
+            for issue in issues
+        )
         access_status = self._access_status(
             stored=stored,
             participant_id=participant_id,
@@ -222,10 +229,9 @@ class CollaborationService:
         confirmed = bool(
             confirmation
             and access_status is not ParticipantAccessStatus.REVOKED
-            and confirmation.confirmed_revision == revision.revision
-            and confirmation.confirmed_source_digest == revision.source_digest
             and confirmation.confirmed_shared_digest == shared_digest(revision)
             and confirmation.confirmed_member_digest == current_member
+            and not relevant_issue
         )
         confirmation_status = (
             ParticipantConfirmationStatus.CONFIRMED
@@ -245,6 +251,36 @@ class CollaborationService:
             confirmedRevision=(confirmation.confirmed_revision if confirmed else None),
         )
 
+    @staticmethod
+    def _source_digest_is_ready(
+        revision: TripDraftRevisionView,
+        stored: StoredCollaboration,
+    ) -> bool:
+        confirmations = tuple(stored.confirmations.values())
+        if not confirmations:
+            return False
+        if all(
+            confirmation.confirmed_source_digest == revision.source_digest
+            for confirmation in confirmations
+        ):
+            return True
+        current_shared = shared_digest(revision)
+        return (
+            any(
+                confirmation.confirmed_revision == revision.revision
+                and confirmation.confirmed_source_digest == revision.source_digest
+                for confirmation in confirmations
+            )
+            and any(
+                confirmation.confirmed_revision != revision.revision
+                for confirmation in confirmations
+            )
+            and all(
+                confirmation.confirmed_shared_digest == current_shared
+                for confirmation in confirmations
+            )
+        )
+
     def _derive(
         self,
         revision: TripDraftRevisionView,
@@ -260,6 +296,7 @@ class CollaborationService:
                 revision=revision,
                 member_key=member_key,
                 participant_id=revision.member_bindings[member_key],
+                issues=issues,
             )
             for member_key in sorted(revision.member_bindings)
         ]
@@ -267,7 +304,12 @@ class CollaborationService:
             item.confirmation_status is ParticipantConfirmationStatus.CONFIRMED
             for item in progress
         )
-        can_plan = all_confirmed and not issues and stored.current_revision == revision.revision
+        can_plan = (
+            all_confirmed
+            and not issues
+            and stored.current_revision == revision.revision
+            and self._source_digest_is_ready(revision, stored)
+        )
         digest = (
             readiness_digest(
                 revision,
