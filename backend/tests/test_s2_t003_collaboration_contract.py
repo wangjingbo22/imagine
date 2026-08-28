@@ -8,7 +8,7 @@ from app.domain.collaboration import (
 )
 
 
-def test_issue_always_has_rule_reason_and_relaxation_array() -> None:
+def test_issue_always_has_rule_reason_and_allowed_relaxation_array() -> None:
     issue = CollaborationIssue.model_validate(
         {
             "itemId": "ci_0123456789abcdef",
@@ -19,11 +19,13 @@ def test_issue_always_has_rule_reason_and_relaxation_array() -> None:
             "code": "INVALID",
             "reason": "结束时间必须晚于开始时间",
             "candidates": [],
-            "relaxations": [],
+            "allowedRelaxations": [],
         }
     )
     assert issue.rule_id == "S2T003.TIME.WINDOW_ORDER"
     assert issue.relaxations == []
+    assert issue.model_dump(mode="json", by_alias=True)["allowedRelaxations"] == []
+    assert "relaxations" not in issue.model_dump(mode="json", by_alias=True)
     with pytest.raises(ValidationError):
         CollaborationIssue.model_validate(issue.model_dump(exclude={"rule_id"}))
 

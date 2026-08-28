@@ -4,6 +4,15 @@ import { useNavigate } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import { request } from '../api/client'
 import type { CreateSingleDayTrip, TripDraftInput } from '../domain/trip'
+import { ConflictReviewPanel } from '../components/ConflictReviewPanel'
+import {
+  getOrganizerCollaboration,
+  resolveOrganizerConfirmationItem,
+} from '../api/collaborationApi'
+import {
+  canEnterRecommendation,
+  type CollaborationAggregate,
+} from '../domain/collaboration'
 
 const questions = [
   ['trip', '这次想去哪里、哪天出发、当天大约什么时间可用？'],
@@ -28,14 +37,6 @@ type Parsed = {
 }
 type ConversationResult = { state: { tripId: string; expectedParticipants: number; participants: Array<{ participantId: string; status: string }> } | null; parse: { parsed: Parsed; canPlan: boolean; confirmationItems: Array<{ message: string }>; trip: CreateSingleDayTrip | null }; organizerAccessToken: string | null }
 type Invitation = { invitationUrl: string }
-type CollaborationState = {
-  tripId: string
-  status: string
-  expectedParticipants: number
-  participants: Array<{ participantId: string; status: string; isOrganizer: boolean }>
-  conflicts: Array<{ conflictId: string; message: string; suggestion: string; allowedRelaxations: string[] }>
-}
-
 export function ConversationPlannerPage() {
   const [description, setDescription] = useState('')
   const [answers, setAnswers] = useState<string[]>(Array(questions.length).fill(''))
@@ -47,7 +48,7 @@ export function ConversationPlannerPage() {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ConversationResult | null>(null)
   const [links, setLinks] = useState<string[]>([])
-  const [collaboration, setCollaboration] = useState<CollaborationState | null>(null)
+  const [collaboration, setCollaboration] = useState<CollaborationAggregate | null>(null)
   const [error, setError] = useState('')
   const navigate = useNavigate()
   const cardAnswersReady = Boolean(tripFields.city.trim() && tripFields.date.trim() && tripFields.startTime.trim() && tripFields.endTime.trim() && routeFields.start.trim() && routeFields.end.trim() && routeFields.budget.trim())
@@ -66,8 +67,8 @@ export function ConversationPlannerPage() {
     let active = true
     const refresh = async () => {
       try {
-        const state = await request<CollaborationState>(`/api/v2/trips/${result.state?.tripId}/collaboration`)
-        if (active) setCollaboration(state.data)
+        const state = await getOrganizerCollaboration(result.state!.tripId, organizerToken)
+        if (active) setCollaboration(state)
       } catch (caught) { if (active) setError(caught instanceof Error ? caught.message : '无法刷新成员状态。') }
     }
     void refresh()
@@ -147,14 +148,16 @@ export function ConversationPlannerPage() {
     } finally { setLoading(false) }
   }
 
-  async function resolveConflict(conflictId: string, relaxation: string) {
-    if (!result?.state || !organizerToken) return
+  async function resolveConflict(itemId: string, relaxationId: string) {
+    if (!collaboration || !organizerToken) return
     setLoading(true); setError('')
     try {
-      const updated = await request<CollaborationState>(`/api/v2/trips/${result.state.tripId}/conflicts/${conflictId}/resolve`, {
-        method: 'POST', headers: { 'X-Organizer-Token': organizerToken }, body: JSON.stringify({ relaxation }),
-      })
-      setCollaboration(updated.data)
+      setCollaboration(await resolveOrganizerConfirmationItem({
+        state: collaboration,
+        itemId,
+        relaxationId,
+        organizerToken,
+      }))
     } catch (caught) { setError(caught instanceof Error ? caught.message : '冲突处理失败。') }
     finally { setLoading(false) }
   }
@@ -171,7 +174,7 @@ export function ConversationPlannerPage() {
     <main className="planner-layout">
       <aside className="planner-sidebar">
         <div><span className="eyebrow">S2 · 对话建行程</span><h1>把旅行，<br />说给我听。</h1><p>我们会用六个小问题收集完整信息，再一次性整理为可确认的行程需求。</p></div>
-        <ol className="step-list">{questions.map(([, label], index) => <li key={label} className={index < step || result ? 'is-complete' : index === step ? 'is-current' : ''}><span>{index < step || result ? <Check size={14} /> : index + 1}</span><div><strong>问题 {index + 1}</strong><small>{label.slice(0, 16)}…</small></div></li>)}</ol>
+        <ol className="step-list">{questions.map(([, label], index) => <li key={label} aria-current={!result && index === step ? 'step' : undefined} className={index < step || result ? 'is-complete' : index === step ? 'is-current' : ''}><span>{index < step || result ? <Check size={14} /> : index + 1}</span><div><strong>问题 {index + 1}</strong><small>{label.slice(0, 16)}…</small></div></li>)}</ol>
         <div className="privacy-note"><LockKeyhole size={17} /><span>你的回答仅用于整理行程偏好。成员资料各自独立确认。</span></div>
       </aside>
       <section className="planner-panel conversation-panel" data-reveal="panel">
@@ -186,15 +189,15 @@ export function ConversationPlannerPage() {
           {step === 1 && entryMode === 'group' && <div className="party-picker"><span>同行人数</span><div>{[2, 3].map((count) => <button key={count} type="button" className={answers[1].startsWith(String(count)) ? 'is-selected' : ''} onClick={() => updateAnswer(`${count}个人出行，我是组织者。`)}><UsersRound size={18} />{count} 人</button>)}</div></div>}
           <div className="planner-actions"><button className="button button--ghost" type="button" disabled={step === 0} onClick={() => setStep((value) => value - 1)}>上一个问题</button>{step < questions.length - 1 ? <button className="button button--primary" type="button" disabled={!currentStepReady} onClick={() => setStep((value) => value + 1)}>下一个问题 <ArrowRight size={18} /></button> : <button className="button button--primary" type="button" disabled={!isReady || loading} onClick={analyze}>{loading ? '正在整理需求…' : '完成问答并智能整理'} <ArrowRight size={18} /></button>}</div>
         </section></section></>}
-      {error && <p className="form-error">{error}</p>}
+      {error && <p className="form-error" role="alert">{error}</p>}
       {result && <section className="confirmation-card"><div className="confirmation-card__head"><span><Check size={20} /></span><div><strong>Agent 解析确认卡</strong><p>{result.parse.canPlan ? '已整理完成。核对无误后，把邀请链接发给同行成员。' : '仍有需要补充的信息，请回到对应问题修正。'}</p></div></div>
         <ul className="confirmation-grid">{[['城市', preview?.cityName], ['日期', preview?.travelDate], ['时间', `${preview?.startTime ?? '未识别'} 至 ${preview?.endTime ?? '未识别'}`], ['起终点', `${preview?.startLocationText ?? '未识别'} → ${preview?.endLocationText ?? '未识别'}`], ['预算', preview?.budgetCents === null || preview?.budgetCents === undefined ? '未识别' : `¥${preview.budgetCents / 100}`], ['兴趣', preview?.interests.join('、') || '未识别']].map(([label, value]) => <li key={label}><strong>{label}</strong><span>{value}</span></li>)}</ul>
         {result.parse.confirmationItems.map((item) => <p className="form-error" key={item.message}>{item.message}</p>)}
         <div><strong>需要更正？</strong><p>{questions.map(([, question], index) => <button className="button button--soft" type="button" key={question} onClick={() => editAnswer(index)}>修改第 {index + 1} 问</button>)}</p></div>
         {links.length > 0 && <div className="invite-card"><strong>成员邀请链接</strong><p>每个链接只对应一名成员，资料确认后自动失效。</p>{links.map((link, index) => <div className="invite-row" key={link}><span>成员 {index + 1}</span><code>{link}</code><button type="button" className="button button--soft" onClick={() => navigator.clipboard.writeText(link)}><Copy size={14} />复制</button></div>)}</div>}
-        {collaboration && <div className="draft-confirmation"><div className="draft-confirmation__heading"><span><UsersRound size={18} /></span><div><strong>协作进度</strong><p>{collaboration.participants.filter((item) => item.status === 'CONFIRMED').length} / {collaboration.expectedParticipants} 位成员已确认 · {collaboration.status}</p></div></div>
-          {collaboration.conflicts.map((conflict) => <div key={conflict.conflictId}><p className="form-error">{conflict.message}。{conflict.suggestion}</p>{conflict.allowedRelaxations.map((relaxation) => <button className="button button--soft" disabled={loading} key={relaxation} onClick={() => void resolveConflict(conflict.conflictId, relaxation)}>采用：{relaxation}</button>)}</div>)}
-          {collaboration.status === 'READY_TO_PLAN' && <button className="button button--primary" onClick={() => navigate(`/recommendation/${collaboration.tripId}`)}>查看唯一推荐 <ArrowRight size={18} /></button>}
+        {collaboration && <div className="draft-confirmation"><div className="draft-confirmation__heading"><span><UsersRound size={18} /></span><div><strong>协作进度</strong><p role="status" aria-live="polite">{collaboration.progress.confirmedCount} / {collaboration.progress.expectedCount} 位成员已确认 · {collaboration.status}</p></div></div>
+          <ConflictReviewPanel state={collaboration} busy={loading} onResolve={(itemId, relaxationId) => void resolveConflict(itemId, relaxationId)} />
+          {canEnterRecommendation(collaboration) && <button className="button button--primary" onClick={() => navigate(`/recommendation/${collaboration.tripId}`)}>查看唯一推荐 <ArrowRight size={18} /></button>}
         </div>}
       </section>}
     </section></main>

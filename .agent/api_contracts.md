@@ -306,3 +306,14 @@ Schema 校验失败沿用人工确认结构：
 - 候选签发证据绑定生成时的 `readinessDigest/currentRevision`；决策时必须与当前协作版本一致。成员资料变化后，旧候选不能再接受。
 - `DELAY | FATIGUE` 候选禁止使用通用 `/plan-versions/{planId}/accept|reject`，必须走本节专用决策接口并复验瞬时 HARD 证据。
 - 百炼只读取服务端生成的脱敏 Diff 投影并返回一段展示文案；它不得修改任务、金额、状态或版本。未配置、超时或非法输出只令 `explanation.status=UNAVAILABLE`，结构化候选与 Diff 必须完整返回。
+
+## 14. PBI-15-A 多人硬冲突与组织者处理（S2-T029）
+
+- `GET /api/v2/trips/{tripId}/collaboration` 必须携带 `X-Organizer-Token`，返回当前 `collaborationVersion/currentRevision/status/canPlan/progress/confirmationItems`。
+- 每个 `confirmationItems[]` 必须包含 `participantId`、`relatedParticipantIds[]`、`ruleId`、`reason` 与 `allowedRelaxations[]`；旧字段名 `relaxations` 仅保留输入兼容，不作为公开响应字段。
+- `POST /api/v2/trips/{tripId}/confirmation-items/{itemId}/resolve` 必须携带 `X-Organizer-Token` 与 `Idempotency-Key`，请求固定为 `schemaVersion/baseRevision/expectedVersion/relaxationId`。
+- 组织者只能执行 `actorScope=ORGANIZER` 的放宽项。成员字段的 `PARTICIPANT` 放宽项必须由对应成员会话执行；组织者页面应显示责任成员，但不得代填或越权修改。
+- 任何未解决确认项都令 `status=CONFLICT_REVIEW`、`canPlan=false`、`readinessDigest=null`，Provider、推荐和规划边界必须在调用下游前拒绝。
+- 放宽会创建新的 T002 revision。旧确认随即变为 `NEEDS_RECONFIRMATION`，状态进入 `COLLECTING_MEMBERS`；只有所有成员在新 revision 重新确认且硬冲突为零，才可进入 `READY_TO_PLAN`。
+- `MemberSessionView` 返回 `collaborationVersion`，确保成员解决自己的确认项时能提交严格 `expectedVersion`。
+- 当前生产 `POST /api/v2/trips/conversations` 仍等待 T002 `TripDraftRevision` 接入并返回 503；S2-T029 不得伪造该上游能力。

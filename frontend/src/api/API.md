@@ -315,7 +315,16 @@ src/api/tripContract.ts
 - 百炼解释是可选展示字段。`UNAVAILABLE` 只表示解释降级，页面仍必须使用完整结构化候选和 Diff；不得根据解释文案改写任务、价格或状态。
 - 协作 Trip 调用以上接口必须继续携带 `X-Organizer-Token`。S2-T023 页面尚未在本次后端交付中实现。
 
-## 13. 尚未登记的远端接口
+## 13. 多人硬冲突与组织者处理
+
+- `GET /api/v2/trips/{tripId}/collaboration`：携带 `X-Organizer-Token` 恢复协作进度和 `confirmationItems[]`。
+- 冲突项公开字段固定为 `participantId/relatedParticipantIds/ruleId/reason/allowedRelaxations`。页面必须点名成员与规则，不能只显示一条笼统错误。
+- `POST /api/v2/trips/{tripId}/confirmation-items/{itemId}/resolve`：携带组织者凭证、`Idempotency-Key`，并提交当前 `baseRevision/expectedVersion/relaxationId`。
+- 组织者只能点击 `actorScope=ORGANIZER` 的选项；成员选项显示“需对应成员本人处理”，不得由前端绕过权限。
+- 页面只有在 `status=READY_TO_PLAN && canPlan=true && readinessDigest!=null` 时显示唯一推荐入口。冲突解决后若成员状态为 `NEEDS_RECONFIRMATION`，应继续显示等待重新确认，不得直接进入规划。
+- 当前组织者创建入口仍依赖上游 T002，未接入时会返回 503；前端不得伪造成功状态。
+
+## 14. 尚未登记的远端接口
 
 以下能力目前没有远端 HTTP 契约：
 

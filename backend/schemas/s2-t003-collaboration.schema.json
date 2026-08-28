@@ -13,6 +13,13 @@
         "CollaborationIssue": {
           "additionalProperties": false,
           "properties": {
+            "allowedRelaxations": {
+              "items": {
+                "$ref": "#/$defs/RelaxationOption"
+              },
+              "title": "Allowedrelaxations",
+              "type": "array"
+            },
             "candidates": {
               "items": {
                 "type": "string"
@@ -60,13 +67,6 @@
               "title": "Relatedparticipantids",
               "type": "array"
             },
-            "relaxations": {
-              "items": {
-                "$ref": "#/$defs/RelaxationOption"
-              },
-              "title": "Relaxations",
-              "type": "array"
-            },
             "ruleId": {
               "pattern": "^S2T003\\.[A-Z0-9_.]+$",
               "title": "Ruleid",
@@ -80,7 +80,8 @@
             "relatedParticipantIds",
             "ruleId",
             "code",
-            "reason"
+            "reason",
+            "allowedRelaxations"
           ],
           "title": "CollaborationIssue",
           "type": "object"
@@ -523,6 +524,13 @@
       },
       "additionalProperties": false,
       "properties": {
+        "allowedRelaxations": {
+          "items": {
+            "$ref": "#/$defs/RelaxationOption"
+          },
+          "title": "Allowedrelaxations",
+          "type": "array"
+        },
         "candidates": {
           "items": {
             "type": "string"
@@ -570,13 +578,6 @@
           "title": "Relatedparticipantids",
           "type": "array"
         },
-        "relaxations": {
-          "items": {
-            "$ref": "#/$defs/RelaxationOption"
-          },
-          "title": "Relaxations",
-          "type": "array"
-        },
         "ruleId": {
           "pattern": "^S2T003\\.[A-Z0-9_.]+$",
           "title": "Ruleid",
@@ -590,7 +591,8 @@
         "relatedParticipantIds",
         "ruleId",
         "code",
-        "reason"
+        "reason",
+        "allowedRelaxations"
       ],
       "title": "CollaborationIssue",
       "type": "object"
@@ -958,6 +960,13 @@
         "CollaborationIssue": {
           "additionalProperties": false,
           "properties": {
+            "allowedRelaxations": {
+              "items": {
+                "$ref": "#/$defs/RelaxationOption"
+              },
+              "title": "Allowedrelaxations",
+              "type": "array"
+            },
             "candidates": {
               "items": {
                 "type": "string"
@@ -1005,13 +1014,6 @@
               "title": "Relatedparticipantids",
               "type": "array"
             },
-            "relaxations": {
-              "items": {
-                "$ref": "#/$defs/RelaxationOption"
-              },
-              "title": "Relaxations",
-              "type": "array"
-            },
             "ruleId": {
               "pattern": "^S2T003\\.[A-Z0-9_.]+$",
               "title": "Ruleid",
@@ -1025,7 +1027,8 @@
             "relatedParticipantIds",
             "ruleId",
             "code",
-            "reason"
+            "reason",
+            "allowedRelaxations"
           ],
           "title": "CollaborationIssue",
           "type": "object"
@@ -1359,6 +1362,11 @@
         "accessStatus": {
           "$ref": "#/$defs/ParticipantAccessStatus"
         },
+        "collaborationVersion": {
+          "minimum": 1,
+          "title": "Collaborationversion",
+          "type": "integer"
+        },
         "confirmationItems": {
           "items": {
             "$ref": "#/$defs/CollaborationIssue"
@@ -1401,6 +1409,7 @@
         "tripId",
         "participantId",
         "currentRevision",
+        "collaborationVersion",
         "sharedTrip",
         "participant",
         "accessStatus",

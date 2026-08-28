@@ -185,7 +185,13 @@ class CollaborationService:
             return CollaborationStatus.READY_TO_PLAN
         if issues:
             return CollaborationStatus.CONFLICT_REVIEW
-        if any(item.confirmation_status is ParticipantConfirmationStatus.CONFIRMED for item in progress):
+        if any(
+            item.confirmation_status in {
+                ParticipantConfirmationStatus.CONFIRMED,
+                ParticipantConfirmationStatus.NEEDS_RECONFIRMATION,
+            }
+            for item in progress
+        ):
             return CollaborationStatus.COLLECTING_MEMBERS
         return CollaborationStatus.DRAFT_CONVERSATION
 
@@ -330,6 +336,7 @@ class CollaborationService:
             tripId=actor.trip_id,
             participantId=actor.participant_id,
             currentRevision=revision.revision,
+            collaborationVersion=stored.version,
             sharedTrip=revision.understanding.trip,
             participant=participant,
             accessStatus=progress.access_status,
