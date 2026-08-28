@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 const testDir = new URL('../tests/', import.meta.url)
+const rolldownCli = join(process.cwd(), 'node_modules', 'rolldown', 'bin', 'cli.mjs')
 const outputDir = join(process.cwd(), '.test-dist')
 await rm(outputDir, { recursive: true, force: true })
 await mkdir(outputDir)
@@ -11,7 +12,7 @@ try {
   const tests = (await readdir(testDir)).filter((file) => file.endsWith('.test.ts'))
   for (const test of tests) {
     const bundled = join(outputDir, test.replace(/\.ts$/, '.mjs'))
-    const bundle = spawnSync('./node_modules/.bin/rolldown', [join('tests', test), '--file', bundled, '--format', 'esm', '--platform', 'node'], { stdio: 'inherit' })
+    const bundle = spawnSync(process.execPath, [rolldownCli, join('tests', test), '--file', bundled, '--format', 'esm', '--platform', 'node'], { stdio: 'inherit' })
     if (bundle.status !== 0) process.exitCode = bundle.status ?? 1
     bundledTests.push(bundled)
   }

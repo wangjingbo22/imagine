@@ -1706,7 +1706,7 @@ class PlanningBoundaryService:
         if adjustment_event_id is not None:
             self._restore_confirmed_adjustment(
                 trip_id=trip_id,
-                current_plan_id=plan.parent_plan_id,
+                current_plan_id=plan.parent_id,
                 event_id=adjustment_event_id,
                 inline=constraints.source_event,
             )
