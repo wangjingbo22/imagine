@@ -28,9 +28,10 @@ const questions = [
 function careSummary(view: MemberSessionView): string {
   const care = view.participant.careDraft
   if (!care) return '没有额外关怀限制。'
+  const walkLimits = care.walkLimits ?? { maxContinuousMeters: null, maxDailyMeters: null }
   return [
     care.assistanceTypeHint ? `关怀类型：${care.assistanceTypeHint}` : null,
-    care.walkLimits.maxContinuousMeters === null ? null : `连续步行不超过${care.walkLimits.maxContinuousMeters}米`,
+    walkLimits.maxContinuousMeters === null ? null : `连续步行不超过${walkLimits.maxContinuousMeters}米`,
     care.maxTransfers === null ? null : `最多换乘${care.maxTransfers}次`,
     care.restIntervalMinutes === null ? null : `每${care.restIntervalMinutes}分钟休息`,
     care.avoidStairs ? '避开楼梯' : null,
@@ -56,6 +57,11 @@ export function MemberConversationPage() {
 
   useEffect(() => {
     let active = true
+    const timeout = window.setTimeout(() => {
+      if (!active) return
+      setError('成员会话加载超时，请重新打开邀请链接。')
+      setLoading(false)
+    }, 15_000)
     const initialize = async () => {
       try {
         let capability = token
@@ -76,7 +82,7 @@ export function MemberConversationPage() {
           window.sessionStorage.removeItem(keyName)
           window.history.replaceState(null, '', '/join')
         }
-        if (!capability) throw new Error('缺少有效的一次性邀请或成员会话。')
+        if (!capability) throw new Error('缺少有效的成员邀请或成员会话。')
         const current = await getMemberSession(capability)
         if (!active) return
         setSessionToken(capability)
@@ -94,7 +100,7 @@ export function MemberConversationPage() {
         setDescription(`参加组织者创建的${shared.cityName ?? ''}行程，并独立确认我的个人偏好与关怀限制。`)
         setAnswers([
           `城市：${shared.cityName ?? ''}；日期：${shared.travelDate ?? ''}；时间：${shared.startTime ?? ''}到${shared.endTime ?? ''}`,
-          '同行信息由组织者管理；我是通过一次性邀请加入的成员。',
+          '同行信息由组织者管理；我是通过成员邀请链接加入的成员。',
           `从${shared.startLocationText ?? ''}出发；结束地：${shared.endLocationText ?? ''}；共享预算：${shared.budgetCents === null ? '' : `${shared.budgetCents / 100}元`}`,
           `兴趣：${participant.interests.join('、')}；必去：${participant.mustVisit.join('、')}；避开：${participant.avoidPlaces.join('、')}`,
           `个人预算上限：${participant.budgetCapCents === null ? '未设置' : `${participant.budgetCapCents / 100}元`}；${careSummary(current)}`,
@@ -103,11 +109,14 @@ export function MemberConversationPage() {
       } catch (caught) {
         if (active) setError(caught instanceof Error ? caught.message : '邀请链接无效。')
       } finally {
-        if (active) setLoading(false)
+        if (active) {
+          window.clearTimeout(timeout)
+          setLoading(false)
+        }
       }
     }
     void initialize()
-    return () => { active = false }
+    return () => { active = false; window.clearTimeout(timeout) }
   }, [token])
 
   const ready = Boolean(description.trim() && answers.every((answer) => answer.trim()))
@@ -177,8 +186,8 @@ export function MemberConversationPage() {
     finally { setLoading(false) }
   }
 
-  if (loading && !view && !error) return <AppShell compact><main className="planner-layout"><section className="planner-panel"><p role="status">正在兑换邀请并建立仅属于你的成员会话…</p></section></main></AppShell>
-  if (!view) return <AppShell compact><main className="planner-layout"><section className="planner-panel"><h1>此邀请不可用</h1><p className="form-error" role="alert">{error || '链接已失效、撤销，或已被确认使用。'}</p></section></main></AppShell>
+  if (loading && !view && !error) return <AppShell compact><main className="planner-layout"><section className="planner-panel member-loading-panel"><Sparkles size={24} /><h1>正在进入成员行程</h1><p role="status">正在建立仅属于你的成员会话，请稍候…</p></section></main></AppShell>
+  if (!view) return <AppShell compact><main className="planner-layout"><section className="planner-panel invitation-error-panel"><h1>此邀请不可用</h1><p className="form-error" role="alert">{error || '链接已过期或被组织者撤销。'}</p><div className="invitation-error-help"><strong>怎么继续？</strong><ol><li>同一个成员邀请链接可以重复打开。</li><li>再次打开后请使用最新标签页；旧标签页的会话会自动失效。</li><li>若链接已过期或被撤销，请联系组织者。</li></ol><a className="button button--soft" href="/plan">返回行程创建页</a></div></section></main></AppShell>
 
   return <AppShell compact><main className="planner-layout"><section className="planner-panel" data-reveal="panel">
     <span className="section-kicker">MEMBER CONVERSATION</span>

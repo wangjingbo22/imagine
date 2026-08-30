@@ -82,7 +82,7 @@ class CollaborationService:
             status = 403
         elif code == "PARTICIPANT_SESSION_REQUIRED":
             status = 401
-        elif code in {"INVITATION_UNAVAILABLE", "INVITATION_ALREADY_REDEEMED", "INVITATION_EXPIRED"}:
+        elif code in {"INVITATION_UNAVAILABLE", "INVITATION_EXPIRED"}:
             status = 410
         elif code in {"PARTICIPANT_CONFIRMATION_REQUIRED", "PARTICIPANT_DRAFT_MISSING"}:
             status = 422
@@ -90,7 +90,16 @@ class CollaborationService:
             status = 404
         else:
             status = 409
-        return AppError(code, "协作操作无法完成", status, status == 503)
+        invitation_messages = {
+            "INVITATION_EXPIRED": "该邀请链接已过期，请联系组织者重新邀请。",
+            "INVITATION_UNAVAILABLE": "该邀请链接不存在或已被组织者撤销。",
+        }
+        return AppError(
+            code,
+            invitation_messages.get(code, "协作操作无法完成"),
+            status,
+            status == 503,
+        )
 
     def _current(self, trip_id: UUID) -> TripDraftRevisionView:
         try:

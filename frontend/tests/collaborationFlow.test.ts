@@ -180,11 +180,19 @@ test('organizer page serially rolls the collaboration version and fails closed f
   const page = await readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8')
   assert.match(page, /for \(const participant of state\.participants\.filter/)
   assert.match(page, /expectedVersion = invitation\.collaborationVersion/)
-  assert.match(page, /setLinks\(\(current\) => current\.includes\(link\)/)
+  assert.match(page, /setLinks\(\(current\) => current\.some\(\(item\) => item\.link === link\)/)
   assert.match(page, /accessStatus: 'INVITED'/)
   assert.match(page, /singleParticipantPlanningDraft\(revision\)/)
   assert.match(page, /多人 Trip 尚不能无损转换/)
   assert.doesNotMatch(page, /mode:\s*'GROUP'/)
+})
+
+test('fixed-question fallback requires an explicit six-answer review and a fresh retry key', async () => {
+  const page = await readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8')
+  assert.match(page, /reviewedFallbackCount === questions\.length/)
+  assert.match(page, /六项已核对，重新智能整理/)
+  assert.match(page, /conversationKey\.current = null\s+await analyze\(\)/)
+  assert.match(page, /在确认资料前仍不会调用 Provider 或规划/)
 })
 
 test('recommendation route consumes the guarded server Trip without legacy reconfirmation', async () => {
@@ -202,4 +210,12 @@ test('a new invitation never falls through to another participant last session',
   const page = await readFile(new URL('../src/pages/MemberConversationPage.tsx', import.meta.url), 'utf8')
   assert.match(page, /let capability = token\s*\? window\.sessionStorage\.getItem\(`participant-session:\$\{token\}`\)\s*:\s*window\.sessionStorage\.getItem\('participant-session:last'\)/)
   assert.match(page, /window\.history\.replaceState\(null, '', '\/join'\)/)
+  assert.match(page, /同一个成员邀请链接可以重复打开/)
+  assert.match(page, /旧标签页的会话会自动失效/)
+})
+
+test('organizer presents each reusable member invitation as a direct link with rotation guidance', async () => {
+  const page = await readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8')
+  assert.match(page, /确认资料前可以重复打开/)
+  assert.match(page, /href=\{item\.link\} target="_blank" rel="noreferrer"/)
 })

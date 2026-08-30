@@ -4,7 +4,15 @@ import type {
   ValidationIssue,
 } from '../domain/trip'
 
-const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
+export function resolveApiBaseUrl(configuredValue?: string): string {
+  const normalized = configuredValue?.trim().replace(/\/+$/, '')
+  return normalized || ''
+}
+
+// Local development is same-origin by default: Vite proxies /api and /health
+// to the backend. Deployments with a separate API origin can still provide an
+// explicit HTTPS VITE_API_BASE_URL.
+const API_BASE_URL = resolveApiBaseUrl(import.meta.env?.VITE_API_BASE_URL)
 
 export class ApiError extends Error {
   readonly code: number | string

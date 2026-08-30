@@ -178,7 +178,7 @@ test('T023 calls parse, persistence, preview, and dedicated decision contracts',
   )
 
   assert.deepEqual(
-    calls.map(({ url }) => new URL(url).pathname),
+    calls.map(({ url }) => new URL(url, 'http://local.test').pathname),
     [
       '/api/v1/execution-adjustments/parse',
       '/api/v1/execution-adjustments/trips/trip%20%2F%20one/events',

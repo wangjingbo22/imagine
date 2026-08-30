@@ -33,7 +33,7 @@ def _issued(tmp_path):
     return repository, revision, clock, bootstrap, invitation
 
 
-def test_invitation_redeems_once_into_independent_member_session(tmp_path) -> None:
+def test_invitation_can_reopen_and_rotates_the_member_session(tmp_path) -> None:
     repository, revision, clock, _, invitation = _issued(tmp_path)
     assert invitation.invitation_url is not None
     assert invitation.invitation_url.startswith("/join#token=")
@@ -43,8 +43,12 @@ def test_invitation_redeems_once_into_independent_member_session(tmp_path) -> No
     actor = repository.authenticate_participant(redeemed.participant_session_token)
     assert actor.participant_id == revision.member_bindings["member-2"]
     assert actor.expires_at == clock.now + timedelta(days=7)
-    with pytest.raises(CollaborationStoreError, match="INVITATION_ALREADY_REDEEMED"):
-        repository.redeem_invitation(raw_invite, "3333333333333333")
+    reopened = repository.redeem_invitation(raw_invite, "3333333333333333")
+    assert reopened.participant_session_token is not None
+    with pytest.raises(CollaborationStoreError, match="PARTICIPANT_SESSION_REVOKED"):
+        repository.authenticate_participant(redeemed.participant_session_token)
+    reopened_actor = repository.authenticate_participant(reopened.participant_session_token)
+    assert reopened_actor.participant_id == revision.member_bindings["member-2"]
 
 
 def test_database_and_structured_rows_never_contain_raw_secrets(tmp_path) -> None:
@@ -73,22 +77,30 @@ def test_database_and_structured_rows_never_contain_raw_secrets(tmp_path) -> Non
     assert all(secret not in serialized for secret in raw)
 
 
-def test_same_invite_concurrent_redemption_has_one_winner(tmp_path) -> None:
+def test_same_invite_concurrent_redemption_keeps_only_latest_session_active(tmp_path) -> None:
     repository, _, _, _, invitation = _issued(tmp_path)
     assert invitation.invitation_url is not None
     raw_invite = invitation.invitation_url.split("=", 1)[1]
 
     def redeem(key: str) -> str:
         try:
-            repository.redeem_invitation(raw_invite, key)
-            return "SUCCESS"
+            outcome = repository.redeem_invitation(raw_invite, key)
+            assert outcome.participant_session_token is not None
+            return outcome.participant_session_token
         except CollaborationStoreError as error:
-            return str(error)
+            return f"ERROR:{error}"
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(redeem, ("2222222222222222", "3333333333333333")))
-    assert results.count("SUCCESS") == 1
-    assert results.count("INVITATION_ALREADY_REDEEMED") == 1
+    assert all(not item.startswith("ERROR:") for item in results)
+    active_count = 0
+    for token in results:
+        try:
+            repository.authenticate_participant(token)
+            active_count += 1
+        except CollaborationStoreError as error:
+            assert str(error) == "PARTICIPANT_SESSION_REVOKED"
+    assert active_count == 1
 
 
 def test_revoke_invitation_revokes_linked_session_and_invalidates_confirmation(tmp_path) -> None:

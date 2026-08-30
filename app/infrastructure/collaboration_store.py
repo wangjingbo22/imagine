@@ -584,7 +584,8 @@ class SqliteCollaborationRepository:
                     raise CollaborationStoreError("PARTICIPANT_NOT_BOUND")
                 active = connection.execute(
                     "SELECT 1 FROM participant_invitations "
-                    "WHERE trip_id = ? AND participant_id = ? AND status = 'ACTIVE'",
+                    "WHERE trip_id = ? AND participant_id = ? "
+                    "AND status IN ('ACTIVE', 'REDEEMED') AND revoked_at IS NULL",
                     (str(trip_id), str(participant_id)),
                 ).fetchone()
                 if active is not None:
@@ -674,9 +675,7 @@ class SqliteCollaborationRepository:
             ).fetchone()
         if row is None or row["status"] == "REVOKED" or row["revoked_at"]:
             raise CollaborationStoreError("INVITATION_UNAVAILABLE")
-        if row["status"] == "REDEEMED":
-            raise CollaborationStoreError("INVITATION_ALREADY_REDEEMED")
-        if row["status"] != "ACTIVE":
+        if row["status"] not in {"ACTIVE", "REDEEMED"}:
             raise CollaborationStoreError("INVITATION_UNAVAILABLE")
         if datetime.fromisoformat(row["expires_at"]) <= self._clock():
             raise CollaborationStoreError("INVITATION_EXPIRED")
@@ -718,9 +717,7 @@ class SqliteCollaborationRepository:
                 ).fetchone()
                 if row is None or row["status"] == "REVOKED" or row["revoked_at"]:
                     raise CollaborationStoreError("INVITATION_UNAVAILABLE")
-                if row["status"] == "REDEEMED":
-                    raise CollaborationStoreError("INVITATION_ALREADY_REDEEMED")
-                if row["status"] != "ACTIVE":
+                if row["status"] not in {"ACTIVE", "REDEEMED"}:
                     raise CollaborationStoreError("INVITATION_UNAVAILABLE")
                 if datetime.fromisoformat(row["expires_at"]) <= now:
                     raise CollaborationStoreError("INVITATION_EXPIRED")
@@ -728,14 +725,21 @@ class SqliteCollaborationRepository:
                 session_id = uuid4()
                 session_secret = self._new_secret()
                 session_expiry = now + min(timedelta(days=7), timedelta(days=30))
+                if row["redeemed_session_id"]:
+                    connection.execute(
+                        "UPDATE collaboration_actor_sessions "
+                        "SET revoked_at=COALESCE(revoked_at, ?) WHERE session_id=?",
+                        (now.isoformat(), row["redeemed_session_id"]),
+                    )
                 updated = connection.execute(
                     "UPDATE participant_invitations SET status='REDEEMED', accepted_at=?, "
                     "redeemed_at=?, redeemed_session_id=?, version=version+1 "
-                    "WHERE invitation_id=? AND status='ACTIVE'",
+                    "WHERE invitation_id=? AND status IN ('ACTIVE', 'REDEEMED') "
+                    "AND revoked_at IS NULL",
                     (now.isoformat(), now.isoformat(), str(session_id), row["invitation_id"]),
                 ).rowcount
                 if updated != 1:
-                    raise CollaborationStoreError("INVITATION_ALREADY_REDEEMED")
+                    raise CollaborationStoreError("INVITATION_UNAVAILABLE")
                 connection.execute(
                     "INSERT INTO collaboration_actor_sessions VALUES (?, ?, ?, 'MEMBER', ?, ?, NULL, ?, ?)",
                     (

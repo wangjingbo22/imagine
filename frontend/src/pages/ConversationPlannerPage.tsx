@@ -71,7 +71,8 @@ export function ConversationPlannerPage() {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<OrganizerConversationCreated | null>(null)
   const [fallback, setFallback] = useState<FixedQuestionFallbackResponse | null>(null)
-  const [links, setLinks] = useState<string[]>([])
+  const [reviewedFallbackAnswers, setReviewedFallbackAnswers] = useState<boolean[]>(Array(questions.length).fill(false))
+  const [links, setLinks] = useState<Array<{ invitationId: string; participantId: string; link: string }>>([])
   const [collaboration, setCollaboration] = useState<CollaborationAggregate | null>(null)
   const [planningDraft, setPlanningDraft] = useState<TripDraftInput | null>(null)
   const [error, setError] = useState('')
@@ -98,6 +99,8 @@ export function ConversationPlannerPage() {
     : null
   const organizerConfirmed = collaboration?.participants.some((item) => item.role === 'ORGANIZER' && item.confirmationStatus === 'CONFIRMED') ?? false
   const needsInvitations = collaboration?.participants.some((item) => item.role === 'MEMBER' && item.accessStatus === 'NOT_INVITED') ?? false
+  const reviewedFallbackCount = reviewedFallbackAnswers.filter(Boolean).length
+  const fallbackReviewComplete = reviewedFallbackCount === questions.length
 
   useEffect(() => {
     if (!revision || !organizerToken) return
@@ -198,7 +201,7 @@ export function ConversationPlannerPage() {
 
   function joinExistingTrip() {
     const token = invitationTokenFromText(inviteLink)
-    if (!token) { setError('请粘贴完整的一次性邀请链接或 43 位邀请码。'); return }
+    if (!token) { setError('请粘贴完整的成员邀请链接或 43 位邀请码。'); return }
     navigate(`/join#token=${encodeURIComponent(token)}`)
   }
 
@@ -215,6 +218,7 @@ export function ConversationPlannerPage() {
       }, key)
       if (isFixedQuestionFallback(created)) {
         setFallback(created)
+        setReviewedFallbackAnswers(Array(questions.length).fill(false))
         setResult(null)
         setCollaboration(null)
         setPlanningDraft(null)
@@ -231,6 +235,20 @@ export function ConversationPlannerPage() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '对话解析失败，请稍后重试。')
     } finally { setLoading(false) }
+  }
+
+  async function retryAfterFallbackReview() {
+    if (!fallbackReviewComplete || loading) return
+    // A failed command is idempotently replayed by the server. An explicit user
+    // review starts a new submission attempt while preserving the six answers.
+    conversationKey.current = null
+    await analyze()
+  }
+
+  function toggleFallbackReview(index: number) {
+    setReviewedFallbackAnswers((current) => current.map((checked, itemIndex) => (
+      itemIndex === index ? !checked : checked
+    )))
   }
 
   async function confirmAndPrepare() {
@@ -259,10 +277,12 @@ export function ConversationPlannerPage() {
         })
         expectedVersion = invitation.collaborationVersion
         if (!invitation.linkAvailable || !invitation.invitationUrl) {
-          throw new Error(`成员 ${participant.memberKey} 的一次性邀请密钥不可再次显示，请重新创建行程。`)
+          throw new Error(`成员 ${participant.memberKey} 的邀请密钥未生成，请重新创建邀请。`)
         }
         const link = new URL(invitation.invitationUrl, window.location.origin).toString()
-        setLinks((current) => current.includes(link) ? current : [...current, link])
+        setLinks((current) => current.some((item) => item.link === link)
+          ? current
+          : [...current, { invitationId: invitation.invitationId, participantId: participant.participantId, link }])
         state = {
           ...state,
           collaborationVersion: invitation.collaborationVersion,
@@ -310,6 +330,7 @@ export function ConversationPlannerPage() {
     setCollaboration(null)
     setPlanningDraft(null)
     setLinks([])
+    setReviewedFallbackAnswers(Array(questions.length).fill(false))
     setStep(index)
     answersChanged()
   }
@@ -335,15 +356,30 @@ export function ConversationPlannerPage() {
           </section>
         </section>}
         {error && <p className="form-error" role="alert">{error}</p>}
-        {fallback && <section className="confirmation-card"><div className="confirmation-card__head"><span><Sparkles size={20} /></span><div><strong>已切换为固定问题核对</strong><p>模型本次不可用，服务端没有创建权威 Trip。请逐项核对后重新提交，当前不会进入 Provider 或规划。</p></div></div>{fallback.fallback.items.map((item, index) => <p className="form-error" key={item.questionId}>第 {index + 1} 问：{item.message}</p>)}<div><strong>返回对应问题修改</strong><p>{questions.map(([, question], index) => <button className="button button--soft" type="button" key={question} onClick={() => editAnswer(index)}>修改第 {index + 1} 问</button>)}</p></div></section>}
-        {result && revision && <section className="confirmation-card"><div className="confirmation-card__head"><span><Check size={20} /></span><div><strong>Agent 解析确认卡</strong><p>请先确认组织者资料；多人行程随后按成员逐个签发一次性邀请。</p></div></div>
+        {fallback && <section className="confirmation-card fallback-review-card">
+          <div className="confirmation-card__head"><span><Sparkles size={20} /></span><div><strong>逐项核对六个回答</strong><p>本次模型服务不可用（{fallback.recognition.failureCode}），服务端没有创建 Trip。请确认每项内容准确；需要更正就返回对应问题，全部核对后可重新智能整理。</p></div></div>
+          <ol className="fallback-review-list">
+            {fallback.fallback.items.map((item, index) => <li key={item.questionId} className={reviewedFallbackAnswers[index] ? 'is-reviewed' : ''}>
+              <div className="fallback-review-item__content"><span>问题 {index + 1}</span><strong>{questions[index]?.[1]}</strong><p>{item.answer}</p></div>
+              <div className="fallback-review-item__actions">
+                <button className="button button--soft" type="button" onClick={() => editAnswer(index)}>修改此项</button>
+                <label><input type="checkbox" checked={reviewedFallbackAnswers[index] ?? false} onChange={() => toggleFallbackReview(index)} /><span><Check size={15} />答案准确</span></label>
+              </div>
+            </li>)}
+          </ol>
+          <div className="fallback-review-footer">
+            <p role="status" aria-live="polite">已核对 {reviewedFallbackCount} / {questions.length} 项。重新整理成功后会显示“Agent 解析确认卡”，在确认资料前仍不会调用 Provider 或规划。</p>
+            <button className="button button--primary" type="button" disabled={!fallbackReviewComplete || loading} onClick={() => void retryAfterFallbackReview()}>{loading ? '正在重新整理…' : '六项已核对，重新智能整理'} <ArrowRight size={18} /></button>
+          </div>
+        </section>}
+        {result && revision && <section className="confirmation-card"><div className="confirmation-card__head"><span><Check size={20} /></span><div><strong>Agent 解析确认卡</strong><p>请先确认组织者资料；多人行程随后按成员逐个生成可重复打开的邀请链接。</p></div></div>
           <ul className="confirmation-grid">{[['城市', preview?.cityName], ['日期', preview?.travelDate], ['时间', `${preview?.startTime ?? '未识别'} 至 ${preview?.endTime ?? '未识别'}`], ['起终点', `${preview?.startLocationText ?? '未识别'} → ${preview?.endLocationText ?? '未识别'}`], ['预算', preview?.budgetCents === null || preview?.budgetCents === undefined ? '未识别' : `¥${preview.budgetCents / 100}`], ['兴趣', previewParticipant?.interests.join('、') || '未识别']].map(([label, value]) => <li key={label}><strong>{label}</strong><span>{value}</span></li>)}</ul>
           <div><strong>需要更正？</strong><p>{questions.map(([, question], index) => <button className="button button--soft" type="button" key={question} onClick={() => editAnswer(index)}>修改第 {index + 1} 问</button>)}</p></div>
           {collaboration && <div className="draft-confirmation"><div className="draft-confirmation__heading"><span><UsersRound size={18} /></span><div><strong>协作进度</strong><p role="status" aria-live="polite">{collaboration.progress.confirmedCount} / {collaboration.progress.expectedCount} 位成员已确认 · {collaboration.status}</p></div></div>
-            <ConflictReviewPanel state={collaboration} busy={loading} onResolve={(itemId, relaxationId) => void resolveConflict(itemId, relaxationId)} />
             {(!organizerConfirmed || needsInvitations) && <button className="button button--primary" type="button" disabled={loading} onClick={() => void confirmAndPrepare()}>{organizerConfirmed ? '继续创建成员邀请' : `确认组织者资料${collaboration.progress.expectedCount > 1 ? '并创建邀请' : ''}`} <ArrowRight size={18} /></button>}
+            <ConflictReviewPanel state={collaboration} busy={loading} onResolve={(itemId, relaxationId) => void resolveConflict(itemId, relaxationId)} />
           </div>}
-          {links.length > 0 && <div className="invite-card"><strong>成员邀请链接</strong><p>每个链接只对应一名成员，资料确认后自动失效。</p>{links.map((link, index) => <div className="invite-row" key={link}><span>成员 {index + 1}</span><code>{link}</code><button type="button" className="button button--soft" onClick={() => void navigator.clipboard.writeText(link)}><Copy size={14} />复制</button></div>)}</div>}
+          {links.length > 0 && <div className="invite-card"><strong>成员邀请链接</strong><p>每个链接只对应一名成员，在该成员确认资料前可以重复打开。再次打开会生成新会话，并让该成员上一次打开的旧标签页失效。</p>{links.map((item, index) => <div className="invite-row" key={item.invitationId}><span>成员 {index + 1}</span><code>{item.link}</code><div className="invite-row__actions"><a className="button button--soft" href={item.link} target="_blank" rel="noreferrer"><ArrowRight size={14} />打开</a><button type="button" className="button button--soft" onClick={() => void navigator.clipboard.writeText(item.link)}><Copy size={14} />复制</button></div></div>)}</div>}
           {collaboration && canEnterRecommendation(collaboration) && planningDraft && <button className="button button--primary" type="button" onClick={() => { window.sessionStorage.setItem(`s2-plan-context:${collaboration.tripId}`, JSON.stringify({ draft: planningDraft })); navigate(`/recommendation/${collaboration.tripId}`) }}>查看唯一推荐 <ArrowRight size={18} /></button>}
           {collaboration && canEnterRecommendation(collaboration) && !planningDraft && <p className="form-error" role="status">协作状态已就绪，但多人 Trip 尚不能无损转换到现有单人规划契约。为避免伪造参与者或关怀事实，当前不会进入推荐页。</p>}
         </section>}

@@ -113,7 +113,10 @@ export function redeemParticipantInvitation(
     body: JSON.stringify({ schemaVersion: '1.0', token }),
   }).then((response) => response.data)
   invitationRedemptions.set(token, operation)
-  void operation.catch(() => invitationRedemptions.delete(token))
+  void operation.then(
+    () => invitationRedemptions.delete(token),
+    () => invitationRedemptions.delete(token),
+  )
   return operation
 }
 
