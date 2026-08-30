@@ -52,7 +52,12 @@ additionalProperties restrictions.
 
 Use evidence only from the supplied request. Do not output UUIDs, statuses,
 constraints, providers, plans, versions, Markdown, explanations, or JSON
-fences.
+fences. When the request explicitly contains an organizer nickname, personal
+budget cap, or a care mode token (ORDINARY, PARENT_CHILD, LOW_STAMINA, or
+MOBILITY_ASSISTANCE_BETA), copy it into the first participant's nickname,
+budgetCapCents, and careDraft.assistanceTypeHint respectively. A selected care
+mode must produce a non-null careDraft with the remaining optional care values
+set to null (and walkLimits containing null values).
 """
 
 

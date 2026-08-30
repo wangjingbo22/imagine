@@ -61,6 +61,10 @@ export function ConversationPlannerPage() {
   const [answers, setAnswers] = useState<string[]>(Array(questions.length).fill(''))
   const [tripFields, setTripFields] = useState({ city: '', date: '', startTime: '', endTime: '' })
   const [routeFields, setRouteFields] = useState({ start: '', end: '', budget: '' })
+  const [organizerNickname, setOrganizerNickname] = useState('')
+  const [partyCount, setPartyCount] = useState(1)
+  const [personalBudget, setPersonalBudget] = useState('')
+  const [assistanceMode, setAssistanceMode] = useState('ORDINARY')
   const [entryMode, setEntryMode] = useState<'single' | 'group' | null>(null)
   const [inviteLink, setInviteLink] = useState('')
   const [step, setStep] = useState(0)
@@ -78,8 +82,12 @@ export function ConversationPlannerPage() {
   const isReady = description.trim().length > 0 && cardAnswersReady && answers.every((answer) => answer.trim().length > 0)
   const currentStepReady = step === 0
     ? Boolean(tripFields.city.trim() && tripFields.date.trim() && tripFields.startTime.trim() && tripFields.endTime.trim())
+    : step === 1
+      ? Boolean(organizerNickname.trim())
     : step === 2
       ? Boolean(routeFields.start.trim() && routeFields.end.trim() && routeFields.budget.trim())
+      : step === 4
+        ? Boolean(personalBudget.trim())
       : Boolean(answers[step].trim())
   const currentQuestion = questions[step]
   const revision = result?.revision ?? null
@@ -139,11 +147,31 @@ export function ConversationPlannerPage() {
     })
   }
 
+  function updateParty(count: number, nickname = organizerNickname) {
+    answersChanged()
+    setPartyCount(count)
+    setAnswers((items) => items.map((answer, index) => index === 1
+      ? `${count}个人出行；组织者昵称：${nickname}` : answer))
+  }
+
+  function updateOrganizerName(value: string) {
+    setOrganizerNickname(value)
+    updateParty(partyCount, value)
+  }
+
+  function updateAssistance(mode: string, budget = personalBudget) {
+    answersChanged()
+    setAssistanceMode(mode)
+    const labels: Record<string, string> = { ORDINARY: '普通出行（无额外关怀限制）', PARENT_CHILD: '亲子出行', LOW_STAMINA: '低体力出行', MOBILITY_ASSISTANCE_BETA: '行动辅助' }
+    setAnswers((items) => items.map((answer, index) => index === 4
+      ? `组织者个人预算上限：${budget}元；关怀模式：${mode}（${labels[mode]}）。` : answer))
+  }
+
   function begin(mode: 'single' | 'group') {
     answersChanged()
     setEntryMode(mode)
     if (mode === 'single') {
-      setAnswers((current) => current.map((answer, index) => index === 1 ? '1个人出行，我是组织者。' : answer))
+      updateParty(1)
     }
   }
 
@@ -281,8 +309,7 @@ export function ConversationPlannerPage() {
           <label className="field-label" htmlFor="goal">这趟旅行，你最希望得到什么？</label>
           <textarea id="goal" className="conversation-textarea" value={description} onChange={(event) => { answersChanged(); setDescription(event.target.value) }} placeholder="例如：和朋友去驻马店玩一天，想轻松一点，也想吃当地特色。" />
           <section className="question-bubble"><div className="question-bubble__meta"><span>问题 {step + 1} / {questions.length}</span><span>{Math.round(((step + 1) / questions.length) * 100)}%</span></div><h3>{currentQuestion[1]}</h3>
-            {step === 0 ? <div className="question-field-cards question-field-cards--trip"><label><span><MapPin size={16} />目的城市</span><input value={tripFields.city} onChange={(event) => updateTripField('city', event.target.value)} placeholder="例如：杭州、驻马店" /></label><label><span><CalendarDays size={16} />出行日期</span><input type="date" value={tripFields.date} onChange={(event) => updateTripField('date', event.target.value)} /></label><fieldset className="time-picker-card"><legend><Clock3 size={16} />可用时间</legend><div><label>开始<input type="time" value={tripFields.startTime} onChange={(event) => updateTripField('startTime', event.target.value)} /></label><span>—</span><label>结束<input type="time" value={tripFields.endTime} onChange={(event) => updateTripField('endTime', event.target.value)} /></label></div></fieldset></div> : step === 2 ? <div className="question-field-cards question-field-cards--route"><label><span><MapPin size={16} />出发地</span><input value={routeFields.start} onChange={(event) => updateRouteField('start', event.target.value)} placeholder="例如：杭州东站" /></label><label><span><MapPin size={16} />结束地</span><input value={routeFields.end} onChange={(event) => updateRouteField('end', event.target.value)} placeholder="例如：晚上回杭州东站" /></label><label><span><WalletCards size={16} />共享预算</span><input value={routeFields.budget} onChange={(event) => updateRouteField('budget', event.target.value)} placeholder="例如：总共 500 元" /></label></div> : <textarea className="conversation-textarea conversation-textarea--answer" value={answers[step]} onChange={(event) => updateAnswer(event.target.value)} placeholder="用自然语言回答即可，不用填表。" />}
-            {step === 1 && entryMode === 'group' && <div className="party-picker"><span>同行人数</span><div>{[2, 3].map((count) => <button key={count} type="button" className={answers[1].startsWith(String(count)) ? 'is-selected' : ''} onClick={() => updateAnswer(`${count}个人出行，我是组织者。`)}><UsersRound size={18} />{count} 人</button>)}</div></div>}
+            {step === 0 ? <div className="question-field-cards question-field-cards--trip"><label><span><MapPin size={16} />目的城市</span><input value={tripFields.city} onChange={(event) => updateTripField('city', event.target.value)} /></label><label><span><CalendarDays size={16} />出行日期</span><input type="date" value={tripFields.date} onChange={(event) => updateTripField('date', event.target.value)} /></label><fieldset className="time-picker-card"><legend><Clock3 size={16} />可用时间</legend><div><label>开始<input type="time" value={tripFields.startTime} onChange={(event) => updateTripField('startTime', event.target.value)} /></label><span>—</span><label>结束<input type="time" value={tripFields.endTime} onChange={(event) => updateTripField('endTime', event.target.value)} /></label></div></fieldset></div> : step === 1 ? <div className="question-field-cards"><label><span>组织者昵称</span><input value={organizerNickname} onChange={(event) => updateOrganizerName(event.target.value)} placeholder="例如：小明" /></label>{entryMode === 'group' && <label><span>同行人数</span><select value={partyCount} onChange={(event) => updateParty(Number(event.target.value))}><option value={2}>2 人</option><option value={3}>3 人</option></select></label>}</div> : step === 2 ? <div className="question-field-cards question-field-cards--route"><label><span><MapPin size={16} />出发地</span><input value={routeFields.start} onChange={(event) => updateRouteField('start', event.target.value)} /></label><label><span><MapPin size={16} />结束地</span><input value={routeFields.end} onChange={(event) => updateRouteField('end', event.target.value)} /></label><label><span><WalletCards size={16} />共享预算</span><input value={routeFields.budget} onChange={(event) => updateRouteField('budget', event.target.value)} /></label></div> : step === 4 ? <div className="question-field-cards"><label><span>个人预算上限（元）</span><input inputMode="numeric" value={personalBudget} onChange={(event) => { setPersonalBudget(event.target.value); updateAssistance(assistanceMode, event.target.value) }} placeholder="例如：500" /></label><label><span>关怀模式</span><select value={assistanceMode} onChange={(event) => updateAssistance(event.target.value)}><option value="ORDINARY">普通出行</option><option value="PARENT_CHILD">亲子出行</option><option value="LOW_STAMINA">低体力出行</option><option value="MOBILITY_ASSISTANCE_BETA">行动辅助</option></select></label></div> : <textarea className="conversation-textarea conversation-textarea--answer" value={answers[step]} onChange={(event) => updateAnswer(event.target.value)} placeholder="用自然语言回答即可，不用填表。" />}
             <div className="planner-actions"><button className="button button--ghost" type="button" disabled={step === 0} onClick={() => setStep((value) => value - 1)}>上一个问题</button>{step < questions.length - 1 ? <button className="button button--primary" type="button" disabled={!currentStepReady} onClick={() => setStep((value) => value + 1)}>下一个问题 <ArrowRight size={18} /></button> : <button className="button button--primary" type="button" disabled={!isReady || loading} onClick={() => void analyze()}>{loading ? '正在整理需求…' : '完成问答并智能整理'} <ArrowRight size={18} /></button>}</div>
           </section>
         </section>}
