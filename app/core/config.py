@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     amap_route_cache_ttl_seconds: int = Field(default=1_800, ge=60)
     bailian_api_key: SecretStr | None = None
     bailian_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    bailian_model: str = "qwen3.7-plus"
+    bailian_model: str = "qwen-plus"
     bailian_request_timeout_seconds: float = Field(
         default=45.0,
         ge=8,

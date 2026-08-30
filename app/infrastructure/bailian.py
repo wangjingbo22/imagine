@@ -12,6 +12,7 @@ from app.application.llm_gateway import TripUnderstandingTransportError
 from app.domain.trip_draft import (
     LlmTripDraftFields,
     TripDraftExtractionError,
+    TripUnderstandingProposal,
     TripUnderstandingRequest,
 )
 
@@ -36,12 +37,22 @@ budgetCents, interests, mustVisit, avoidPlaces。
 “偏好/喜欢吃”等文字拼接进地点。没有明确的起点或终点必须填 null。
 """
 
-_TRIP_UNDERSTANDING_SYSTEM_PROMPT = """You produce only the strict T001 trip-understanding JSON contract.
-Use only schemaVersion, trip, participants, fieldEvidence, missingFields,
-ambiguities, and confirmationQuestions, with their documented nested fields.
-Do not output UUIDs, statuses, constraints, providers, plans, versions, or
-authoritative business decisions. Do not output Markdown, explanations, or
-JSON fences. Preserve source evidence exactly and return one JSON object.
+_TRIP_UNDERSTANDING_SCHEMA = json.dumps(
+    TripUnderstandingProposal.model_json_schema(by_alias=True),
+    ensure_ascii=False,
+    separators=(",", ":"),
+)
+
+_TRIP_UNDERSTANDING_SYSTEM_PROMPT = f"""You produce only one JSON object that
+validates against the following JSON Schema. Follow it exactly, including all
+required nested fields, null values, arrays, camelCase names, and
+additionalProperties restrictions.
+
+{_TRIP_UNDERSTANDING_SCHEMA}
+
+Use evidence only from the supplied request. Do not output UUIDs, statuses,
+constraints, providers, plans, versions, Markdown, explanations, or JSON
+fences.
 """
 
 
@@ -121,20 +132,42 @@ class BailianTripDraftExtractor:
         self,
         request: TripUnderstandingRequest,
     ) -> str:
+        return await self._trip_understanding_completion(
+            [
+                {"role": "system", "content": _TRIP_UNDERSTANDING_SYSTEM_PROMPT},
+                {"role": "user", "content": request.model_dump_json(by_alias=True)},
+            ]
+        )
+
+    async def repair_trip_understanding(
+        self,
+        request: TripUnderstandingRequest,
+        *,
+        invalid_response: str,
+        validation_errors: str,
+    ) -> str:
+        repair_prompt = (
+            "Your previous JSON did not validate. Return a corrected replacement "
+            "only; do not explain it. Validation errors:\n"
+            f"{validation_errors}\nPrevious JSON:\n{invalid_response}"
+        )
+        return await self._trip_understanding_completion(
+            [
+                {"role": "system", "content": _TRIP_UNDERSTANDING_SYSTEM_PROMPT},
+                {"role": "user", "content": request.model_dump_json(by_alias=True)},
+                {"role": "user", "content": repair_prompt},
+            ]
+        )
+
+    async def _trip_understanding_completion(
+        self,
+        messages: list[dict[str, str]],
+    ) -> str:
         payload: dict[str, Any] = {
             "model": self.model,
             "temperature": 0,
             "response_format": {"type": "json_object"},
-            "messages": [
-                {
-                    "role": "system",
-                    "content": _TRIP_UNDERSTANDING_SYSTEM_PROMPT,
-                },
-                {
-                    "role": "user",
-                    "content": request.model_dump_json(by_alias=True),
-                },
-            ],
+            "messages": messages,
         }
         try:
             async with asyncio.timeout(self.timeout_seconds):

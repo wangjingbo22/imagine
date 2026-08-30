@@ -70,7 +70,9 @@ def _proposal_json() -> str:
 
 
 def test_trip_understanding_timeout_default_is_forty_five_seconds() -> None:
-    assert Settings().bailian_request_timeout_seconds == 45.0
+    settings = Settings(_env_file=None)
+    assert settings.bailian_request_timeout_seconds == 45.0
+    assert settings.bailian_model == "qwen-plus"
 
 
 @pytest.mark.parametrize("timeout", [7.99, 45.01])
@@ -122,11 +124,48 @@ async def test_understanding_request_uses_existing_openai_compatible_client() ->
     assert body["model"] == "qwen-fixture"
     assert body["temperature"] == 0
     assert body["response_format"] == {"type": "json_object"}
+    assert '"schemaVersion"' in body["messages"][0]["content"]
+    assert '"additionalProperties":false' in body["messages"][0]["content"]
     assert json.loads(body["messages"][1]["content"]) == _request().model_dump(
         mode="json", by_alias=True
     )
     assert "test-api-key" not in captured["body"]
     assert "Authorization" not in captured["body"]
+
+
+@pytest.mark.asyncio
+async def test_understanding_repair_reuses_schema_and_sends_validation_context() -> None:
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.content.decode("utf-8")
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": _proposal_json()}}]},
+        )
+
+    extractor = BailianTripDraftExtractor(
+        api_key="test-api-key",
+        base_url="https://example.invalid/v1",
+        model="qwen-fixture",
+        timeout_seconds=10,
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        raw = await extractor.repair_trip_understanding(
+            _request(),
+            invalid_response="{}",
+            validation_errors='[{"loc":["trip"],"msg":"Field required"}]',
+        )
+    finally:
+        await extractor.close()
+
+    assert json.loads(raw) == _fixture_payload()
+    body = json.loads(captured["body"])
+    assert len(body["messages"]) == 3
+    assert '"schemaVersion"' in body["messages"][0]["content"]
+    assert "Field required" in body["messages"][2]["content"]
+    assert "Previous JSON:\n{}" in body["messages"][2]["content"]
 
 
 @pytest.mark.asyncio

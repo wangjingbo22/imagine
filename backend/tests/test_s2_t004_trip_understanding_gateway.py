@@ -94,6 +94,22 @@ class SequenceUnderstandingClient:
             raise outcome
         return outcome
 
+    async def repair_trip_understanding(
+        self,
+        request: TripUnderstandingRequest,
+        *,
+        invalid_response: str,
+        validation_errors: str,
+    ) -> str:
+        assert request == _request()
+        assert invalid_response
+        assert validation_errors
+        outcome = self.outcomes[self.call_count]
+        self.call_count += 1
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
 
 @pytest.mark.parametrize(
     "result_kwargs",
@@ -201,7 +217,7 @@ async def test_non_retryable_transport_failure_stops_at_one_call() -> None:
         ("{}", "LLM_SCHEMA_INVALID"),
     ],
 )
-async def test_invalid_model_content_never_starts_a_repair_call(
+async def test_invalid_model_content_is_repaired_once(
     raw: str,
     failure_code: str,
 ) -> None:
@@ -209,13 +225,13 @@ async def test_invalid_model_content_never_starts_a_repair_call(
 
     result = await StrictTripUnderstandingGateway(client).understand(_request())
 
-    assert result.decision == "FIXED_QUESTIONS"
-    assert result.failure_code == failure_code
-    assert result.call_count == client.call_count == 1
+    assert result.decision == "MODEL_PROPOSAL"
+    assert result.failure_code is None
+    assert result.call_count == client.call_count == 2
 
 
 @pytest.mark.asyncio
-async def test_evidence_context_mismatch_is_content_invalid_without_retry() -> None:
+async def test_evidence_context_mismatch_is_repaired_once() -> None:
     payload = _fixture_payload()
     evidence = payload["fieldEvidence"]
     assert isinstance(evidence, list)
@@ -225,9 +241,9 @@ async def test_evidence_context_mismatch_is_content_invalid_without_retry() -> N
 
     result = await StrictTripUnderstandingGateway(client).understand(_request())
 
-    assert result.decision == "FIXED_QUESTIONS"
-    assert result.failure_code == "LLM_CONTENT_INVALID"
-    assert result.call_count == client.call_count == 1
+    assert result.decision == "MODEL_PROPOSAL"
+    assert result.failure_code is None
+    assert result.call_count == client.call_count == 2
 
 
 @pytest.mark.asyncio
