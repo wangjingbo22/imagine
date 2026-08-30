@@ -10,6 +10,7 @@ import {
   newIdempotencyKey,
   resolveOrganizerConfirmationItem,
 } from '../api/collaborationApi'
+import { ApiError } from '../api/client'
 import { AppShell } from '../components/AppShell'
 import { ConflictReviewPanel } from '../components/ConflictReviewPanel'
 import {
@@ -38,6 +39,21 @@ function referenceDate(): string {
   const month = String(now.getMonth() + 1).padStart(2, '0')
   const day = String(now.getDate()).padStart(2, '0')
   return `${now.getFullYear()}-${month}-${day}`
+}
+
+function questionIndexForConfirmationDetails(
+  details: Array<Record<string, unknown>>,
+): number {
+  const fieldPath = details
+    .map((item) => item.fieldPath)
+    .find((value): value is string => typeof value === 'string')
+  if (!fieldPath) return 5
+  if (fieldPath.startsWith('trip.cityName') || fieldPath.startsWith('trip.travelDate') || fieldPath.startsWith('trip.startTime') || fieldPath.startsWith('trip.endTime')) return 0
+  if (fieldPath === 'participants') return 1
+  if (fieldPath.startsWith('trip.startLocationText') || fieldPath.startsWith('trip.endLocationText') || fieldPath.startsWith('trip.budgetCents')) return 2
+  if (fieldPath.includes('.interests') || fieldPath.includes('.mustVisit') || fieldPath.includes('.avoidPlaces')) return 3
+  if (fieldPath.includes('.careDraft') || fieldPath.includes('.budgetCapCents')) return 4
+  return 5
 }
 
 export function ConversationPlannerPage() {
@@ -218,6 +234,12 @@ export function ConversationPlannerPage() {
         window.sessionStorage.setItem(`s2-plan-context:${revision.tripId}`, JSON.stringify({ draft }))
       }
     } catch (caught) {
+      if (caught instanceof ApiError && caught.code === 'PARTICIPANT_CONFIRMATION_REQUIRED') {
+        const missingQuestion = questionIndexForConfirmationDetails(caught.details)
+        editAnswer(missingQuestion)
+        setError(`请先补充问题 ${missingQuestion + 1}，再重新提交确认。`)
+        return
+      }
       setError(caught instanceof Error ? caught.message : '确认或邀请成员失败。')
     } finally { setLoading(false) }
   }
