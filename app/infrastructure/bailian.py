@@ -57,8 +57,8 @@ class BailianTripDraftExtractor:
         timeout_seconds: float,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        if not 8 <= timeout_seconds <= 12:
-            raise ValueError("timeoutSeconds must be between 8 and 12 seconds")
+        if not 8 <= timeout_seconds <= 45:
+            raise ValueError("timeoutSeconds must be between 8 and 45 seconds")
         self.model = model
         self.timeout_seconds = timeout_seconds
         self._client = httpx.AsyncClient(

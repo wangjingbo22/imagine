@@ -69,12 +69,12 @@ def _proposal_json() -> str:
     return json.dumps(_fixture_payload(), ensure_ascii=False)
 
 
-def test_trip_understanding_timeout_default_is_ten_seconds() -> None:
-    assert Settings().bailian_request_timeout_seconds == 10.0
+def test_trip_understanding_timeout_default_is_forty_five_seconds() -> None:
+    assert Settings().bailian_request_timeout_seconds == 45.0
 
 
-@pytest.mark.parametrize("timeout", [7.99, 12.01])
-def test_bailian_timeout_rejects_values_outside_eight_to_twelve(
+@pytest.mark.parametrize("timeout", [7.99, 45.01])
+def test_bailian_timeout_rejects_values_outside_eight_to_forty_five(
     timeout: float,
 ) -> None:
     with pytest.raises(ValueError):

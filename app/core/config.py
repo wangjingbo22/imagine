@@ -22,9 +22,9 @@ class Settings(BaseSettings):
     bailian_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     bailian_model: str = "qwen3.7-plus"
     bailian_request_timeout_seconds: float = Field(
-        default=10.0,
+        default=45.0,
         ge=8,
-        le=12,
+        le=45,
     )
     bailian_candidate_timeout_seconds: float = Field(
         default=10.0,
