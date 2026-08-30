@@ -175,6 +175,27 @@ export function ConversationPlannerPage() {
     }
   }
 
+  function applyTestPreset() {
+    answersChanged()
+    setEntryMode('single')
+    setDescription('想在北京轻松玩一天，参观历史景点并品尝北京特色美食。')
+    setTripFields({ city: '北京', date: '2026-09-06', startTime: '09:00', endTime: '18:00' })
+    setRouteFields({ start: '北京站', end: '北京站', budget: '500' })
+    setOrganizerNickname('测试用户')
+    setPartyCount(1)
+    setPersonalBudget('500')
+    setAssistanceMode('ORDINARY')
+    setAnswers([
+      '目的城市：北京；出行日期：2026-09-06；可用时间：09:00到18:00',
+      '1个人出行；组织者昵称：测试用户',
+      '从北京站出发；结束地：北京站；共享预算：500',
+      '喜欢历史文化和美食，必去故宫和天坛，不去酒吧。',
+      '组织者个人预算上限：500元；关怀模式：ORDINARY（普通出行（无额外关怀限制））。',
+      '请安排节奏舒适、路线顺畅的一日行程。',
+    ])
+    setStep(0)
+  }
+
   function joinExistingTrip() {
     const token = invitationTokenFromText(inviteLink)
     if (!token) { setError('请粘贴完整的一次性邀请链接或 43 位邀请码。'); return }
@@ -304,7 +325,7 @@ export function ConversationPlannerPage() {
       </aside>
       <section className="planner-panel conversation-panel" data-reveal="panel">
         <header className="planner-panel__header"><div><span className="section-kicker">CONVERSATIONAL TRIP</span><h2>{hasOutcome ? '确认你的旅行需求' : '从一句期待开始'}</h2></div><span className="save-state"><span className="status-dot" /> 已自动保存当前回答</span></header>
-        {!hasOutcome && entryMode === null && <section className="entry-mode-card"><div><span className="section-kicker">CHOOSE YOUR WAY</span><h3>这次，怎么出发？</h3><p>单人行程直接开始；多人由组织者创建后发送邀请链接，成员各自填写自己的资料。</p></div><div className="entry-mode-grid"><button type="button" onClick={() => begin('single')}><UserRound size={21} /><strong>单人创建</strong><small>我自己规划一趟行程</small><ArrowRight size={17} /></button><button type="button" onClick={() => begin('group')}><UsersRound size={21} /><strong>多人创建</strong><small>我是组织者，邀请同行成员</small><ArrowRight size={17} /></button></div><div className="join-entry"><span><Link2 size={16} />已有多人邀请？</span><input value={inviteLink} onChange={(event) => setInviteLink(event.target.value)} placeholder="粘贴邀请链接" /><button className="button button--soft" type="button" onClick={joinExistingTrip}>加入行程</button></div></section>}
+        {!hasOutcome && entryMode === null && <section className="entry-mode-card"><div><span className="section-kicker">CHOOSE YOUR WAY</span><h3>这次，怎么出发？</h3><p>单人行程直接开始；多人由组织者创建后发送邀请链接，成员各自填写自己的资料。</p></div><div className="entry-mode-grid"><button type="button" onClick={() => begin('single')}><UserRound size={21} /><strong>单人创建</strong><small>我自己规划一趟行程</small><ArrowRight size={17} /></button><button type="button" onClick={() => begin('group')}><UsersRound size={21} /><strong>多人创建</strong><small>我是组织者，邀请同行成员</small><ArrowRight size={17} /></button></div><button className="button button--soft" type="button" onClick={applyTestPreset}>填入北京单人测试模板</button><div className="join-entry"><span><Link2 size={16} />已有多人邀请？</span><input value={inviteLink} onChange={(event) => setInviteLink(event.target.value)} placeholder="粘贴邀请链接" /><button className="button button--soft" type="button" onClick={joinExistingTrip}>加入行程</button></div></section>}
         {!hasOutcome && entryMode !== null && <section className="conversation-card"><div className="conversation-intro"><span><Sparkles size={18} /></span><div><strong>先写一句总体期待</strong><p>它会和六个问题的回答一起交给 Agent，不会提前调用模型。</p></div></div>
           <label className="field-label" htmlFor="goal">这趟旅行，你最希望得到什么？</label>
           <textarea id="goal" className="conversation-textarea" value={description} onChange={(event) => { answersChanged(); setDescription(event.target.value) }} placeholder="例如：和朋友去驻马店玩一天，想轻松一点，也想吃当地特色。" />
