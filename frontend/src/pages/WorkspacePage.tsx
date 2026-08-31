@@ -20,11 +20,10 @@ import {
   Send,
   Sparkles,
   Telescope,
-  Utensils,
   Wallet,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { tripApi, USE_PLAN_VERSION_API } from '../api/tripApi'
@@ -392,7 +391,7 @@ export function WorkspacePage() {
         setRestoredPlan(toDisplayPlan(stored))
         setPersistedPlanId(stored.planId)
         setPlanningTripSnapshot(stored.tripSnapshot)
-        void tripApi.getPlanningFacts(tripId).then((factsResponse) => {
+        void tripApi.getPlanningFacts(tripId, organizerToken).then((factsResponse) => {
           if (cancelled) return
           setCandidateRequest(factsResponse.data)
           setPlanningTripSnapshot(factsResponse.data.trip)
@@ -610,6 +609,16 @@ export function WorkspacePage() {
     storedCurrentPlan?.version ?? null,
     executionAdjustmentCount,
   )
+  const executionMapEvidence = useMemo<LocationEvidence | null>(() => {
+    if (locationEvidence) return locationEvidence
+    if (!candidateRequest) return null
+    return {
+      city: { cityContext: candidateRequest.trip.cityContext },
+      places: candidateRequest.taskFacts.map((fact) => fact.place),
+      routes: candidateRequest.taskFacts.map((fact) => fact.route),
+      queries: [],
+    } as unknown as LocationEvidence
+  }, [candidateRequest, locationEvidence])
 
   function toggleRecommendationFeedback(option: string) {
     setSelectedFeedbackOptions((current) =>
@@ -761,7 +770,7 @@ export function WorkspacePage() {
       if (!persistedPlanId) {
         throw new Error('服务端尚未签发可信 Plan V1；请先补齐未知价格、设施或来源证据。')
       }
-      await tripApi.confirmPlan(tripId, persistedPlanId)
+      await tripApi.confirmPlan(tripId, persistedPlanId, organizerToken)
       await tripApi.startExecution(tripId)
       const restored = await tripApi.getTrip(tripId)
       if (restored.data.currentPlan) {
@@ -834,6 +843,7 @@ export function WorkspacePage() {
         tripId,
         candidateReview.reviewId,
         confirmations,
+        organizerToken,
       )
       const stored = response.data
       setProviderPlan(toDisplayPlan(stored))
@@ -841,7 +851,7 @@ export function WorkspacePage() {
       setPlanningTripSnapshot(stored.tripSnapshot)
       setPlanningIssue(null)
       setCandidateReview(null)
-      const facts = await tripApi.getPlanningFacts(tripId)
+      const facts = await tripApi.getPlanningFacts(tripId, organizerToken)
       setCandidateRequest(facts.data)
       setPlanLifecycleError('价格、设施与来源事实已由服务端重新校验，Plan V1 已获得 PASS。')
     } catch (error) {
@@ -1713,12 +1723,11 @@ export function WorkspacePage() {
 
               <article className="current-task-card">
                 <div className="current-task-card__visual">
-                  <div className="current-task-map">
-                    <span className="current-task-map__road" />
-                    <span className="current-task-map__pin"><Utensils size={23} /></span>
-                    <span className="current-task-map__origin">你的位置</span>
-                    <span className="current-task-map__route" />
-                  </div>
+                  <RouteOverview
+                    cityName={activePlan.cityName}
+                    evidence={executionMapEvidence}
+                    startLocationText={candidateRequest?.trip.days[0].startLocationText ?? null}
+                  />
                 </div>
                 <div className="current-task-card__content">
                   <span className="category-chip">任务 {currentTask?.order ?? 0} / {activePlan.tasks.length} · {currentTask?.category}</span>

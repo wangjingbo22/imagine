@@ -182,6 +182,7 @@ async function searchByQuery(
   tripId: string,
   city: CityResolution,
   query: string,
+  organizerToken?: string | null,
 ) {
   const response = await tripApi.searchPlaces(
     tripId,
@@ -190,6 +191,7 @@ async function searchByQuery(
     [],
     1,
     8,
+    organizerToken,
   )
   return response.data.places
 }
@@ -209,7 +211,7 @@ async function collectPlaces(
 
   for (const query of queries) {
     try {
-      const result = await providerCall(() => searchByQuery(tripId, city, query))
+      const result = await providerCall(() => searchByQuery(tripId, city, query, options.organizerToken))
       buckets.push(result.filter((place) =>
         directDistanceMeters(city.cityContext.center, place.location) <= planningRadiusMeters &&
         !excludedIds.has(place.placeId) &&
@@ -228,7 +230,7 @@ async function collectPlaces(
     }
     try {
       buckets.push(
-        (await providerCall(() => searchByQuery(tripId, city, query))).filter((place) =>
+        (await providerCall(() => searchByQuery(tripId, city, query, options.organizerToken))).filter((place) =>
           directDistanceMeters(city.cityContext.center, place.location) <= planningRadiusMeters &&
           !excludedIds.has(place.placeId) &&
           !isAvoided(place, fragments),
@@ -307,6 +309,7 @@ function returnEndpointPlace(
 async function resolveConfirmedEndpoints(
   tripId: string,
   trip: CreateSingleDayTrip | CandidatePlanningTrip,
+  organizerToken?: string | null,
 ) {
   if (trip.tripId !== tripId) {
     throw new Error('已确认 Trip 与当前 tripId 不一致，必须重新确认行程。')
@@ -316,6 +319,7 @@ async function resolveConfirmedEndpoints(
     tripId,
     trip.cityContext,
     day.startLocationText,
+    organizerToken,
   ))).data
   const end = day.endLocationText.trim() === day.startLocationText.trim()
     ? start
@@ -323,6 +327,7 @@ async function resolveConfirmedEndpoints(
         tripId,
         trip.cityContext,
         day.endLocationText,
+        organizerToken,
       ))).data
   if (
     start.cityCode !== trip.cityContext.cityCode ||
@@ -379,6 +384,7 @@ async function requestFirstRoute(
   origin: GeoPoint,
   destination: GeoPoint,
   mode: TravelMode,
+  organizerToken?: string | null,
 ) {
   const response = await tripApi.planRoute(
     tripId,
@@ -386,6 +392,8 @@ async function requestFirstRoute(
     origin,
     destination,
     mode,
+    null,
+    organizerToken,
   )
   const route = response.data.routes[0]
   if (!route) throw new Error(`高德未返回 ${mode} 路线`)
@@ -400,6 +408,7 @@ async function selectRoute(
   destination: GeoPoint,
   confirmedProfile: AssistanceProfile | null | undefined,
   preferredMaxWalkMeters?: number,
+  organizerToken?: string | null,
 ) {
   const maxWalkLimit = preferredMaxWalkMeters !== undefined
     ? preferredMaxWalkMeters
@@ -424,7 +433,7 @@ async function selectRoute(
   for (const mode of attempts) {
     try {
       const route = await providerCall(
-        () => requestFirstRoute(tripId, city, origin, destination, mode),
+        () => requestFirstRoute(tripId, city, origin, destination, mode, organizerToken),
       )
       if (!hasCompleteRouteRiskFacts(route)) {
         continue
@@ -623,7 +632,7 @@ async function createAmapPlan(
   if (city.cityContext.cityCode !== confirmedTrip.cityContext.cityCode) {
     throw new Error('Provider 城市解析与 T004 已确认 Trip 不一致，请重新确认行程。')
   }
-  const endpoints = await resolveConfirmedEndpoints(tripId, confirmedTrip)
+  const endpoints = await resolveConfirmedEndpoints(tripId, confirmedTrip, options.organizerToken)
   onPhase?.('PLACES', `已解析 cityCode ${city.cityContext.cityCode}，正在检索同城地点并保留返程任务`)
   const collected = await collectPlaces(tripId, draft, city, options)
   const intermediatePlaces = orderByShortestNextSegment(collected.places).slice(0, 3)
@@ -645,6 +654,7 @@ async function createAmapPlan(
       place.location,
       confirmedTrip.participants[0].assistanceProfile ?? null,
       options.preferredMaxWalkMeters,
+      options.organizerToken,
     ))
     await delay(220)
   }
@@ -758,6 +768,7 @@ export async function buildAmapReplanCandidate(
   onPhase?.('PLACES', '正在检索替代地点，并固定复用 Plan V1 的最终目的地')
   const collected = await collectPlaces(tripId, draft, city, {
     extraQueries: options.extraQueries,
+    organizerToken: options.organizerToken,
     excludePlaceIds: [
       ...baseFacts.map((fact) => fact.place.placeId),
       ...(options.excludePlaceIds ?? []),
@@ -782,6 +793,7 @@ export async function buildAmapReplanCandidate(
       place.location,
       baseRequest.trip.participants[0].assistanceProfile ?? null,
       options.preferredMaxWalkMeters,
+      options.organizerToken,
     ))
     origin = place.location
     await delay(220)

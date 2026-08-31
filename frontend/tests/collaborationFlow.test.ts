@@ -215,6 +215,43 @@ test('recommendation route consumes the guarded server Trip without legacy recon
   assert.match(api, /'X-Organizer-Token': organizerToken/)
 })
 
+test('recommendation page shares StrictMode requests and prevents duplicate route generation', async () => {
+  const page = await readFile(new URL('../src/pages/RecommendationPage.tsx', import.meta.url), 'utf8')
+  assert.match(page, /const inFlightRecommendations = new Map<string, Promise<Bundle>>\(\)/)
+  assert.match(page, /const existing = inFlightRecommendations\.get\(requestKey\)/)
+  assert.match(page, /if \(existing\) return existing/)
+  assert.match(page, /if \(buildingRef\.current\) return/)
+  assert.match(page, /disabled=\{building \|\| loading\}/)
+})
+
+test('collaboration route planning propagates the organizer capability to guarded Provider calls', async () => {
+  const [api, planner] = await Promise.all([
+    readFile(new URL('../src/api/tripApi.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/services/amapPlan.ts', import.meta.url), 'utf8'),
+  ])
+  assert.match(api, /function organizerHeaders\(organizerToken\?: string \| null\)/)
+  assert.match(api, /headers: organizerHeaders\(organizerToken\)/)
+  assert.match(planner, /day\.startLocationText,\s+organizerToken/)
+  assert.match(planner, /options\.organizerToken/)
+})
+
+test('plan review confirmation retains the organizer capability in the workspace', async () => {
+  const [api, workspace] = await Promise.all([
+    readFile(new URL('../src/api/tripApi.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/pages/WorkspacePage.tsx', import.meta.url), 'utf8'),
+  ])
+  assert.match(api, /confirmPlanReview\([\s\S]*organizerToken\?: string \| null/)
+  assert.match(api, /plan-reviews\/\$\{reviewId\}\/confirm[\s\S]*headers: organizerHeaders\(organizerToken\)/)
+  assert.match(workspace, /candidateReview\.reviewId,\s+confirmations,\s+organizerToken/)
+})
+
+test('execution task card renders the real AMap route from signed task facts', async () => {
+  const page = await readFile(new URL('../src/pages/WorkspacePage.tsx', import.meta.url), 'utf8')
+  assert.match(page, /const executionMapEvidence = useMemo<LocationEvidence \| null>/)
+  assert.match(page, /<RouteOverview\s+cityName=\{activePlan\.cityName\}\s+evidence=\{executionMapEvidence\}/)
+  assert.doesNotMatch(page, /current-task-map__road/)
+})
+
 test('a new invitation never falls through to another participant last session', async () => {
   const page = await readFile(new URL('../src/pages/MemberConversationPage.tsx', import.meta.url), 'utf8')
   assert.match(page, /let capability = token\s*\? window\.sessionStorage\.getItem\(`participant-session:\$\{token\}`\)\s*:\s*window\.sessionStorage\.getItem\('participant-session:last'\)/)

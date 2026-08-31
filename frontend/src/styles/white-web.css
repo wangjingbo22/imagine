@@ -1611,6 +1611,19 @@ body,
   border-right: 1px solid var(--web-line);
 }
 
+.current-task-card__visual .map-card {
+  height: 100%;
+  min-height: 255px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.current-task-card__visual .real-route-map,
+.current-task-card__visual .real-route-map__container {
+  min-height: 210px;
+}
+
 .current-task-map {
   position: relative;
   height: 100%;

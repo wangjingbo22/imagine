@@ -47,6 +47,10 @@ export const USE_PLAN_VERSION_API =
 export const USE_WORKFLOW_API =
   (import.meta.env?.VITE_USE_WORKFLOW_API ?? 'true') === 'true'
 
+function organizerHeaders(organizerToken?: string | null): Record<string, string> {
+  return organizerToken ? { 'X-Organizer-Token': organizerToken } : {}
+}
+
 function isAdjustmentRecognitionSource(
   value: string | null,
 ): value is AdjustmentRecognitionSource {
@@ -170,7 +174,7 @@ export const tripApi = {
     return request<ConstraintProfileState>(`/api/v1/trips/${tripId}/constraints`)
   },
 
-  confirmPlan(tripId: string, planId: string) {
+  confirmPlan(tripId: string, planId: string, organizerToken?: string | null) {
     return request<{
       tripId: string
       planId: string
@@ -178,7 +182,7 @@ export const tripApi = {
       planStatus: 'CURRENT'
     }>(
       `/api/v1/trips/${tripId}/plan-versions/${planId}/confirm`,
-      { method: 'POST' },
+      { method: 'POST', headers: organizerHeaders(organizerToken) },
     )
   },
 
@@ -204,9 +208,10 @@ export const tripApi = {
     )
   },
 
-  getPlanReview(tripId: string, reviewId: string) {
+  getPlanReview(tripId: string, reviewId: string, organizerToken?: string | null) {
     return request<CandidatePlanReview>(
       `/api/v1/trips/${tripId}/plan-reviews/${reviewId}`,
+      { headers: organizerHeaders(organizerToken) },
     )
   },
 
@@ -214,19 +219,22 @@ export const tripApi = {
     tripId: string,
     reviewId: string,
     confirmations: CandidateReviewConfirmationInput[],
+    organizerToken?: string | null,
   ) {
     return request<StoredPlanVersion>(
       `/api/v1/trips/${tripId}/plan-reviews/${reviewId}/confirm`,
       {
         method: 'POST',
+        headers: organizerHeaders(organizerToken),
         body: JSON.stringify({ schemaVersion: '1.0', confirmations }),
       },
     )
   },
 
-  getPlanningFacts(tripId: string) {
+  getPlanningFacts(tripId: string, organizerToken?: string | null) {
     return request<CandidatePlanRequest>(
       `/api/v1/trips/${tripId}/planning-facts`,
+      { headers: organizerHeaders(organizerToken) },
     )
   },
 
@@ -266,9 +274,11 @@ export const tripApi = {
     types: string[] = [],
     page = 1,
     pageSize = 20,
+    organizerToken?: string | null,
   ) {
     return request<PlaceCollection>('/api/v1/places/search', {
       method: 'POST',
+      headers: organizerHeaders(organizerToken),
       body: JSON.stringify({
         schemaVersion: '1.0', tripId, cityContext, keywords, types, page, pageSize,
       }),
@@ -307,9 +317,10 @@ export const tripApi = {
     })
   },
 
-  forwardGeocode(tripId: string, cityContext: CityContext, address: string) {
+  forwardGeocode(tripId: string, cityContext: CityContext, address: string, organizerToken?: string | null) {
     return request<AddressResolution>('/api/v1/geocoding/forward', {
       method: 'POST',
+      headers: organizerHeaders(organizerToken),
       body: JSON.stringify({ schemaVersion: '1.0', tripId, cityContext, address }),
     })
   },
@@ -328,9 +339,11 @@ export const tripApi = {
     destination: GeoPoint,
     mode: TravelMode,
     strategy: number | null = null,
+    organizerToken?: string | null,
   ) {
     return request<RouteCollection>('/api/v1/routes/plan', {
       method: 'POST',
+      headers: organizerHeaders(organizerToken),
       body: JSON.stringify({
         schemaVersion: '1.0', tripId, cityContext, origin, destination, mode, strategy,
       }),
