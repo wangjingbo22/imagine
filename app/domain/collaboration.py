@@ -104,6 +104,7 @@ class ConversationAnswer(CollaborationModel):
 class ConversationSubmission(CollaborationModel):
     natural_language_request: str = Field(min_length=1, max_length=1000)
     answers: list[ConversationAnswer] = Field(min_length=6, max_length=6)
+    reviewed_fallback: bool = False
 
     @model_validator(mode="after")
     def require_fixed_question_order(self) -> "ConversationSubmission":
@@ -288,6 +289,7 @@ class ParticipantMutationRequest(CollaborationModel):
 class ParticipantConversationRequest(ParticipantMutationRequest):
     natural_language_request: str = Field(min_length=1, max_length=1000)
     answers: list[ConversationAnswer] = Field(min_length=6, max_length=6)
+    reviewed_fallback: bool = False
 
     @model_validator(mode="after")
     def require_fixed_questions(self) -> "ParticipantConversationRequest":
@@ -301,6 +303,7 @@ class ParticipantConversationRequest(ParticipantMutationRequest):
         return ConversationSubmission(
             naturalLanguageRequest=self.natural_language_request,
             answers=self.answers,
+            reviewedFallback=self.reviewed_fallback,
         )
 
 

@@ -642,7 +642,7 @@ class SqliteCollaborationRepository:
             invitationId=invitation_id,
             tripId=trip_id,
             participantId=participant_id,
-            invitationUrl=f"/join#token={token}",
+            invitationUrl=f"/join/{token}",
             expiresAt=expires_at,
             linkAvailable=True,
             collaborationVersion=next_version,

@@ -136,7 +136,7 @@ async def test_unavailable_t002_changes_no_rows_or_downstream_calls(tmp_path) ->
     )
     assert invitation.invitation_url is not None
     session = harness.repository.redeem_invitation(
-        invitation.invitation_url.split("=", 1)[1],
+        invitation.invitation_url.rsplit("/", 1)[1],
         "redeem-000000001",
     )
     assert session.participant_session_token is not None
@@ -485,7 +485,7 @@ def test_first_member_resolution_returns_latest_view_and_stable_replay(tmp_path)
         idempotency_key="d016-member-invite-1",
     )
     redeemed = harness.repository.redeem_invitation(
-        invitation.invitation_url.split("=", 1)[1],
+        invitation.invitation_url.rsplit("/", 1)[1],
         "d016-member-redeem-1",
     )
     assert redeemed.participant_session_token is not None
@@ -588,7 +588,7 @@ def test_expired_member_session_uses_required_error_code(tmp_path) -> None:
         idempotency_key="expired-session-invite",
     )
     redeemed = harness.repository.redeem_invitation(
-        invitation.invitation_url.split("=", 1)[1],
+        invitation.invitation_url.rsplit("/", 1)[1],
         "expired-session-redeem",
     )
     assert redeemed.participant_session_token is not None
@@ -671,7 +671,7 @@ def test_member_cannot_use_organizer_relaxation(tmp_path) -> None:
         idempotency_key="scope-invite-0001",
     )
     redeemed = harness.repository.redeem_invitation(
-        invitation.invitation_url.split("=", 1)[1],
+        invitation.invitation_url.rsplit("/", 1)[1],
         "scope-redeem-0001",
     )
     assert redeemed.participant_session_token is not None
@@ -827,7 +827,7 @@ async def test_member_submit_stale_expected_version_rejects_before_t002(tmp_path
         idempotency_key="d018-stale-submit-invite",
     )
     redeemed = harness.repository.redeem_invitation(
-        invitation.invitation_url.split("=", 1)[1],
+        invitation.invitation_url.rsplit("/", 1)[1],
         "d018-stale-submit-redeem",
     )
     assert redeemed.participant_session_token is not None
@@ -876,7 +876,7 @@ async def test_member_submit_replay_finishes_collaboration_advance_without_repar
         idempotency_key="d019-replay-submit-invite",
     )
     redeemed = harness.repository.redeem_invitation(
-        invitation.invitation_url.split("=", 1)[1],
+        invitation.invitation_url.rsplit("/", 1)[1],
         "d019-replay-submit-redeem",
     )
     assert redeemed.participant_session_token is not None
@@ -949,7 +949,7 @@ def test_actor_scope_rejects_before_idempotency_and_t002(tmp_path) -> None:
         idempotency_key="d015-scope-invite-1",
     )
     redeemed = harness.repository.redeem_invitation(
-        invitation.invitation_url.split("=", 1)[1],
+        invitation.invitation_url.rsplit("/", 1)[1],
         "d015-scope-redeem-1",
     )
     assert redeemed.participant_session_token is not None
@@ -1036,7 +1036,7 @@ def test_member_resolution_uses_entry_actor_after_session_expires(
         idempotency_key="d017-entry-invite-1",
     )
     redeemed = harness.repository.redeem_invitation(
-        invitation.invitation_url.split("=", 1)[1],
+        invitation.invitation_url.rsplit("/", 1)[1],
         "d017-entry-redeem-1",
     )
     assert redeemed.participant_session_token is not None
@@ -1115,7 +1115,7 @@ def test_member_resolution_rejects_expired_or_revoked_session_at_entry(
         idempotency_key=f"d017-entry-{session_state}-invite-1",
     )
     redeemed = harness.repository.redeem_invitation(
-        invitation.invitation_url.split("=", 1)[1],
+        invitation.invitation_url.rsplit("/", 1)[1],
         f"d017-entry-{session_state}-redeem-1",
     )
     assert redeemed.participant_session_token is not None

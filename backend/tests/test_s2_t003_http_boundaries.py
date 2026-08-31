@@ -236,7 +236,7 @@ async def test_redeem_retry_returns_metadata_without_replaying_session_secret(tm
     )
     payload = {
         "schemaVersion": "1.0",
-        "token": invitation.invitation_url.split("=", 1)[1],
+        "token": invitation.invitation_url.rsplit("/", 1)[1],
     }
 
     async with httpx.AsyncClient(
@@ -362,7 +362,7 @@ async def test_resolve_success_and_replay_responses_are_no_store(tmp_path, scope
             idempotency_key="d018-member-invite-1",
         )
         redeemed = harness.repository.redeem_invitation(
-            invitation.invitation_url.split("=", 1)[1],
+            invitation.invitation_url.rsplit("/", 1)[1],
             "d018-member-redeem-1",
         )
         assert redeemed.participant_session_token is not None

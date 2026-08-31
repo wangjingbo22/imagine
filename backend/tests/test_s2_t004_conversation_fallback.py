@@ -8,10 +8,11 @@ from typing import Any
 import httpx
 import pytest
 
+from app.application.reviewed_fallback_understanding import reviewed_member_fallback_proposal
 from app.application.trip_draft_revision_service import TripDraftRevisionService
 from app.core.config import Settings
 from app.core.errors import AppError
-from app.domain.collaboration import OrganizerConversationRequest, QUESTION_IDS
+from app.domain.collaboration import ConversationSubmission, OrganizerConversationRequest, QUESTION_IDS
 from app.domain.trip_draft import (
     TripDraftRevision,
     TripUnderstandingGatewayResult,
@@ -55,6 +56,38 @@ def _request(
         answers=[
             {"questionId": question_id, "answer": evidence}
             for question_id in QUESTION_IDS
+        ],
+    )
+
+
+def _reviewed_request(*, participant_count: int = 2) -> OrganizerConversationRequest:
+    return OrganizerConversationRequest(
+        schemaVersion="1.0",
+        referenceDate="2026-08-31",
+        naturalLanguageRequest="想在北京轻松玩一天，参观历史景点并品尝北京特色美食。",
+        reviewedFallback=True,
+        answers=[
+            {"questionId": "trip", "answer": "目的城市：北京；出行日期：2026-09-06；可用时间：09:00到18:00"},
+            {"questionId": "party", "answer": f"{participant_count}个人出行；组织者昵称：测试用户"},
+            {"questionId": "endpoints_budget", "answer": "从北京站出发；结束地：北京站；共享预算：500"},
+            {"questionId": "preferences", "answer": "喜欢历史文化和美食，必去故宫和天坛，不去酒吧。"},
+            {"questionId": "assistance", "answer": "组织者个人预算上限：500元；关怀模式：ORDINARY（普通出行（无额外关怀限制））。"},
+            {"questionId": "confirm", "answer": "确认；没有其他不可妥协限制。"},
+        ],
+    )
+
+
+def _reviewed_member_submission() -> ConversationSubmission:
+    return ConversationSubmission(
+        naturalLanguageRequest="参加组织者创建的北京行程，并独立确认我的个人偏好与关怀限制。",
+        reviewedFallback=True,
+        answers=[
+            {"questionId": "trip", "answer": "城市：北京；日期：2026-09-06；时间：09:00到18:00"},
+            {"questionId": "party", "answer": "同行信息由组织者管理；我是通过成员邀请链接加入的成员。"},
+            {"questionId": "endpoints_budget", "answer": "从北京站出发；结束地：北京站；共享预算：500元"},
+            {"questionId": "preferences", "answer": "兴趣：；必去：；避开："},
+            {"questionId": "assistance", "answer": "个人预算上限：未设置；没有额外关怀限制。"},
+            {"questionId": "confirm", "answer": "我已查看共同信息，并确认这里填写的是我本人的需求。"},
         ],
     )
 
@@ -156,6 +189,77 @@ async def test_model_failure_preserves_input_and_six_answers_without_canonical_w
     assert stored["outcome_json"]
     assert "LLM_TIMEOUT" in stored["outcome_json"]
     assert "rawConversation" not in stored["outcome_json"]
+
+
+@pytest.mark.asyncio
+async def test_reviewed_fixed_answers_create_deterministic_group_revision_when_model_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    gateway = CountingGateway(_result(failure_code="LLM_UNAVAILABLE"))
+    service, repository = _service(tmp_path, gateway)
+
+    outcome = await service.create_initial(
+        _reviewed_request(participant_count=2),
+        idempotency_key="t004-reviewed-fallback-01",
+    )
+
+    assert isinstance(outcome, TripDraftRevision)
+    assert outcome.understanding.trip.city_name == "北京"
+    assert outcome.understanding.trip.budget_cents == 50_000
+    assert len(outcome.understanding.participants) == 2
+    assert outcome.understanding.participants[0].nickname == "测试用户"
+    assert outcome.understanding.participants[0].care_draft is not None
+    assert outcome.understanding.participants[0].care_draft.assistance_type_hint == "ORDINARY"
+    assert outcome.understanding.participants[1].care_draft is None
+    assert _revision_count(repository) == 1
+
+    with repository._connect() as connection:
+        stored = connection.execute(
+            "SELECT recognition_source, degraded_reason, llm_call_count "
+            "FROM trip_draft_revisions"
+        ).fetchone()
+    assert stored["recognition_source"] == "REVIEWED_FIXED_QUESTIONS"
+    assert stored["degraded_reason"] == "LLM_UNAVAILABLE"
+    assert stored["llm_call_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_reviewed_member_answers_complete_deterministic_organizer_draft(
+    tmp_path: Path,
+) -> None:
+    gateway = CountingGateway(_result(failure_code="LLM_NOT_CONFIGURED", call_count=0, model=None))
+    service, repository = _service(tmp_path, gateway)
+    initial = await service.create_initial(
+        _reviewed_request(participant_count=2),
+        idempotency_key="t004-reviewed-member-initial-01",
+    )
+    assert isinstance(initial, TripDraftRevision)
+    participant_id = initial.member_bindings["member-2"]
+    submission = _reviewed_member_submission()
+
+    current = service.get_current(initial.trip_id)
+    proposal = reviewed_member_fallback_proposal(
+        current.understanding,
+        member_key="member-2",
+        submission=submission,
+    )
+    assert proposal.participants[1].care_draft is not None
+
+    revised = await service.submit_participant_conversation(
+        trip_id=initial.trip_id,
+        participant_id=participant_id,
+        base_revision=1,
+        submission=submission,
+        idempotency_key="t004-reviewed-member-submit-01",
+    )
+
+    assert isinstance(revised, TripDraftRevision)
+    assert revised.revision == 2
+    assert revised.understanding.trip == initial.understanding.trip
+    assert revised.understanding.participants[0] == initial.understanding.participants[0]
+    assert revised.understanding.participants[1].care_draft is not None
+    assert revised.understanding.participants[1].care_draft.assistance_type_hint == "ORDINARY"
+    assert _revision_count(repository) == 2
 
 
 @pytest.mark.asyncio
@@ -349,7 +453,7 @@ async def test_member_conversation_fallback_returns_200_without_advancing_collab
                 "expectedVersion": 1,
             },
         )
-        invitation_token = invitation.json()["data"]["invitationUrl"].split("=", 1)[1]
+        invitation_token = invitation.json()["data"]["invitationUrl"].rsplit("/", 1)[1]
         redeemed = await client.post(
             "/api/v2/participant-invitations/redeem",
             headers={"Idempotency-Key": "t004-member-redeem-01"},

@@ -52,6 +52,8 @@ export function MemberConversationPage() {
   const [step, setStep] = useState(0)
   const [reviewing, setReviewing] = useState(false)
   const [fallback, setFallback] = useState<FixedQuestionFallbackResponse | null>(null)
+  const [reviewedFallbackAnswers, setReviewedFallbackAnswers] = useState<boolean[]>(Array(questions.length).fill(false))
+  const [fallbackReviewNotice, setFallbackReviewNotice] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
 
@@ -126,6 +128,8 @@ export function MemberConversationPage() {
       ? Boolean(routeFields.start.trim() && routeFields.end.trim() && routeFields.budget.trim())
       : Boolean(answers[step].trim())
   const hasBlockingIssue = view?.confirmationItems.some((item) => item.code !== 'CONFLICT') ?? false
+  const reviewedFallbackCount = reviewedFallbackAnswers.filter(Boolean).length
+  const fallbackReviewComplete = reviewedFallbackCount === questions.length
 
   function updateAnswer(value: string) {
     setAnswers((items) => items.map((item, index) => index === step ? value : item))
@@ -149,7 +153,7 @@ export function MemberConversationPage() {
     })
   }
 
-  async function submit() {
+  async function submit(reviewedFallback = false) {
     if (!ready || !view || !sessionToken) return
     setLoading(true); setError('')
     try {
@@ -159,10 +163,17 @@ export function MemberConversationPage() {
         expectedVersion: view.collaborationVersion,
         naturalLanguageRequest: description,
         answers: questions.map(([questionId], index) => ({ questionId, answer: answers[index] })),
+        reviewedFallback,
       })
       if (isFixedQuestionFallback(outcome)) {
         setFallback(outcome)
         setReviewing(false)
+        if (reviewedFallback) {
+          setFallbackReviewNotice(`服务仍未返回模型提案（${outcome.recognition.failureCode}）。已保留 6 / 6 核对结果，可以再次提交。`)
+        } else {
+          setReviewedFallbackAnswers(Array(questions.length).fill(false))
+          setFallbackReviewNotice('')
+        }
       } else {
         setFallback(null)
         setView(outcome)
@@ -170,6 +181,33 @@ export function MemberConversationPage() {
       }
     } catch (caught) { setError(caught instanceof Error ? caught.message : '资料整理失败。') }
     finally { setLoading(false) }
+  }
+
+  function editFallbackAnswer(index: number) {
+    setFallback(null)
+    setFallbackReviewNotice('')
+    setStep(index)
+  }
+
+  function toggleFallbackReview(index: number) {
+    setFallbackReviewNotice('')
+    setReviewedFallbackAnswers((current) => current.map((checked, itemIndex) => (
+      itemIndex === index ? !checked : checked
+    )))
+  }
+
+  async function retryReviewedFallback() {
+    if (loading) return
+    if (!fallbackReviewComplete) {
+      const remaining = questions.length - reviewedFallbackCount
+      setFallbackReviewNotice(`还需勾选 ${remaining} 项“答案准确”，才能继续。`)
+      window.requestAnimationFrame(() => {
+        document.querySelector<HTMLInputElement>('.member-fallback-review li:not(.is-reviewed) input')?.focus()
+      })
+      return
+    }
+    setFallbackReviewNotice('')
+    await submit(true)
   }
 
   async function confirm() {
@@ -186,16 +224,16 @@ export function MemberConversationPage() {
     finally { setLoading(false) }
   }
 
-  if (loading && !view && !error) return <AppShell compact><main className="planner-layout"><section className="planner-panel member-loading-panel"><Sparkles size={24} /><h1>正在进入成员行程</h1><p role="status">正在建立仅属于你的成员会话，请稍候…</p></section></main></AppShell>
-  if (!view) return <AppShell compact><main className="planner-layout"><section className="planner-panel invitation-error-panel"><h1>此邀请不可用</h1><p className="form-error" role="alert">{error || '链接已过期或被组织者撤销。'}</p><div className="invitation-error-help"><strong>怎么继续？</strong><ol><li>同一个成员邀请链接可以重复打开。</li><li>再次打开后请使用最新标签页；旧标签页的会话会自动失效。</li><li>若链接已过期或被撤销，请联系组织者。</li></ol><a className="button button--soft" href="/plan">返回行程创建页</a></div></section></main></AppShell>
+  if (loading && !view && !error) return <AppShell compact><main className="planner-layout member-planner-layout"><section className="planner-panel member-loading-panel"><Sparkles size={24} /><h1>正在进入成员行程</h1><p role="status">正在建立仅属于你的成员会话，请稍候…</p></section></main></AppShell>
+  if (!view) return <AppShell compact><main className="planner-layout member-planner-layout"><section className="planner-panel invitation-error-panel"><h1>此邀请不可用</h1><p className="form-error" role="alert">{error || '链接已过期或被组织者撤销。'}</p><div className="invitation-error-help"><strong>怎么继续？</strong><ol><li>同一个成员邀请链接可以重复打开。</li><li>再次打开后请使用最新标签页；旧标签页的会话会自动失效。</li><li>若链接已过期或被撤销，请联系组织者。</li></ol><a className="button button--soft" href="/plan">返回行程创建页</a></div></section></main></AppShell>
 
-  return <AppShell compact><main className="planner-layout"><section className="planner-panel" data-reveal="panel">
+  return <AppShell compact><main className="planner-layout member-planner-layout"><section className="planner-panel motion-enter">
     <span className="section-kicker">MEMBER CONVERSATION</span>
     <h1>填写你的旅行偏好</h1>
     <p>你只能读取和修改自己的成员资料；组织者和其他成员的资料不会暴露在此会话中。{expiresAt && ` 会话有效至 ${new Date(expiresAt).toLocaleString('zh-CN')}。`}</p>
     <section className="shared-trip-card"><div className="shared-trip-card__head"><span><UsersRound size={18} /></span><div><strong>组织者共享的行程范围</strong><p>下面是共同安排；你的个人偏好和关怀限制独立确认。</p></div></div><div className="shared-trip-card__grid"><article><MapPin size={15} /><span>目的城市</span><strong>{view.sharedTrip.cityName || '待补充'}</strong></article><article><CalendarDays size={15} /><span>出行日期</span><strong>{view.sharedTrip.travelDate || '待补充'}</strong></article><article><Clock3 size={15} /><span>可用时间</span><strong>{view.sharedTrip.startTime && view.sharedTrip.endTime ? `${view.sharedTrip.startTime} — ${view.sharedTrip.endTime}` : '待补充'}</strong></article><article><MapPin size={15} /><span>起终点</span><strong>{view.sharedTrip.startLocationText || '待补充'} → {view.sharedTrip.endLocationText || '待补充'}</strong></article><article><WalletCards size={15} /><span>共享预算</span><strong>{view.sharedTrip.budgetCents === null ? '待补充' : `¥${view.sharedTrip.budgetCents / 100}`}</strong></article></div></section>
     {error && <p className="form-error" role="alert">{error}</p>}
-    {fallback && <section className="draft-confirmation"><div className="draft-confirmation__heading"><span><Sparkles size={18} /></span><div><strong>固定问题核对</strong><p>模型本次不可用，服务端没有推进草稿版本，也不能确认资料。</p></div></div>{fallback.fallback.items.map((item, index) => <p className="form-error" key={item.questionId}>第 {index + 1} 问：{item.message}</p>)}<button className="button button--ghost" type="button" onClick={() => { setFallback(null); setStep(0) }}>返回逐题修改</button></section>}
+    {fallback && <section className="fallback-review-card member-fallback-review"><div className="fallback-review-card__head"><span><Sparkles size={18} /></span><div><strong>成员固定问题核对</strong><p>智能整理不可用时，请逐项确认；6 / 6 后会使用你核对过的答案生成成员草稿。</p></div></div><ol className="fallback-review-list">{fallback.fallback.items.map((item, index) => <li key={item.questionId} className={reviewedFallbackAnswers[index] ? 'is-reviewed' : ''}><div className="fallback-review-item__content"><span>问题 {index + 1}</span><strong>{questions[index][1]}</strong><p>{item.answer}</p></div><div className="fallback-review-item__actions"><button className="button button--soft" type="button" onClick={() => editFallbackAnswer(index)}>修改此项</button><label><input type="checkbox" checked={reviewedFallbackAnswers[index] ?? false} onChange={() => toggleFallbackReview(index)} /><span><Check size={15} />答案准确</span></label></div></li>)}</ol><div className="fallback-review-footer"><div><p role="status" aria-live="polite">已核对 {reviewedFallbackCount} / {questions.length} 项。</p>{fallbackReviewNotice && <p className="fallback-review-notice" role="alert">{fallbackReviewNotice}</p>}</div><button className="button button--primary" type="button" disabled={loading} onClick={() => void retryReviewedFallback()}>{loading ? '正在生成成员草稿…' : fallbackReviewComplete ? '六项已核对，生成成员草稿' : `先勾选剩余 ${questions.length - reviewedFallbackCount} 项`} <ArrowRight size={18} /></button></div></section>}
     {!fallback && !reviewing && view.confirmationStatus !== 'CONFIRMED' && <>
       <label className="field-label" htmlFor="member-goal">先说说你对这趟旅行的期待</label>
       <textarea id="member-goal" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="例如：我更喜欢慢节奏，也不想走太久。" />

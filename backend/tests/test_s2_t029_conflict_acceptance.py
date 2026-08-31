@@ -307,7 +307,7 @@ async def test_real_sqlite_asgi_conflict_relaxation_reconfirmation_reaches_ready
         )
         assert invitation.status_code == 200
         invitation_data = invitation.json()["data"]
-        invitation_token = invitation_data["invitationUrl"].split("=", 1)[1]
+        invitation_token = invitation_data["invitationUrl"].rsplit("/", 1)[1]
         collaboration_version = invitation_data["collaborationVersion"]
 
         redeemed = await client.post(

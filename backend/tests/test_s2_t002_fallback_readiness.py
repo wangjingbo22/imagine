@@ -201,7 +201,7 @@ async def _prepare_ready_trip(
         json={"schemaVersion": "1.0", "expectedVersion": 2},
     )
     assert invitation.status_code == 200
-    token = invitation.json()["data"]["invitationUrl"].split("=", 1)[1]
+    token = invitation.json()["data"]["invitationUrl"].rsplit("/", 1)[1]
     redeemed = await client.post(
         "/api/v2/participant-invitations/redeem",
         headers={"Idempotency-Key": "p0-ready-redeem-0001"},

@@ -36,6 +36,7 @@ export async function createOrganizerConversation(
     naturalLanguageRequest: string
     answers: ConversationAnswer[]
     referenceDate: string
+    reviewedFallback?: boolean
   },
   idempotencyKey: string,
 ): Promise<OrganizerConversationCreated | FixedQuestionFallbackResponse> {
@@ -135,6 +136,7 @@ export async function submitMemberConversation(input: {
   expectedVersion: number
   naturalLanguageRequest: string
   answers: ConversationAnswer[]
+  reviewedFallback?: boolean
 }): Promise<MemberSessionView | FixedQuestionFallbackResponse> {
   const response = await request<MemberSessionView | FixedQuestionFallbackResponse>(
     '/api/v2/member-session/conversation',
@@ -150,6 +152,7 @@ export async function submitMemberConversation(input: {
         expectedVersion: input.expectedVersion,
         naturalLanguageRequest: input.naturalLanguageRequest,
         answers: input.answers,
+        reviewedFallback: input.reviewedFallback ?? false,
       }),
     },
   )

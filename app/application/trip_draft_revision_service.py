@@ -12,6 +12,10 @@ from app.application.llm_gateway import (
     TripUnderstandingGateway,
     UnavailableTripUnderstandingGateway,
 )
+from app.application.reviewed_fallback_understanding import (
+    reviewed_fallback_proposal,
+    reviewed_member_fallback_proposal,
+)
 from app.application.collaboration_ports import (
     CanonicalRevisionPatch,
     TripDraftRevisionPort,
@@ -280,6 +284,30 @@ class TripDraftRevisionService(TripDraftRevisionPort):
         try:
             extraction = await self._understand(request)
             if extraction.decision == "FIXED_QUESTIONS":
+                if payload.reviewed_fallback:
+                    proposal = validate_trip_understanding(
+                        request,
+                        reviewed_fallback_proposal(payload),
+                    )
+                    deterministic_extraction = TripUnderstandingExtraction(
+                        proposal=proposal,
+                        recognitionSource="REVIEWED_FIXED_QUESTIONS",
+                        recognitionModel=extraction.model,
+                        degradedReason=extraction.failure_code,
+                        llmCallCount=extraction.call_count,
+                    )
+                    bindings = {
+                        participant.member_key: uuid4()
+                        for participant in proposal.participants
+                    }
+                    revision = self._build_revision(
+                        claim=claim,
+                        proposal=proposal,
+                        member_bindings=bindings,
+                        created_at=self._clock(),
+                    )
+                    self.repository.complete(claim, revision, deterministic_extraction)
+                    return revision
                 outcome = self._fallback_response(
                     submission=payload,
                     answer_revision=claim.target_revision,
@@ -412,6 +440,33 @@ class TripDraftRevisionService(TripDraftRevisionPort):
         try:
             extraction = await self._understand(request)
             if extraction.decision == "FIXED_QUESTIONS":
+                if submission.reviewed_fallback:
+                    member_key = self._member_key(current, participant_id)
+                    candidate = reviewed_member_fallback_proposal(
+                        current.understanding,
+                        member_key=member_key,
+                        submission=submission,
+                    )
+                    candidate = self._merge_member_scope(
+                        current=current,
+                        candidate=candidate,
+                        participant_id=participant_id,
+                    )
+                    deterministic_extraction = TripUnderstandingExtraction(
+                        proposal=candidate,
+                        recognitionSource="REVIEWED_FIXED_QUESTIONS",
+                        recognitionModel=extraction.model,
+                        degradedReason=extraction.failure_code,
+                        llmCallCount=extraction.call_count,
+                    )
+                    revision = self._build_revision(
+                        claim=claim,
+                        proposal=candidate,
+                        member_bindings=dict(current.member_bindings),
+                        created_at=self._clock(),
+                    )
+                    self.repository.complete(claim, revision, deterministic_extraction)
+                    return revision
                 outcome = self._fallback_response(
                     submission=submission,
                     answer_revision=claim.target_revision,

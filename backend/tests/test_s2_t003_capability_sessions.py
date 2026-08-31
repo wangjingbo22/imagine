@@ -36,8 +36,8 @@ def _issued(tmp_path):
 def test_invitation_can_reopen_and_rotates_the_member_session(tmp_path) -> None:
     repository, revision, clock, _, invitation = _issued(tmp_path)
     assert invitation.invitation_url is not None
-    assert invitation.invitation_url.startswith("/join#token=")
-    raw_invite = invitation.invitation_url.split("=", 1)[1]
+    assert invitation.invitation_url.startswith("/join/")
+    raw_invite = invitation.invitation_url.rsplit("/", 1)[1]
     redeemed = repository.redeem_invitation(raw_invite, "2222222222222222")
     assert redeemed.participant_session_token is not None
     actor = repository.authenticate_participant(redeemed.participant_session_token)
@@ -54,7 +54,7 @@ def test_invitation_can_reopen_and_rotates_the_member_session(tmp_path) -> None:
 def test_database_and_structured_rows_never_contain_raw_secrets(tmp_path) -> None:
     repository, _, _, bootstrap, invitation = _issued(tmp_path)
     assert invitation.invitation_url is not None
-    raw_invite = invitation.invitation_url.split("=", 1)[1]
+    raw_invite = invitation.invitation_url.rsplit("/", 1)[1]
     redeemed = repository.redeem_invitation(raw_invite, "2222222222222222")
     assert bootstrap.organizer_token is not None
     assert redeemed.participant_session_token is not None
@@ -80,7 +80,7 @@ def test_database_and_structured_rows_never_contain_raw_secrets(tmp_path) -> Non
 def test_same_invite_concurrent_redemption_keeps_only_latest_session_active(tmp_path) -> None:
     repository, _, _, _, invitation = _issued(tmp_path)
     assert invitation.invitation_url is not None
-    raw_invite = invitation.invitation_url.split("=", 1)[1]
+    raw_invite = invitation.invitation_url.rsplit("/", 1)[1]
 
     def redeem(key: str) -> str:
         try:
@@ -114,7 +114,7 @@ def test_revoke_invitation_revokes_linked_session_and_invalidates_confirmation(t
     )
     assert invitation.invitation_url is not None
     redeemed = harness.repository.redeem_invitation(
-        invitation.invitation_url.split("=", 1)[1],
+        invitation.invitation_url.rsplit("/", 1)[1],
         "revoke-redeem-0001",
     )
     assert redeemed.participant_session_token is not None
@@ -228,7 +228,7 @@ def test_redeem_idempotency_returns_same_metadata_without_replaying_session_secr
         idempotency_key="invite-idempotent-2",
     )
     assert invitation.invitation_url is not None
-    raw_token = invitation.invitation_url.split("=", 1)[1]
+    raw_token = invitation.invitation_url.rsplit("/", 1)[1]
 
     first = repository.redeem_invitation(raw_token, "redeem-idempotent-1")
     replay = repository.redeem_invitation(raw_token, "redeem-idempotent-1")
