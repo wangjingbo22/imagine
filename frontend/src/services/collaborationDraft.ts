@@ -1,12 +1,19 @@
 import type {
   AssistanceMode,
   AssistanceProfile,
+  CandidatePlanningTrip,
+  CreateDayTrip,
+  PreferenceType,
   TripDraftInput,
 } from '../domain/trip'
 import type {
   CareDraft,
   TripDraftRevision,
 } from '../domain/collaboration'
+import {
+  compileGroupAssistanceConstraints,
+  planningCareFromConstraints,
+} from './assistanceConstraints'
 
 const invitationTokenPattern = /^[A-Za-z0-9_-]{43}$/
 
@@ -99,6 +106,121 @@ function exactAssistanceProfile(care: CareDraft | null): AssistanceProfile | nul
     restInterval: care.restIntervalMinutes ?? preset.restInterval,
     napWindow: explicitNapWindow ?? preset.napWindow,
     avoidStairs: care.avoidStairs ?? preset.avoidStairs,
+  }
+}
+
+function unique(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+}
+
+function groupAssistanceMode(profiles: AssistanceProfile[]): AssistanceMode {
+  if (profiles.some((profile) => profile.type === 'MOBILITY_ASSISTANCE_BETA')) {
+    return 'assisted'
+  }
+  if (profiles.some((profile) => profile.type === 'PARENT_CHILD')) return 'family'
+  if (profiles.some((profile) => profile.type === 'LOW_STAMINA')) return 'low-mobility'
+  return 'standard'
+}
+
+export function collaborationPlanningDraft(
+  revision: TripDraftRevision,
+): TripDraftInput | null {
+  const understanding = revision.understanding
+  if (
+    understanding.participants.length < 1 ||
+    understanding.participants.length > 3 ||
+    understanding.missingFields.length > 0 ||
+    understanding.ambiguities.length > 0 ||
+    understanding.confirmationQuestions.length > 0
+  ) return null
+  if (understanding.participants.some(
+    (participant) => !revision.memberBindings[participant.memberKey],
+  )) return null
+
+  const trip = understanding.trip
+  if (
+    !trip.cityName ||
+    !trip.travelDate ||
+    !trip.startTime ||
+    !trip.endTime ||
+    !trip.startLocationText ||
+    !trip.endLocationText ||
+    trip.budgetCents === null
+  ) return null
+  const profiles = understanding.participants.map(
+    (participant) => exactAssistanceProfile(participant.careDraft),
+  )
+  if (profiles.some((profile) => profile === null)) return null
+  const exactProfiles = profiles as AssistanceProfile[]
+  const care = planningCareFromConstraints(
+    compileGroupAssistanceConstraints(exactProfiles),
+  )
+  return {
+    schemaVersion: '1.0',
+    cityName: trip.cityName,
+    travelDate: trip.travelDate,
+    startTime: trip.startTime,
+    endTime: trip.endTime,
+    startLocationText: trip.startLocationText,
+    endLocationText: trip.endLocationText,
+    budgetCents: trip.budgetCents,
+    interests: unique(understanding.participants.flatMap((item) => item.interests)),
+    mustVisit: unique(understanding.participants.flatMap((item) => item.mustVisit)),
+    avoidPlaces: unique(understanding.participants.flatMap((item) => item.avoidPlaces)),
+    assistanceMode: groupAssistanceMode(exactProfiles),
+    assistanceProfile: {
+      maxSegmentWalkMeters: care.maxContinuousMeters,
+      maxTransfers: care.maxTransfers,
+      restIntervalMinutes: care.restInterval,
+    },
+    naturalLanguageRequest: [
+      `${trip.travelDate}前往${trip.cityName}`,
+      `${trip.startTime}至${trip.endTime}`,
+      `${trip.startLocationText}到${trip.endLocationText}`,
+      `${understanding.participants.length}人同行`,
+    ].join('；'),
+  }
+}
+
+export function planningDraftFromConfirmedTrip(
+  trip: CreateDayTrip | CandidatePlanningTrip,
+): TripDraftInput {
+  const values: Record<PreferenceType, string[]> = {
+    INTEREST: [],
+    MUST_VISIT: [],
+    AVOID_PLACE: [],
+  }
+  for (const participant of trip.participants) {
+    for (const preference of participant.preferences ?? []) {
+      values[preference.type].push(preference.value)
+    }
+  }
+  const profiles = trip.participants
+    .map((participant) => participant.assistanceProfile)
+    .filter((profile): profile is AssistanceProfile => Boolean(profile))
+  const care = planningCareFromConstraints(
+    compileGroupAssistanceConstraints(profiles),
+  )
+  const day = trip.days[0]
+  return {
+    schemaVersion: '1.0',
+    cityName: trip.cityContext.cityName,
+    travelDate: trip.startDate,
+    startTime: day.timeWindow.start,
+    endTime: day.timeWindow.end,
+    startLocationText: day.startLocationText,
+    endLocationText: day.endLocationText,
+    budgetCents: trip.totalBudgetCents,
+    interests: unique(values.INTEREST),
+    mustVisit: unique(values.MUST_VISIT),
+    avoidPlaces: unique(values.AVOID_PLACE),
+    assistanceMode: groupAssistanceMode(profiles),
+    assistanceProfile: {
+      maxSegmentWalkMeters: care.maxContinuousMeters,
+      maxTransfers: care.maxTransfers,
+      restIntervalMinutes: care.restInterval,
+    },
+    naturalLanguageRequest: `${trip.startDate}前往${trip.cityContext.cityName}；${trip.participants.length}人同行`,
   }
 }
 

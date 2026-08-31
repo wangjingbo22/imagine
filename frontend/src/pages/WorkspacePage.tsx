@@ -28,9 +28,9 @@ import { useLocation } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { tripApi, USE_PLAN_VERSION_API } from '../api/tripApi'
 import { AppShell } from '../components/AppShell'
+import { MemoryTimelinePanel } from '../components/MemoryTimelinePanel'
 import { RouteOverview } from '../components/RouteOverview'
 import { TaskPhotoCard } from '../components/TaskPhotoCard'
-import { MemoryPhotoStrip } from '../components/MemoryPhotoStrip'
 import type {
   CandidatePlanRequest,
   CandidatePlanReview,
@@ -59,7 +59,10 @@ import {
   type AmapPlanResult,
   type LocationEvidence,
 } from '../services/amapPlan'
-import { compileAssistanceConstraints } from '../services/assistanceConstraints'
+import {
+  compileGroupAssistanceConstraints,
+  planningCareFromConstraints,
+} from '../services/assistanceConstraints'
 import {
   decideAndContinueExecution,
   executionEventIdempotencyKey,
@@ -443,7 +446,7 @@ export function WorkspacePage() {
     return () => {
       cancelled = true
     }
-  }, [applyTripState, tripId])
+  }, [applyTripState, organizerToken, tripId])
 
   useEffect(() => {
     if (view !== 'summary' || !tripId) {
@@ -501,13 +504,25 @@ export function WorkspacePage() {
       ? restoredPlan.totalCostCents + restoredPlan.bufferCents
       : 35000
   )
-  const planningProfile = planningTripSnapshot?.participants[0].assistanceProfile ?? null
+  const planningConstraints = planningTripSnapshot
+    ? compileGroupAssistanceConstraints(
+        planningTripSnapshot.participants.map((participant) => participant.assistanceProfile),
+      )
+    : []
   const validationRules = [
-    ...(planningProfile
-      ? compileAssistanceConstraints(planningProfile).map(describePlanningConstraint)
-      : []),
+    ...planningConstraints.map(describePlanningConstraint),
     `${planningTripSnapshot?.days[0].timeWindow.end.slice(0, 5) ?? planningDraft?.endTime ?? '20:00'} 前结束`,
   ]
+  const executionMapEvidence = useMemo<LocationEvidence | null>(() => {
+    if (locationEvidence) return locationEvidence
+    if (!candidateRequest) return null
+    return {
+      city: { cityContext: candidateRequest.trip.cityContext },
+      places: candidateRequest.taskFacts.map((fact) => fact.place),
+      routes: candidateRequest.taskFacts.map((fact) => fact.route),
+      queries: [],
+    } as unknown as LocationEvidence
+  }, [candidateRequest, locationEvidence])
   const availablePlan = restoredPlan ?? providerPlan
   if (!availablePlan) {
     return (
@@ -609,17 +624,6 @@ export function WorkspacePage() {
     storedCurrentPlan?.version ?? null,
     executionAdjustmentCount,
   )
-  const executionMapEvidence = useMemo<LocationEvidence | null>(() => {
-    if (locationEvidence) return locationEvidence
-    if (!candidateRequest) return null
-    return {
-      city: { cityContext: candidateRequest.trip.cityContext },
-      places: candidateRequest.taskFacts.map((fact) => fact.place),
-      routes: candidateRequest.taskFacts.map((fact) => fact.route),
-      queries: [],
-    } as unknown as LocationEvidence
-  }, [candidateRequest, locationEvidence])
-
   function toggleRecommendationFeedback(option: string) {
     setSelectedFeedbackOptions((current) =>
       current.includes(option)
@@ -663,8 +667,12 @@ export function WorkspacePage() {
       interests.unshift('特色餐饮')
     }
     try {
-      const currentWalkLimit = planningTrip.participants[0]
-        .assistanceProfile?.walkLimits.maxContinuousMeters ??
+      const currentCare = planningCareFromConstraints(
+        compileGroupAssistanceConstraints(
+          planningTrip.participants.map((participant) => participant.assistanceProfile),
+        ),
+      )
+      const currentWalkLimit = currentCare.maxContinuousMeters ??
         planningDraft.assistanceProfile.maxSegmentWalkMeters
       const preferredMaxWalkMeters = selectedFeedbackOptions.includes('想少走路')
         ? Math.max(100, Math.round((currentWalkLimit ?? 500) * 0.7))
@@ -1977,7 +1985,14 @@ export function WorkspacePage() {
                 ))}
               </div>
             )}
-            <MemoryPhotoStrip tripId={tripId} tasks={activePlan.tasks.map((task) => ({ id: task.id, order: task.order, title: task.title }))} />
+            <MemoryTimelinePanel
+              tripId={tripId}
+              tasks={activePlan.tasks.map((task) => ({
+                id: task.id,
+                order: task.order,
+                title: task.title,
+              }))}
+            />
           </section>
         )}
       </main>

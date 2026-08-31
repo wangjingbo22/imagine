@@ -7,7 +7,7 @@
 - 负责人：林粲涵；全员参与
 - 前置依赖：`S2-T001~S2-T023`
 - 需求源：`SprintBacklog模板!A28:V28`、`PBI追溯!A13:J13`、`用户功能验收清单!A15:J15`
-- 验证基线：`main@012fa364894ffc7dd36a6dd91cdd21641550da06`
+- 验证基线：`main@90bef1439aee70a3b02675b385bba05f96a65cf6`
 - 本地关闭提交：`1a7fcf7169f3e3656507be878e896bf4db1dd9fd`
 
 T024 是验收任务，不拥有上游业务真值。它把六问、唯一推荐、执行/GPS、照片、LATE/FATIGUE V2、组织者接受或拒绝、回忆串成可重复的公网黄金路径，并在 375px 和 768px 下验证布局、触控、状态、键盘和 reduced-motion。
@@ -40,7 +40,7 @@ S2-T001~T005 Trip/协作/执行兼容
 
 以上文件均已落盘并通过本地验收。单人可信桥 `app/application/collaboration_planning_bridge.py` 把 READY revision 接入 canonical Trip；新的 `backend/tests/test_s2_t024_full_golden_path.py` 在同一个真实 ASGI app 和 SQLite 文件内串起六问、READY、Provider/FactRef 推荐、V1、GPS 到达、照片替换/删除、LATE/FATIGUE、PROPOSED V2、组织者接受和 MemoryTimeline，并核对这些表始终属于同一个 `tripId`。关闭提交还把 `app/application/planning_boundary_service.py` 的 V2 恢复父版本引用从不存在的 `plan.parent_plan_id` 修正为真实字段 `plan.parent_id`，全链测试覆盖了该路径。
 
-T023 的迟到/疲劳解析、确认事件、结构化 Diff 与组织者专用决策已在本地前端接线；公网连续浏览器证据仍待部署。2/3 人完整规划链继续严格保留给 T032。
+T023 的迟到/疲劳解析、确认事件、结构化 Diff 与组织者专用决策已在本地前端接线；公网连续浏览器证据仍待部署。T005 的 1/2/3 人 PlanVersion 共享状态机已在最新 `main` 可用，但本轮只刷新 T024 基线追溯，不把尚未执行的公网全链或 T032 扩展验收写成新闭环。
 
 ## 验收合同
 
@@ -54,7 +54,7 @@ T023 的迟到/疲劳解析、确认事件、结构化 Diff 与组织者专用�
 
 ## 当前结论
 
-本地实现与自动化已通过：后端全量 `633 passed in 78.57s`；前端 `52 passed`；375px 和 768px Playwright 共 `14 passed in 31.4s`；build 通过；lint 通过并保留 `RecommendationPage.tsx` 两条既有 warning。真实 ASGI/SQLite 测试已经覆盖单人六问 revision、READY、Provider/FactRef 推荐、canonical V1、执行/GPS、任务照片、LATE/FATIGUE、V2 Diff/接受和回忆；浏览器自动化仍使用明确的 Mock API，覆盖推荐确认到工作台以及执行、V2 Diff、回忆分阶段的响应式、44px、无横向滚动与 reduced-motion，不宣称真实后端连续公网全链。
+本轮修改前基线审计为后端全量 `685 passed`、林粲涵专项 `119 passed`、前端 `52 passed`。最终收口验证为后端全量 `688 passed`、林粲涵及直接联动专项 `188 passed`、前端 `56 passed`、build/lint PASS、375px 与 768px Playwright `14 passed in 28.9s`。真实 ASGI/SQLite 测试已经覆盖单人六问 revision、READY、Provider/FactRef 唯一推荐、不可变签发地点快照、推荐顺序进入 canonical V1、执行/GPS、任务照片、LATE/FATIGUE、V2 Diff/接受和回忆；浏览器自动化仍使用明确的 Mock API，覆盖推荐确认到工作台以及执行、V2 Diff、回忆分阶段的响应式、44px、无横向滚动与 reduced-motion，不宣称真实后端连续公网全链。
 
 公网验收仍保持 `NOT_RUN / BLOCKED`。当前公网 build 是 `32bb112a5eb7ec1e0e3d052ec060defe9f3627c1`，不是本地关闭提交 `1a7fcf7169f3e3656507be878e896bf4db1dd9fd`，且 Render 尚未配置 `BAILIAN_API_KEY`。没有目标 SHA 的公网 URL、真实高德/百炼配置证明、连续录屏和验收签字前，不得把 `RESP-S2-001` 写成公网 PASS。
 

@@ -8,6 +8,7 @@ from app.core.errors import AppError
 from app.infrastructure.memory_media_reader import SqliteMemoryMediaReader
 from app.schemas.execution import ExecutionEventType
 from app.schemas.memory_timeline import (
+    MemoryParticipantCare,
     MemoryPhoto,
     MemoryTimeline,
     MemoryTimelineItem,
@@ -173,6 +174,14 @@ class MemoryTimelineService:
                 current_plan_version=current.version,
                 plan_change_count=max(0, len(versions) - 1),
                 photo_count=len(photos),
+                participant_care_results=[
+                    MemoryParticipantCare(
+                        participant_id=participant.participant_id,
+                        nickname=participant.nickname,
+                        assistance_profile=participant.assistance_profile,
+                    )
+                    for participant in current.trip_snapshot.participants
+                ],
                 assistance_profile=(
                     care.assistance_profile if care is not None else None
                 ),

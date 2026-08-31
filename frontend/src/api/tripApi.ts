@@ -9,6 +9,7 @@ import type {
   CityContext,
   ConstraintConfirmationResult,
   ConstraintProfileState,
+  CreateDayTrip,
   CreateSingleDayTrip,
   ExecutionEvent,
   ExecutionEventInput,
@@ -41,6 +42,7 @@ import type {
 } from '../domain/executionAdjustment'
 import { ApiError, request, requestBare } from './client'
 import { createExpenseChangeReplanRequest } from '../services/executionReplan'
+import type { ProviderFactPlaceSet } from '../services/recommendationSelection'
 
 export const USE_PLAN_VERSION_API =
   (import.meta.env?.VITE_USE_PLAN_VERSION_API ?? 'true') === 'true'
@@ -150,7 +152,7 @@ export const tripApi = {
   },
 
   getCollaborationPlanningTrip(tripId: string, organizerToken: string) {
-    return request<CreateSingleDayTrip>(
+    return request<CreateDayTrip>(
       `/api/v2/trips/${tripId}/planning-trip`,
       { headers: { 'X-Organizer-Token': organizerToken } },
     )
@@ -310,14 +312,25 @@ export const tripApi = {
     })
   },
 
-  getPlaceDetail(tripId: string, cityContext: CityContext, placeId: string) {
+  getPlaceDetail(
+    tripId: string,
+    cityContext: CityContext,
+    placeId: string,
+    organizerToken?: string | null,
+  ) {
     return request<Place>('/api/v1/places/detail', {
       method: 'POST',
+      headers: organizerHeaders(organizerToken),
       body: JSON.stringify({ schemaVersion: '1.0', tripId, cityContext, placeId }),
     })
   },
 
-  forwardGeocode(tripId: string, cityContext: CityContext, address: string, organizerToken?: string | null) {
+  forwardGeocode(
+    tripId: string,
+    cityContext: CityContext,
+    address: string,
+    organizerToken?: string | null,
+  ) {
     return request<AddressResolution>('/api/v1/geocoding/forward', {
       method: 'POST',
       headers: organizerHeaders(organizerToken),
@@ -347,6 +360,20 @@ export const tripApi = {
       body: JSON.stringify({
         schemaVersion: '1.0', tripId, cityContext, origin, destination, mode, strategy,
       }),
+    })
+  },
+
+  getProviderFactSetPlaces(
+    tripId: string,
+    factSetId: string,
+    providerFactDigest: string,
+    organizerToken: string,
+  ) {
+    const path = `/api/v1/trips/${encodeURIComponent(tripId)}` +
+      `/provider-fact-sets/${encodeURIComponent(factSetId)}/places` +
+      `?providerFactDigest=${encodeURIComponent(providerFactDigest)}`
+    return request<ProviderFactPlaceSet>(path, {
+      headers: organizerHeaders(organizerToken),
     })
   },
 

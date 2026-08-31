@@ -111,6 +111,26 @@ class ProviderFactSetSummary(ContractModel):
     references: tuple[ProviderFactReferenceSummary, ...] = Field(min_length=6)
 
 
+class ProviderFactPlacePayload(ContractModel):
+    """One immutable signed Place payload exposed to the organizer only."""
+
+    fact_ref_id: OpaqueId
+    provider_object_id: OpaqueId
+    payload_digest: Digest
+    place: Place
+
+
+class ProviderFactPlaceSet(ContractModel):
+    schema_version: Literal["1.0"] = "1.0"
+    fact_set_id: OpaqueId
+    provider_fact_digest: Digest
+    trip_id: UUID
+    places: tuple[ProviderFactPlacePayload, ...] = Field(
+        min_length=6,
+        max_length=8,
+    )
+
+
 class ProviderFactSnapshot(ContractModel):
     """Full immutable server snapshot; never accepted from the browser or LLM."""
 
@@ -166,9 +186,29 @@ class ProviderFactSnapshot(ContractModel):
             references=self.references,
         )
 
+    def place_set(self) -> ProviderFactPlaceSet:
+        places_by_id = {item.placeId: item for item in self.draft.places}
+        return ProviderFactPlaceSet(
+            fact_set_id=self.fact_set_id,
+            provider_fact_digest=self.provider_fact_digest,
+            trip_id=self.draft.trip.trip_id,
+            places=tuple(
+                ProviderFactPlacePayload(
+                    fact_ref_id=reference.fact_ref_id,
+                    provider_object_id=reference.provider_object_id,
+                    payload_digest=reference.payload_digest,
+                    place=places_by_id[reference.provider_object_id],
+                )
+                for reference in self.references
+                if reference.kind == "PLACE"
+            ),
+        )
+
 
 __all__ = [
     "ProviderFactIssueDraft",
+    "ProviderFactPlacePayload",
+    "ProviderFactPlaceSet",
     "ProviderFactReferenceSummary",
     "ProviderFactSetSummary",
     "ProviderFactSnapshot",

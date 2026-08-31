@@ -138,7 +138,7 @@ def test_t024_pending_status_cannot_be_mistaken_for_public_pass() -> None:
     trace = _trace()
     base = trace["verifiedAgainstMainCommit"]
     assert re.fullmatch(r"[0-9a-f]{40}", base)
-    assert base == "012fa364894ffc7dd36a6dd91cdd21641550da06"
+    assert base == "90bef1439aee70a3b02675b385bba05f96a65cf6"
     assert trace["deliveryBaseCommit"] == (
         "77daffedde92cf33ddae2ff1c378fefc40962910"
     )
@@ -155,14 +155,22 @@ def test_t024_pending_status_cannot_be_mistaken_for_public_pass() -> None:
     verification = trace["localVerification"]
     assert verification["status"] == "PASS"
     assert verification["traceabilityResult"] == "8 passed"
-    assert verification["backendFull"] == "633 passed in 78.57s"
-    assert verification["frontendTest"] == "52 passed"
+    assert verification["baselineAuditScope"] == (
+        "ORIGIN_MAIN_PRE_TRACEABILITY_REFRESH"
+    )
+    assert verification["preClosureBackendFull"] == "685 passed"
+    assert verification["backendFull"] == "688 passed"
+    assert verification["baselineLinFocusedResult"] == "119 passed"
+    assert verification["postClosureLinFocusedResult"] == "188 passed"
+    assert verification["postTraceRefreshFullVerification"] == "PASS"
+    assert verification["frontendTest"] == "56 passed"
     assert trace["knownGaps"]["browserBackendMode"] == (
         "MOCKED_UI_INTEGRATION_NOT_A_CONTINUOUS_REAL_BACKEND_CHAIN"
     )
     assert verification["playwright375Result"] == "7 passed"
     assert verification["playwright768Result"] == "7 passed"
-    assert verification["playwrightAll"] == "14 passed in 31.4s"
+    assert verification["playwrightAll"] == "14 passed in 28.9s"
+    assert verification["frontendLint"] == "PASS"
     assert verification["frontendBuild"] == "PASS"
     assert verification["diffCheck"] == "PASS"
     assert verification["onlineE2E"] == (
@@ -170,6 +178,13 @@ def test_t024_pending_status_cannot_be_mistaken_for_public_pass() -> None:
     )
     assert trace["uat"]["publicResult"] == (
         "NOT_RUN_BLOCKED_TARGET_BUILD_AND_BAILIAN"
+    )
+
+    task = trace["task"]
+    assert "frontend/src/services/recommendationSelection.ts" in task["moduleFiles"]
+    assert "frontend/tests/recommendationSelection.test.ts" in task["testFiles"]
+    assert "backend/tests/test_s2_t030_provider_candidate_issuance.py" in (
+        task["testFiles"]
     )
     assert trace["neededInputs"]
 

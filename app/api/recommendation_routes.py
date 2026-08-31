@@ -15,12 +15,14 @@ from app.application.recommendation_service import (
     project_collaboration_recommendation_trip,
 )
 from app.core.errors import AppError
+from app.domain.collaboration import TripFlowKind
 from app.domain.hard_conflicts import merged_constraints_for_revision
 from app.domain.models import ApiResponse
 from app.domain.recommendation import CandidateFactProvenance
 from app.infrastructure.provider_fact_registry import SqliteProviderFactRegistry
 from app.services.planning.models import CandidateEndpointFact
 from app.services.recommendation import (
+    ProviderFactPlaceSet,
     ProviderFactSetSummary,
     RecommendationOrchestrationRequest,
     RecommendationOrchestrationResult,
@@ -28,6 +30,11 @@ from app.services.recommendation import (
 
 
 router = APIRouter(tags=["S2 可信候选推荐"])
+
+
+def _mark_private_organizer_response(response: Response) -> None:
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Vary"] = "X-Organizer-Token"
 
 
 def _provider_search_terms(
@@ -119,6 +126,7 @@ async def get_provider_fact_set_summary(
     trip_id: UUID,
     fact_set_id: str,
     request: Request,
+    response: Response,
     provider_fact_digest: str = Query(alias="providerFactDigest"),
     registry: SqliteProviderFactRegistry = Depends(get_provider_fact_registry),
 ) -> ApiResponse[ProviderFactSetSummary]:
@@ -142,7 +150,75 @@ async def get_provider_fact_set_summary(
                 message="请求摘要与服务端签发的 FactRef 摘要不一致",
                 http_status=409,
             )
+        _mark_private_organizer_response(response)
         return ApiResponse[ProviderFactSetSummary](data=snapshot.summary())
+
+
+@router.get(
+    "/api/v1/trips/{trip_id}/provider-fact-sets/{fact_set_id}/places",
+    summary="恢复服务端签发的不可变地点事实",
+    description=(
+        "仅向具备组织者权限且协作仍就绪的 Trip 返回签发快照中的地点；"
+        "浏览器不能提交或覆盖地点、价格、来源与 payloadDigest。"
+    ),
+)
+async def get_provider_fact_set_places(
+    trip_id: UUID,
+    fact_set_id: str,
+    request: Request,
+    response: Response,
+    provider_fact_digest: str = Query(alias="providerFactDigest"),
+    registry: SqliteProviderFactRegistry = Depends(get_provider_fact_registry),
+) -> ApiResponse[ProviderFactPlaceSet]:
+    if not request.headers.get("X-Organizer-Token"):
+        raise AppError(
+            code="ORGANIZER_PERMISSION_REQUIRED",
+            message="缺少组织者凭证",
+            http_status=403,
+        )
+    access = build_planning_access(
+        request,
+        trip_id,
+        PlanningOperation.PROVIDER_FACTS,
+    )
+    with request.app.state.collaboration_readiness_guard.operation(access) as permit:
+        if (
+            permit.flow_kind is not TripFlowKind.COLLABORATION_V2
+            or permit.revision is None
+        ):
+            raise AppError(
+                code="ORGANIZER_PERMISSION_REQUIRED",
+                message="组织者权限不足",
+                http_status=403,
+            )
+        try:
+            snapshot = registry.restore_snapshot(trip_id, fact_set_id)
+        except ProviderFactRestoreError as error:
+            raise AppError(
+                code=error.code,
+                message=error.message,
+                http_status=409,
+            ) from error
+        if snapshot.provider_fact_digest != provider_fact_digest:
+            raise AppError(
+                code="PROVIDER_FACT_DIGEST_MISMATCH",
+                message="请求摘要与服务端签发的 FactRef 摘要不一致",
+                http_status=409,
+            )
+        issued_context = snapshot.draft.confirmed_trip_summary
+        if (
+            issued_context.get("collaborationRevision")
+            != permit.revision.revision
+            or issued_context.get("sourceDigest")
+            != permit.revision.source_digest
+        ):
+            raise AppError(
+                code="PROVIDER_FACT_READY_CONTEXT_STALE",
+                message="FactRef 快照与当前已确认协作版本不一致",
+                http_status=409,
+            )
+        _mark_private_organizer_response(response)
+        return ApiResponse[ProviderFactPlaceSet](data=snapshot.place_set())
 
 
 @router.post(
@@ -268,25 +344,14 @@ async def recommendations(trip_id: UUID, request: Request) -> ApiResponse:
             )
             for item in members
         ]
-        care_need_labels = [
-            label
-            for item in members
-            if item.care_draft is not None
-            for label in (
-                item.care_draft.assistance_type_hint,
-                "避开楼梯" if item.care_draft.avoid_stairs else None,
-            )
-            if label is not None
-        ]
         try:
             bundle = await orchestration.recommend_preview_from_provider_facts(
                 trip_id=trip_id,
+                trip=trip,
                 facts=issuance.facts,
-                city_code=city.cityContext.city_code,
                 interests=interests,
                 must_visit=must_visit,
                 avoid_places=avoid_places,
-                care_need_labels=care_need_labels,
                 members=member_preferences,
             )
         except RecommendationOrchestrationError as error:
@@ -325,7 +390,7 @@ async def collaboration_planning_trip(
     request: Request,
     response: Response,
 ) -> ApiResponse:
-    """Return the server-materialized Trip for the READY single flow.
+    """Return the server-materialized Trip for a READY 1-3 member flow.
 
     The browser must not rebuild or reconfirm a collaboration-owned Trip.  The
     same readiness lease used by recommendation/planning binds this response to
@@ -343,13 +408,6 @@ async def collaboration_planning_trip(
     collaboration = request.app.state.collaboration_service
     with guard.operation(access):
         revision = collaboration.ready_revision(trip_id, organizer_token)
-        if len(revision.understanding.participants) != 1:
-            raise AppError(
-                code="COLLABORATION_SINGLE_PLANNING_UNAVAILABLE",
-                message="多人协作 Trip 的规划投影由 S2-T032 提供",
-                http_status=409,
-                retryable=False,
-            )
         shared = revision.understanding.trip
         city = await request.app.state.location_service.resolve_city(
             shared.city_name or ""
@@ -358,13 +416,6 @@ async def collaboration_planning_trip(
             revision,
             city.cityContext,
         )
-        if trip is None:
-            raise AppError(
-                code="COLLABORATION_SINGLE_PLANNING_UNAVAILABLE",
-                message="当前协作 Trip 无法投影为单人规划输入",
-                http_status=409,
-                retryable=False,
-            )
         response.headers["Cache-Control"] = "no-store"
         response.headers["Vary"] = "X-Organizer-Token"
         return ApiResponse(data=trip)

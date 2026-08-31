@@ -8,7 +8,7 @@ import subprocess
 
 ROOT = Path(__file__).parents[2]
 TRACE = ROOT / "docs" / "traceability" / "sprint2" / "lin_canhan_day1.json"
-LATEST_MAIN_COMMIT = "012fa364894ffc7dd36a6dd91cdd21641550da06"
+LATEST_MAIN_COMMIT = "90bef1439aee70a3b02675b385bba05f96a65cf6"
 DELIVERY_BASE_COMMIT = "a43ad37a5c8b97d2b90507fa9966998bfee038b9"
 IMPLEMENTATION_COMMIT = "f376574a5c8c5c577d6ed43efd200293023b3b32"
 CONTRACT_HARDENING_COMMIT = "0856b745075156e3da5365e74852aaa192329325"
@@ -143,12 +143,15 @@ def test_runtime_linkages_are_explicit_and_honest_about_day2_boundary() -> None:
         ]
     )
     assert links[("S2-T019", "S2-T023")]["status"] == (
-        "FIXTURE_AND_HTTP_CONTRACT_READY_UI_NOT_IMPLEMENTED_HERE"
+        "T019_T020_CONTRACT_CONSUMED_BY_LOCAL_T023_UI_PUBLIC_E2E_PENDING"
     )
     assert links[("S2-T020", "S1-T007")]["status"] == (
         "ISOLATED_MUST_NOT_APPEND_TO_CONFIRMED_CONSTRAINTS"
     )
-    assert "no frontend component is implemented by this delivery" in (
+    assert (
+        "T019 and T020 own no frontend component; downstream S2-T023 is locally "
+        "integrated and public-browser E2E remains pending"
+    ) in (
         trace["integrationBoundaries"]
     )
 
@@ -156,7 +159,9 @@ def test_runtime_linkages_are_explicit_and_honest_about_day2_boundary() -> None:
 def test_verification_and_required_acceptance_artifacts_are_locked() -> None:
     trace = _trace()
     verification = trace["localVerification"]
-    assert verification["status"] == "LATEST_MAIN_FULL_REGRESSION_PASS"
+    assert verification["status"] == (
+        "LATEST_MAIN_POST_TRACE_REFRESH_FULL_PASS"
+    )
     assert verification["latestMainCommit"] == LATEST_MAIN_COMMIT
     assert verification["latestMainTraceResult"] == "4 passed"
     assert verification["historicalBaselineCommit"] == DELIVERY_BASE_COMMIT
@@ -169,14 +174,20 @@ def test_verification_and_required_acceptance_artifacts_are_locked() -> None:
     )
     assert verification["historicalDiffCheck"] == "PASS"
     assert verification["latestMainClosureCommit"] == CLOSURE_COMMIT
-    assert verification["latestMainBackendResult"] == "633 passed in 78.57s"
-    assert verification["latestMainFrontendTest"] == "52 passed"
-    assert verification["latestMainFrontendBuild"] == "PASS"
-    assert verification["latestMainFrontendLint"] == (
-        "PASS_WITH_2_EXISTING_WARNINGS"
+    assert verification["baselineAuditScope"] == (
+        "ORIGIN_MAIN_PRE_TRACEABILITY_REFRESH"
     )
+    assert verification["preClosureBackendResult"] == "685 passed"
+    assert verification["latestMainBackendResult"] == "688 passed"
+    assert verification["baselineLinFocusedResult"] == "119 passed"
+    assert verification["postClosureLinFocusedResult"] == "188 passed"
+    assert verification["latestMainFrontendTest"] == "56 passed"
+    assert verification["latestMainFrontendBuild"] == "PASS"
+    assert verification["latestMainFrontendLint"] == "PASS"
+    assert verification["latestMainPlaywrightT024"] == "14 passed"
     assert verification["latestMainDiffCheck"] == "PASS"
-    assert verification["latestMainFunctionalRegression"] == "PASS"
+    assert verification["latestMainFunctionalRegression"] == "FULL_PASS"
+    assert verification["postTraceRefreshFullVerification"] == "PASS"
 
     tasks = {task["taskId"]: task for task in trace["tasks"]}
     assert "backend/schemas/execution_event_draft.schema.json" in (
@@ -187,6 +198,10 @@ def test_verification_and_required_acceptance_artifacts_are_locked() -> None:
     )
     assert trace["productDecisionsStillNeeded"]
     external = trace["externalAcceptanceStillNeeded"]
-    assert any("S2-T023" in item for item in external)
+    assert any(
+        "S2-T023" in item and "locally integrated" in item
+        and "public-browser acceptance remains pending" in item
+        for item in external
+    )
     assert any("BAILIAN_API_KEY" in item for item in external)
     assert any("public end-to-end" in item for item in external)

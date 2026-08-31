@@ -5,7 +5,7 @@
 - PBI / AC：`PBI-15-A` / `AC-15-B`
 - 依赖：`S2-T003`
 - 需求源：`SprintBacklog模板!A33:V33`、`PBI追溯!A15:J15`、`用户功能验收清单!A6:J6` 与 `A8:J8`
-- 最新集成验证基线：`main@012fa364894ffc7dd36a6dd91cdd21641550da06`
+- 最新集成验证基线：`main@90bef1439aee70a3b02675b385bba05f96a65cf6`
 - 实现提交：`00f7ef692b5b3a5ef1b5d711af68456eeff41a66`
 
 本任务不重写 T003 冲突算法，而是把既有确定性结果冻结成可验收合同：每个确认项对外提供 `participantId`、`relatedParticipantIds`、`ruleId`、`reason` 和 `allowedRelaxations`，组织者页面逐项展示责任成员、规则和权限范围。
@@ -30,7 +30,7 @@
 - `frontend/tests/collaborationConflictReview.test.ts`：组织者权限、真实 API 路径、版本和幂等参数、推荐入口门禁。
 - `backend/schemas/s2-t003-collaboration.schema.json`：发布合同使用 `allowedRelaxations`，并给成员视图补充 `collaborationVersion`。
 
-本次收口重跑 T029 及 T002/T003 直接相邻回归，共 `80 passed`；统一收口提交为 `1a7fcf7169f3e3656507be878e896bf4db1dd9fd`。最新后端全量 `633 passed in 78.57s`，前端 `52 passed`，build 通过，lint 通过并保留 2 条既有 warning，`git diff --check` 通过。
+历史上 T029 及 T002/T003 直接相邻回归为 `80 passed`，统一收口提交为 `1a7fcf7169f3e3656507be878e896bf4db1dd9fd`。本轮修改前基线审计为后端全量 `685 passed`、林粲涵专项 `119 passed`、前端 `52 passed`；最终收口验证为后端全量 `688 passed`、林粲涵及直接联动专项 `188 passed`、前端 `56 passed`、build/lint PASS、T024 Playwright `14 passed`。
 
 ## 诚实边界与仍需输入
 

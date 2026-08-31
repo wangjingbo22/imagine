@@ -3,12 +3,16 @@ import type {
   CandidatePlanRequest,
   CandidatePlanningTrip,
   CandidateTaskFact,
+  CreateDayTrip,
   CreateSingleDayTrip,
   GeoPoint,
   Place,
   ProviderRoute,
 } from '../domain/trip'
-import { compileAssistanceConstraints } from './assistanceConstraints.ts'
+import {
+  compileGroupAssistanceConstraints,
+  planningCareFromConstraints,
+} from './assistanceConstraints.ts'
 import {
   calculateElapsedSinceRestMinutes,
   scheduleTaskRanges,
@@ -66,7 +70,7 @@ function normalizedText(value: string) {
 }
 
 function validateCandidateFactChain(
-  trip: CreateSingleDayTrip | CandidatePlanningTrip,
+  trip: CreateDayTrip | CreateSingleDayTrip | CandidatePlanningTrip,
   startLocation: CandidateEndpointFact,
   endLocation: CandidateEndpointFact,
   places: Place[],
@@ -113,7 +117,7 @@ function validateCandidateFactChain(
 }
 
 export function buildCandidateRequestFromConfirmedTrip(
-  confirmedTrip: CreateSingleDayTrip | CandidatePlanningTrip,
+  confirmedTrip: CreateDayTrip | CreateSingleDayTrip | CandidatePlanningTrip,
   startLocation: CandidateEndpointFact,
   endLocation: CandidateEndpointFact,
   places: Place[],
@@ -126,20 +130,23 @@ export function buildCandidateRequestFromConfirmedTrip(
     places,
     routes,
   )
-  const profile = confirmedTrip.participants[0].assistanceProfile ?? null
+  const confirmedConstraints = compileGroupAssistanceConstraints(
+    confirmedTrip.participants.map((participant) => participant.assistanceProfile),
+  )
+  const care = planningCareFromConstraints(confirmedConstraints)
   const day = confirmedTrip.days[0]
   const ranges = scheduleTaskRanges(
     routes,
     day.timeWindow.start,
     day.timeWindow.end,
-    profile?.napWindow ?? null,
-    profile?.restInterval ?? null,
+    care.napWindow,
+    care.restInterval,
   )
   const elapsedSinceRestMinutes = calculateElapsedSinceRestMinutes(
     routes,
     ranges,
     day.timeWindow.start,
-    profile?.napWindow ?? null,
+    care.napWindow,
   )
   const taskFacts = buildCandidateTaskFacts(
     places,
@@ -166,6 +173,6 @@ export function buildCandidateRequestFromConfirmedTrip(
     startLocation,
     endLocation,
     taskFacts,
-    confirmedConstraints: profile ? compileAssistanceConstraints(profile) : [],
+    confirmedConstraints,
   }
 }

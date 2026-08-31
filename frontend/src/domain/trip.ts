@@ -297,8 +297,7 @@ export interface CreateSingleDayTrip {
   days: [TripDayInput]
 }
 
-export interface CandidatePlanningTrip extends Omit<CreateSingleDayTrip, 'status'> {
-  mode: 'SINGLE'
+export interface CandidatePlanningTrip extends Omit<CreateDayTrip, 'status'> {
   status: 'CONSTRAINT_CONFIRMED' | 'PLANNING' | 'PLAN_REVIEW'
 }
 
@@ -349,7 +348,7 @@ export interface CandidatePlanRequest {
   confirmedConstraints: PlanningConstraint[]
 }
 
-export interface PlanTripSnapshot extends Omit<CreateSingleDayTrip, 'status'> {
+export interface PlanTripSnapshot extends Omit<CreateDayTrip, 'status'> {
   status: 'PLAN_REVIEW'
 }
 

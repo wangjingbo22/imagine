@@ -256,6 +256,11 @@ async def test_four_memory_scenarios_are_complete_sorted_and_traceable(
     assert summary["planChangeCount"] == (1 if scenario["withV2"] else 0)
     assert summary["photoCount"] == (1 if scenario["withPhoto"] else 0)
     assert summary["assistanceProfile"] == profile
+    assert summary["participantCareResults"] == [{
+        "participantId": v1_request["trip"]["participants"][0]["participantId"],
+        "nickname": v1_request["trip"]["participants"][0]["nickname"],
+        "assistanceProfile": profile,
+    }]
 
     items = timeline["items"]
     occurred = [datetime.fromisoformat(item["occurredAt"]) for item in items]

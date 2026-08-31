@@ -26,7 +26,7 @@ from app.application.arrival_evidence_service import ArrivalEvidenceService
 from app.application.arrival_execution_service import ArrivalExecutionService
 from app.application.collaboration_service import CollaborationService
 from app.application.collaboration_planning_bridge import (
-    SingleCollaborationPlanningBridge,
+    CollaborationPlanningBridge,
 )
 from app.application.collaboration_ports import CollaborationReadinessGuard
 from app.application.collaboration_readiness import SqliteCollaborationReadinessGuard
@@ -306,7 +306,7 @@ def create_app(
         revisions=resolved_revision_port,
         evaluator=DeterministicHardConflictEvaluator(),
     )
-    collaboration_planning_bridge = SingleCollaborationPlanningBridge(
+    collaboration_planning_bridge = CollaborationPlanningBridge(
         workflow_service
     )
     resolved_readiness_guard = (

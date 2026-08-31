@@ -27,6 +27,7 @@ from app.schemas.execution_adjustment import (
 from app.schemas.plan import PlanVersion, PlanVersionStatus, ProposedPlanVersion
 from app.schemas.trip import (
     AssistanceProfile,
+    CreateDayTrip,
     CreateSingleDayTrip,
     Trip,
     TripStatus,
@@ -210,7 +211,7 @@ class SqliteWorkflowRepository:
 
     @staticmethod
     def _confirmed_trip_semantic_json(
-        trip: CreateSingleDayTrip,
+        trip: CreateDayTrip,
         *,
         ignore_participant_id: bool = True,
     ) -> str:
@@ -247,11 +248,11 @@ class SqliteWorkflowRepository:
 
     def _confirm_trip(
         self,
-        trip: CreateSingleDayTrip,
+        trip: CreateDayTrip,
         *,
         flow_kind: TripFlowKind,
         ignore_participant_id: bool,
-    ) -> CreateSingleDayTrip:
+    ) -> CreateDayTrip:
         """Persist one authoritative Trip without changing its registered flow."""
 
         trip_text = str(trip.trip_id)
@@ -294,7 +295,7 @@ class SqliteWorkflowRepository:
                 raise
 
         assert row is not None
-        return CreateSingleDayTrip.model_validate_json(
+        return CreateDayTrip.model_validate_json(
             row["trip_json"],
             strict=True,
         )
@@ -302,17 +303,21 @@ class SqliteWorkflowRepository:
     def confirm_trip(self, trip: CreateSingleDayTrip) -> CreateSingleDayTrip:
         """Persist the legacy parser-owned single-person Trip."""
 
-        return self._confirm_trip(
+        persisted = self._confirm_trip(
             trip,
             flow_kind=TripFlowKind.LEGACY_SINGLE,
             ignore_participant_id=True,
         )
+        return CreateSingleDayTrip.model_validate_json(
+            persisted.model_dump_json(by_alias=True),
+            strict=True,
+        )
 
     def confirm_collaboration_trip(
         self,
-        trip: CreateSingleDayTrip,
-    ) -> CreateSingleDayTrip:
-        """Project one READY collaboration revision into the existing planner store."""
+        trip: CreateDayTrip,
+    ) -> CreateDayTrip:
+        """Persist one READY collaboration revision for the shared planner."""
 
         return self._confirm_trip(
             trip,
@@ -338,7 +343,7 @@ class SqliteWorkflowRepository:
                 "Trip 尚未通过行程草稿确认，不允许进入规划",
             )
 
-        confirmed = CreateSingleDayTrip.model_validate_json(
+        confirmed = CreateDayTrip.model_validate_json(
             row["trip_json"],
             strict=True,
         )

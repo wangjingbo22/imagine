@@ -10,6 +10,8 @@ from .contracts import (
 )
 from .fact_registry_contracts import (
     ProviderFactIssueDraft,
+    ProviderFactPlacePayload,
+    ProviderFactPlaceSet,
     ProviderFactReferenceSummary,
     ProviderFactSetSummary,
     ProviderFactSnapshot,
@@ -24,6 +26,8 @@ __all__ = [
     "ProviderCandidateSelectionRequest",
     "ProviderFactBundle",
     "ProviderFactIssueDraft",
+    "ProviderFactPlacePayload",
+    "ProviderFactPlaceSet",
     "ProviderFactReferenceSummary",
     "ProviderFactSetSummary",
     "ProviderFactSnapshot",

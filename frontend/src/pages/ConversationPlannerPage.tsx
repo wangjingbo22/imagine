@@ -21,8 +21,8 @@ import {
 } from '../domain/collaboration'
 import type { TripDraftInput } from '../domain/trip'
 import {
+  collaborationPlanningDraft,
   invitationTokenFromText,
-  singleParticipantPlanningDraft,
 } from '../services/collaborationDraft'
 
 const questions = [
@@ -281,7 +281,7 @@ export function ConversationPlannerPage() {
       setFallback(null)
       setResult(created)
       window.sessionStorage.setItem(`organizer-token:${created.revision.tripId}`, created.organizerAccess.organizerToken)
-      setPlanningDraft(singleParticipantPlanningDraft(created.revision))
+      setPlanningDraft(collaborationPlanningDraft(created.revision))
       setCollaboration(await getOrganizerCollaboration(created.revision.tripId, created.organizerAccess.organizerToken))
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '对话解析失败，请稍后重试。')
@@ -361,7 +361,7 @@ export function ConversationPlannerPage() {
       setCollaboration(current)
 
       const draft = current.currentRevision === revision.revision
-        ? singleParticipantPlanningDraft(revision)
+        ? collaborationPlanningDraft(revision)
         : null
       setPlanningDraft(draft)
       if (draft && canEnterRecommendation(current)) {
@@ -446,8 +446,7 @@ export function ConversationPlannerPage() {
           </div>}
           {collaboration && hasMemberParticipants && links.length === 0 && <div className="invite-card invite-card--pending"><strong>成员邀请入口</strong><p>{!organizerConfirmed ? '点击上方“确认组织者资料并生成成员邀请链接”，生成后成员可直接打开或复制自己的专属链接。' : needsInvitations ? '点击上方“生成成员邀请链接”，生成后成员可直接打开或复制自己的专属链接。' : '邀请已创建，但当前标签页没有可展示的链接密钥。请返回创建页面重新发起一趟多人行程。'}</p></div>}
           {links.length > 0 && <div className="invite-card"><strong>成员邀请链接</strong><p>每个链接只对应一名成员，在该成员确认资料前可以重复打开。再次打开会生成新会话，并让该成员上一次打开的旧标签页失效。</p>{links.map((item, index) => <div className="invite-row" key={item.invitationId}><span>成员 {index + 1}</span><code>{item.link}</code><div className="invite-row__actions"><a className="button button--soft" href={item.link}><ArrowRight size={14} />进入成员页</a><button type="button" className="button button--soft" onClick={() => void navigator.clipboard.writeText(item.link)}><Copy size={14} />复制</button></div></div>)}</div>}
-          {collaboration && canEnterRecommendation(collaboration) && planningDraft && <button className="button button--primary" type="button" onClick={() => { window.sessionStorage.setItem(`s2-plan-context:${collaboration.tripId}`, JSON.stringify({ draft: planningDraft })); navigate(`/recommendation/${collaboration.tripId}`) }}>查看唯一推荐 <ArrowRight size={18} /></button>}
-          {collaboration && canEnterRecommendation(collaboration) && !planningDraft && <p className="form-error" role="status">协作状态已就绪，但多人 Trip 尚不能无损转换到现有单人规划契约。为避免伪造参与者或关怀事实，当前不会进入推荐页。</p>}
+          {collaboration && canEnterRecommendation(collaboration) && <button className="button button--primary" type="button" onClick={() => { if (planningDraft) window.sessionStorage.setItem(`s2-plan-context:${collaboration.tripId}`, JSON.stringify({ draft: planningDraft })); navigate(`/recommendation/${collaboration.tripId}`) }}>查看唯一推荐 <ArrowRight size={18} /></button>}
         </section>}
       </section>
     </main>

@@ -5,7 +5,7 @@
   "scope": "DAY_1",
   "verifiedAgainst": {
     "remoteBranch": "origin/main",
-    "remoteMainCommit": "012fa364894ffc7dd36a6dd91cdd21641550da06",
+    "remoteMainCommit": "90bef1439aee70a3b02675b385bba05f96a65cf6",
     "implementationCommit": "f376574a5c8c5c577d6ed43efd200293023b3b32",
     "verifiedAt": "2026-08-28"
   },
@@ -47,7 +47,8 @@
     ],
     "testFiles": [
       "backend/tests/test_s2_t008_candidate_selection_gateway.py",
-      "backend/tests/test_s2_t008_traceability.py"
+      "backend/tests/test_s2_t008_traceability.py",
+      "backend/tests/test_s2_t030_provider_candidate_issuance.py"
     ],
     "fixtures": [
       "backend/tests/fixtures/s2_t008/candidate_selection_request.json",
@@ -74,7 +75,9 @@
       "all-model-failures-return-deterministic-enumeration-with-sanitized-codes",
       "t006-registry-facts-are-projected-through-a-price-route-pass-free-adapter",
       "v2-recommendation-route-consumes-the-injected-strict-gateway-through-the-shared-orchestrator",
-      "formal-t009-route-builder-remains-an-external-production-dependency"
+    "formal-t009-route-builder-remains-an-external-production-dependency",
+    "preview-and-formal-gateway-use-the-same-canonical-facts-and-confirmed-trip-summary",
+    "selected-factref-order-is-preserved-through-the-signed-snapshot-and-v1"
     ]
   },
   "pbiTrace": {
@@ -96,7 +99,8 @@
     ],
     "testFiles": [
       "backend/tests/test_s2_t008_candidate_selection_gateway.py",
-      "backend/tests/test_s2_t008_traceability.py"
+      "backend/tests/test_s2_t008_traceability.py",
+      "backend/tests/test_s2_t030_provider_candidate_issuance.py"
     ],
     "fixtureFiles": [
       "backend/tests/fixtures/s2_t008/candidate_selection_request.json",
@@ -185,9 +189,9 @@
   ],
   "relatedDeliveryTrace": "docs/traceability/sprint2/lin_canhan_day1.json",
   "localVerification": {
-    "status": "LATEST_MAIN_FULL_REGRESSION_PASS",
+    "status": "LATEST_MAIN_POST_TRACE_REFRESH_FULL_PASS",
     "verifiedAt": "2026-08-28",
-    "latestMainCommit": "012fa364894ffc7dd36a6dd91cdd21641550da06",
+    "latestMainCommit": "90bef1439aee70a3b02675b385bba05f96a65cf6",
     "latestMainTraceCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_s2_t008_traceability.py",
     "latestMainTraceResult": "6 passed",
     "historicalBaselineCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
@@ -199,12 +203,18 @@
     "historicalFrontendBuild": "npm run build passed",
     "historicalFrontendLint": "npm run lint passed with 2 existing warnings",
     "latestMainClosureCommit": "1a7fcf7169f3e3656507be878e896bf4db1dd9fd",
-    "latestMainBackendResult": "633 passed in 78.57s",
-    "latestMainFrontendTest": "52 passed",
+    "baselineAuditScope": "ORIGIN_MAIN_PRE_TRACEABILITY_REFRESH",
+    "preClosureBackendResult": "685 passed",
+    "latestMainBackendResult": "688 passed",
+    "baselineLinFocusedResult": "119 passed",
+    "postClosureLinFocusedResult": "188 passed",
+    "latestMainFrontendTest": "56 passed",
     "latestMainFrontendBuild": "PASS",
-    "latestMainFrontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
+    "latestMainFrontendLint": "PASS",
+    "latestMainPlaywrightT024": "14 passed",
     "latestMainDiffCheck": "PASS",
-    "latestMainFunctionalRegression": "PASS"
+    "latestMainFunctionalRegression": "FULL_PASS",
+    "postTraceRefreshFullVerification": "PASS"
   },
   "externalEvidence": {
     "pullRequest": null,

@@ -1,6 +1,7 @@
 """Deterministic S2 candidate issuer and strict LLM-ranking boundary."""
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from hashlib import sha256
@@ -313,21 +314,19 @@ class RecommendationOrchestrationService:
         self,
         *,
         trip_id: UUID,
+        trip: Trip,
         facts: Sequence[FactRef],
-        city_code: str,
         interests: Sequence[str],
         must_visit: Sequence[str],
         avoid_places: Sequence[str],
-        care_need_labels: Sequence[str],
         members: Sequence["MemberPreference"],
     ) -> RecommendationBundle:
         """Serve the collaboration UI through the same T008 gateway.
 
-        The v2 conversation flow does not yet own a planning ``Trip`` at this
-        screen, so it cannot invoke the route-backed v1 decision method.  It
-        nevertheless reuses this orchestration object and the identical strict
-        model boundary for its provider-backed preview; final routing and HARD
-        validation remain in the v1 flow.
+        The v2 conversation flow projects its authoritative revision into the
+        same canonical ``Trip`` contract before this boundary.  Preview and the
+        route-backed formal path therefore expose identical model-safe facts;
+        final routing and HARD validation remain in the v1 flow.
         """
 
         trusted = TrustedRecommendationService()
@@ -357,22 +356,15 @@ class RecommendationOrchestrationService:
                         + ":"
                         + ",".join(item.fact_ref_id for item in candidates),
                     ),
-                    confirmed_trip_summary=ConfirmedTripSummary(
-                        city_code=city_code,
-                        participant_count=len(members),
-                        interest_tags=_stable_unique_text(interests, limit=12),
-                        must_visit_labels=_stable_unique_text(must_visit, limit=8),
-                        avoid_labels=_stable_unique_text(avoid_places, limit=8),
-                        care_need_labels=_stable_unique_text(
-                            care_need_labels,
-                            limit=8,
-                        ),
-                    ),
+                    confirmed_trip_summary=_canonical_confirmed_trip_summary(trip),
                     candidate_facts=tuple(
                         _safe_preview_candidate_fact(
                             facts_by_ref[item.fact_ref_id]
                         )
-                        for item in candidates
+                        for item in sorted(
+                            candidates,
+                            key=lambda candidate: candidate.fact_ref_id,
+                        )
                     ),
                     allowed_task_count=(3, 4),
                 )
@@ -615,6 +607,26 @@ def _strict_candidate_request(
     """
 
     trip = facts.trip
+    summary = _canonical_confirmed_trip_summary(trip)
+    candidate_facts = tuple(
+        _safe_candidate_fact(item, facts.provider_fact_digest)
+        for item in sorted(
+            facts.candidate_facts,
+            key=lambda candidate: candidate.place_fact_id,
+        )
+    )
+    return ProviderCandidateSelectionRequest(
+        schema_version="1.0",
+        trace_id=trace_id,
+        confirmed_trip_summary=summary,
+        candidate_facts=candidate_facts,
+        allowed_task_count=(3, 4),
+    )
+
+
+def _canonical_confirmed_trip_summary(trip: Trip) -> ConfirmedTripSummary:
+    """Build the one model-safe summary used by preview and formal selection."""
+
     interests: list[str] = []
     must_visit: list[str] = []
     avoid: list[str] = []
@@ -635,24 +647,13 @@ def _strict_candidate_request(
             if profile.avoid_stairs:
                 care.append("避开楼梯")
 
-    summary = ConfirmedTripSummary(
+    return ConfirmedTripSummary(
         city_code=trip.city_context.city_code,
         participant_count=len(trip.participants),
         interest_tags=_stable_unique_text(interests, limit=12),
         must_visit_labels=_stable_unique_text(must_visit, limit=8),
         avoid_labels=_stable_unique_text(avoid, limit=8),
         care_need_labels=_stable_unique_text(care, limit=8),
-    )
-    candidate_facts = tuple(
-        _safe_candidate_fact(item, facts.provider_fact_digest)
-        for item in facts.candidate_facts
-    )
-    return ProviderCandidateSelectionRequest(
-        schema_version="1.0",
-        trace_id=trace_id,
-        confirmed_trip_summary=summary,
-        candidate_facts=candidate_facts,
-        allowed_task_count=(3, 4),
     )
 
 
@@ -689,7 +690,13 @@ def _safe_candidate_fact(
 
 def _safe_preview_candidate_fact(fact: FactRef) -> ProviderCandidateFact:
     place = fact.place
-    digest = sha256(place.model_dump_json().encode("utf-8")).hexdigest()
+    canonical_payload = json.dumps(
+        place.model_dump(mode="json", by_alias=True),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    digest = sha256(canonical_payload.encode("utf-8")).hexdigest()
     source_label = {
         "ONLINE": "在线来源已核验",
         "VERIFIED_CACHE": "缓存来源已核验",
@@ -699,7 +706,7 @@ def _safe_preview_candidate_fact(fact: FactRef) -> ProviderCandidateFact:
         place_fact_id=fact.fact_ref_id,
         fact_digest=f"sha256:{digest}",
         display_name=place.name,
-        category_tags=((place.category,) if place.category else ()),
+        category_tags=(place.category or "PLACE",),
         known_attributes=(source_label,),
         risk_flags=(
             ("缓存时效待确认",)
@@ -855,16 +862,12 @@ def project_collaboration_recommendation_trip(
 
 
 def _proposal_orders(selected: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
-    candidates: list[tuple[str, ...]] = [selected, tuple(reversed(selected))]
-    if len(selected) == 3:
-        candidates.extend(
-            (
-                selected[1:] + selected[:1],
-                selected[2:] + selected[:2],
-            )
-        )
-    candidates.append(tuple(sorted(selected)))
-    return _unique_orders(candidates)
+    # A valid model proposal owns only the allowlisted place sequence it
+    # returned.  Deterministic code may validate or reject that sequence, but
+    # silently rotating/reversing it would make the preview and the signed
+    # route-backed recommendation disagree.  An unusable exact order falls
+    # through to the separate deterministic enumeration path above.
+    return (selected,)
 
 
 def _deterministic_orders(
@@ -1098,12 +1101,16 @@ class TrustedRecommendationService:
         if not ordered:
             return bundle
 
-        # Exhaustively evaluate at most 126 possible three/four-task selections.
+        # The recommendation contains only intermediate places.  Keep the
+        # proposal contract at two-to-three items so T011 can append the one
+        # independently verified return task and still produce three-to-four
+        # total plan tasks.  A model proposal already contains two or three
+        # items; deterministic fallback selects exactly three when available.
         # The comparison implements the published fairness key exactly:
         # minimum member score desc, average score desc, known price asc, then
         # a stable candidate-id tie break.
-        sizes = range(3, min(4, len(ordered)) + 1) if len(ordered) >= 3 else (len(ordered),)
-        possible_sets = (tasks for size in sizes for tasks in combinations(ordered, size))
+        target_size = min(3, len(ordered))
+        possible_sets = combinations(ordered, target_size)
         scored_sets = [(list(tasks), TrustedRecommendationService._score_members(tasks, members), facts_by_id) for tasks in possible_sets]
         tasks, scores, _ = min(
             scored_sets,

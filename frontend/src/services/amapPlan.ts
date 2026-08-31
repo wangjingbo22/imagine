@@ -2,13 +2,13 @@ import { tripApi } from '../api/tripApi'
 import { ApiError } from '../api/client'
 import type {
   AddressResolution,
-  AssistanceProfile,
   CandidateEndpointFact,
   CandidatePlanReview,
   CandidatePlanRequest,
   CandidatePlanningTrip,
   CandidateTaskFact,
   CityResolution,
+  CreateDayTrip,
   CreateSingleDayTrip,
   GeoPoint,
   Place,
@@ -23,11 +23,21 @@ import {
   buildCandidateTaskFacts,
 } from './candidateRequestBuilder'
 import {
+  compileGroupAssistanceConstraints,
+  planningCareFromConstraints,
+  type GroupPlanningCare,
+} from './assistanceConstraints'
+import {
   calculateElapsedSinceRestMinutes,
   scheduleTaskRanges,
   secondsSinceMidnight,
 } from './restClock'
 import { hasCompleteRouteRiskFacts, routeWalkingMeters } from './routeRiskFacts'
+import {
+  appendConfirmedReturnPlace,
+  selectedPlacesFromSignedFactSet,
+  type ConfirmedRecommendationSelection,
+} from './recommendationSelection'
 
 export type AmapPlanningPhase = 'CITY' | 'PLACES' | 'ROUTES' | 'PLAN'
 
@@ -46,6 +56,7 @@ export interface AmapPlanResult {
   planningIssue: PlanningIssue | null
   knownCostCents: number
   unknownPriceCount: number
+  recommendationTrace: ConfirmedRecommendationSelection | null
 }
 
 export interface PlanningIssue {
@@ -66,8 +77,9 @@ export interface AmapPlanOptions {
   extraQueries?: string[]
   excludePlaceIds?: string[]
   preferredMaxWalkMeters?: number
-  confirmedTrip?: CreateSingleDayTrip | CandidatePlanningTrip
+  confirmedTrip?: CreateDayTrip | CreateSingleDayTrip | CandidatePlanningTrip
   organizerToken?: string | null
+  recommendationSelection?: ConfirmedRecommendationSelection
 }
 
 export interface AmapReplanOptions extends AmapPlanOptions {
@@ -211,7 +223,9 @@ async function collectPlaces(
 
   for (const query of queries) {
     try {
-      const result = await providerCall(() => searchByQuery(tripId, city, query, options.organizerToken))
+      const result = await providerCall(
+        () => searchByQuery(tripId, city, query, options.organizerToken),
+      )
       buckets.push(result.filter((place) =>
         directDistanceMeters(city.cityContext.center, place.location) <= planningRadiusMeters &&
         !excludedIds.has(place.placeId) &&
@@ -230,7 +244,9 @@ async function collectPlaces(
     }
     try {
       buckets.push(
-        (await providerCall(() => searchByQuery(tripId, city, query, options.organizerToken))).filter((place) =>
+        (await providerCall(
+          () => searchByQuery(tripId, city, query, options.organizerToken),
+        )).filter((place) =>
           directDistanceMeters(city.cityContext.center, place.location) <= planningRadiusMeters &&
           !excludedIds.has(place.placeId) &&
           !isAvoided(place, fragments),
@@ -266,6 +282,40 @@ async function collectPlaces(
     )
   }
   return { places: selected, queries: successfulQueries }
+}
+
+async function collectConfirmedRecommendationPlaces(
+  tripId: string,
+  city: CityResolution,
+  selection: ConfirmedRecommendationSelection,
+  organizerToken: string | null | undefined,
+) {
+  if (!organizerToken) {
+    throw new Error('组织者凭证缺失，不能核验已确认的 FactRef 推荐。')
+  }
+  if (selection.tripId !== tripId) {
+    throw new Error('已确认推荐不属于当前 Trip，请刷新后重新确认。')
+  }
+  const factSet = (
+    await tripApi.getProviderFactSetPlaces(
+      tripId,
+      selection.factSetId,
+      selection.providerFactDigest,
+      organizerToken,
+    )
+  ).data
+  const places = selectedPlacesFromSignedFactSet(factSet, selection)
+  for (const place of places) {
+    if (place.cityCode !== city.cityContext.cityCode) {
+      throw new Error(`推荐地点 ${place.placeId} 与已确认城市不一致，请刷新后重新确认。`)
+    }
+  }
+  return {
+    places,
+    queries: selection.selectedPlaces.map(
+      (selected) => `FactRef ${selected.factRefId}`,
+    ),
+  }
 }
 
 function endpointFact(
@@ -308,7 +358,7 @@ function returnEndpointPlace(
 
 async function resolveConfirmedEndpoints(
   tripId: string,
-  trip: CreateSingleDayTrip | CandidatePlanningTrip,
+  trip: CreateDayTrip | CreateSingleDayTrip | CandidatePlanningTrip,
   organizerToken?: string | null,
 ) {
   if (trip.tripId !== tripId) {
@@ -406,17 +456,17 @@ async function selectRoute(
   city: CityResolution,
   origin: GeoPoint,
   destination: GeoPoint,
-  confirmedProfile: AssistanceProfile | null | undefined,
+  confirmedCare: GroupPlanningCare | undefined,
   preferredMaxWalkMeters?: number,
   organizerToken?: string | null,
 ) {
   const maxWalkLimit = preferredMaxWalkMeters !== undefined
     ? preferredMaxWalkMeters
-    : confirmedProfile !== undefined
-      ? confirmedProfile?.walkLimits.maxContinuousMeters ?? null
+    : confirmedCare !== undefined
+      ? confirmedCare.maxContinuousMeters
       : draft.assistanceProfile.maxSegmentWalkMeters
-  const maxTransfers = confirmedProfile !== undefined
-    ? confirmedProfile?.maxTransfers ?? null
+  const maxTransfers = confirmedCare !== undefined
+    ? confirmedCare.maxTransfers
     : draft.assistanceProfile.maxTransfers
   const maxWalk = maxWalkLimit === null
     ? Number.POSITIVE_INFINITY
@@ -433,7 +483,14 @@ async function selectRoute(
   for (const mode of attempts) {
     try {
       const route = await providerCall(
-        () => requestFirstRoute(tripId, city, origin, destination, mode, organizerToken),
+        () => requestFirstRoute(
+          tripId,
+          city,
+          origin,
+          destination,
+          mode,
+          organizerToken,
+        ),
       )
       if (!hasCompleteRouteRiskFacts(route)) {
         continue
@@ -632,13 +689,40 @@ async function createAmapPlan(
   if (city.cityContext.cityCode !== confirmedTrip.cityContext.cityCode) {
     throw new Error('Provider 城市解析与 T004 已确认 Trip 不一致，请重新确认行程。')
   }
-  const endpoints = await resolveConfirmedEndpoints(tripId, confirmedTrip, options.organizerToken)
-  onPhase?.('PLACES', `已解析 cityCode ${city.cityContext.cityCode}，正在检索同城地点并保留返程任务`)
-  const collected = await collectPlaces(tripId, draft, city, options)
-  const intermediatePlaces = orderByShortestNextSegment(collected.places).slice(0, 3)
-  const places = [...intermediatePlaces, endpoints.returnPlace]
+  const endpoints = await resolveConfirmedEndpoints(
+    tripId,
+    confirmedTrip,
+    options.organizerToken,
+  )
+  const selection = options.recommendationSelection
+  onPhase?.(
+    'PLACES',
+    selection
+      ? `正在核验已确认 FactRef 集合 ${selection.factSetId}`
+      : `已解析 cityCode ${city.cityContext.cityCode}，正在检索同城地点并保留返程任务`,
+  )
+  const collected = selection
+    ? await collectConfirmedRecommendationPlaces(
+        tripId,
+        city,
+        selection,
+        options.organizerToken,
+      )
+    : await collectPlaces(tripId, draft, city, options)
+  const intermediatePlaces = selection
+    ? collected.places
+    : orderByShortestNextSegment(collected.places).slice(0, 3)
+  const places = appendConfirmedReturnPlace(
+    intermediatePlaces,
+    endpoints.returnPlace,
+  )
   const { queries } = collected
   onPhase?.('ROUTES', `已获得 ${places.length} 个真实地点，正在逐段规划路线`)
+  const confirmedCare = planningCareFromConstraints(
+    compileGroupAssistanceConstraints(
+      confirmedTrip.participants.map((participant) => participant.assistanceProfile),
+    ),
+  )
 
   const origins = [
     endpoints.startLocation.location,
@@ -652,7 +736,7 @@ async function createAmapPlan(
       city,
       origins[index],
       place.location,
-      confirmedTrip.participants[0].assistanceProfile ?? null,
+      confirmedCare,
       options.preferredMaxWalkMeters,
       options.organizerToken,
     ))
@@ -697,6 +781,7 @@ async function createAmapPlan(
     planningIssue,
     knownCostCents: plan.totalCostCents,
     unknownPriceCount,
+    recommendationTrace: selection ?? null,
   }
 }
 
@@ -711,6 +796,9 @@ export async function buildAmapReplanCandidate(
     throw new Error('原始候选事实与当前 tripId 不一致，不能生成 Plan V2。')
   }
   const baseFacts = baseRequest.taskFacts
+  const confirmedCare = planningCareFromConstraints(
+    baseRequest.confirmedConstraints,
+  )
   const prefixLength = Math.max(
     0,
     Math.min(baseFacts.length, options.lockedThroughIndex + 1),
@@ -738,7 +826,7 @@ export async function buildAmapReplanCandidate(
     const recalculatedElapsed = elapsedForFacts(
       baseFacts,
       baseRequest.trip.days[0].timeWindow.start,
-      baseRequest.trip.participants[0].assistanceProfile?.napWindow ?? null,
+      confirmedCare.napWindow,
     )
     const taskFacts = baseFacts.map((fact, index) => index === baseFacts.length - 1
       ? {
@@ -791,7 +879,7 @@ export async function buildAmapReplanCandidate(
       city,
       origin,
       place.location,
-      baseRequest.trip.participants[0].assistanceProfile ?? null,
+      confirmedCare,
       options.preferredMaxWalkMeters,
       options.organizerToken,
     ))
@@ -803,8 +891,8 @@ export async function buildAmapReplanCandidate(
     suffixRoutes,
     previousFact?.endAt ?? day.timeWindow.start,
     day.timeWindow.end,
-    baseRequest.trip.participants[0].assistanceProfile?.napWindow ?? null,
-    baseRequest.trip.participants[0].assistanceProfile?.restInterval ?? null,
+    confirmedCare.napWindow,
+    confirmedCare.restInterval,
   )
   const provisionalSuffixFacts = buildCandidateTaskFacts(
     suffixPlaces,
@@ -829,7 +917,7 @@ export async function buildAmapReplanCandidate(
   const recalculatedElapsed = elapsedForFacts(
     provisionalFacts,
     day.timeWindow.start,
-    baseRequest.trip.participants[0].assistanceProfile?.napWindow ?? null,
+    confirmedCare.napWindow,
   )
   const taskFacts = provisionalFacts.map((fact, index) => index < prefixLength
     ? fact
@@ -866,6 +954,7 @@ function planRequestKey(
     excludePlaceIds: options.excludePlaceIds ?? [],
     preferredMaxWalkMeters: options.preferredMaxWalkMeters ?? null,
     confirmedTrip: options.confirmedTrip ?? null,
+    recommendationSelection: options.recommendationSelection ?? null,
   })
 }
 

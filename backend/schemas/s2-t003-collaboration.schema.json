@@ -1516,6 +1516,11 @@
           "title": "Naturallanguagerequest",
           "type": "string"
         },
+        "reviewedFallback": {
+          "default": false,
+          "title": "Reviewedfallback",
+          "type": "boolean"
+        },
         "schemaVersion": {
           "const": "1.0",
           "title": "Schemaversion",

@@ -93,3 +93,38 @@ test('missing optional assistance data stays unconstrained instead of inventing 
     restIntervalMinutes: null,
   })
 })
+
+test('group planning facts restore every member preference and the strictest shared care limits', () => {
+  const request = requestFixture()
+  request.trip.mode = 'GROUP'
+  request.trip.participants.push({
+    participantId: '33333333-3333-4333-8333-333333333333',
+    nickname: '同行成员',
+    budgetCapCents: 30_000,
+    preferences: [
+      { type: 'INTEREST', value: '建筑', weight: 4, isHard: false },
+      { type: 'MUST_VISIT', value: '天坛', weight: 5, isHard: true },
+      { type: 'AVOID_PLACE', value: '拥挤商场', weight: 5, isHard: true },
+    ],
+    assistanceProfile: {
+      type: 'LOW_STAMINA',
+      childAge: null,
+      walkLimits: { maxContinuousMeters: 320, maxDailyMeters: null },
+      maxTransfers: 0,
+      restInterval: 45,
+      napWindow: null,
+      avoidStairs: false,
+    },
+  })
+
+  const restored = restoreDraftFromPlanningFacts(request)
+  assert.deepEqual(restored.interests, ['博物馆', '建筑'])
+  assert.deepEqual(restored.mustVisit, ['故宫', '天坛'])
+  assert.deepEqual(restored.avoidPlaces, ['楼梯', '拥挤商场'])
+  assert.equal(restored.assistanceMode, 'low-mobility')
+  assert.deepEqual(restored.assistanceProfile, {
+    maxSegmentWalkMeters: 320,
+    maxTransfers: 0,
+    restIntervalMinutes: 45,
+  })
+})

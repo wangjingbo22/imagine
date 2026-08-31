@@ -1,6 +1,6 @@
 # 林粲涵 Sprint 2 Day1：S2-T019 / S2-T020 追溯
 
-本追溯已在团队 `main@012fa364894ffc7dd36a6dd91cdd21641550da06` 上重新核对；原交付基线仍为 `a43ad37a5c8b97d2b90507fa9966998bfee038b9`，林粲涵 Day1/Day2 联动修复的核心实现提交仍为 `f376574a5c8c5c577d6ed43efd200293023b3b32`，`occurredAt` 必填与幂等合同加固提交仍为 `0856b745075156e3da5365e74852aaa192329325`。两者保留 Day1 的 T019/T020 边界，并补齐已确认事件到 T021 的 `eventId` 联动。
+本追溯已在团队 `main@90bef1439aee70a3b02675b385bba05f96a65cf6` 上重新核对；原交付基线仍为 `a43ad37a5c8b97d2b90507fa9966998bfee038b9`，林粲涵 Day1/Day2 联动修复的核心实现提交仍为 `f376574a5c8c5c577d6ed43efd200293023b3b32`，`occurredAt` 必填与幂等合同加固提交仍为 `0856b745075156e3da5365e74852aaa192329325`。两者保留 Day1 的 T019/T020 边界，并补齐已确认事件到 T021 的 `eventId` 联动。
 
 ## PBI / AC / Task
 
@@ -33,9 +33,9 @@ S2-T019 rawText/currentTask
 
 ## 验收结果
 
-- 最新 `main@012fa36` 的 Day1 追溯专项：`4 passed`。
+- 最新基线 `main@90bef14` 的 Day1 追溯专项：`4 passed`。
 - S2-T019/T020 专项 `24 passed`、后端全量 `528 passed`、前端 `32 passed`、build/lint 与 diff check，均是原交付时基于 `a43ad37` 的历史记录；本次没有把这些数字当作最新 main 的功能重跑结果。
-- 最新 main 加收口提交已重跑：后端全量 `633 passed in 78.57s`，前端 `52 passed`，build 通过，lint 通过并保留 2 条既有 warning，diff check 通过。
+- 本轮修改前基线审计为后端全量 `685 passed`、林粲涵专项 `119 passed`、前端 `52 passed`；完成推荐事实谱系收口后，最终验证为后端全量 `688 passed`、林粲涵及直接联动专项 `188 passed`、前端 `56 passed`、build/lint PASS、T024 375/768 Playwright `14 passed`。
 - T023 前端已完成本地契约与页面接线；公网浏览器链路仍待部署验收。
 
 机器可读文件为 `docs/traceability/sprint2/lin_canhan_day1.json`；测试会逐项验证新版需求范围、提交哈希、模块与验收文件、已确认事件幂等、T019→T021 `eventId` 联动以及产品阈值的 `PENDING` 状态。

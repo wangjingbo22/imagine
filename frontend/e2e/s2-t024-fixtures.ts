@@ -130,10 +130,10 @@ export const tripSummary = {
 
 export const recommendationBundle = {
   candidates: Array.from({ length: 6 }, (_, index) => ({ factRefId: `place-fact-${index + 1}`, placeId: `place-${index + 1}`, name: ['中国国家博物馆', '故宫博物院', '景山公园', '天坛公园', '北海公园', '首都博物馆'][index], category: '历史文化' })),
-  recommendations: [{ placeId: 'place-1', reason: '符合历史文化兴趣' }, { placeId: 'place-2', reason: '与起终点顺路' }, { placeId: 'place-3', reason: '提供休息缓冲' }],
+  recommendations: [{ placeId: 'place-3', reason: '提供休息缓冲' }, { placeId: 'place-1', reason: '符合历史文化兴趣' }, { placeId: 'place-2', reason: '与起终点顺路' }],
   usedDeterministicFallback: false,
   trustedPlan: {
-    tasks: Array.from({ length: 3 }, (_, index) => ({ factRefId: `place-fact-${index + 1}`, placeId: `place-${index + 1}`, name: ['中国国家博物馆', '故宫博物院', '景山公园'][index], category: '历史文化' })),
+    tasks: [2, 0, 1].map((index) => ({ factRefId: `place-fact-${index + 1}`, placeId: `place-${index + 1}`, name: ['中国国家博物馆', '故宫博物院', '景山公园'][index], category: '历史文化' })),
     memberScores: [{ participantId: '40000000-0000-4000-8000-000000000024', score: 92, penaltyRuleIds: [], reasons: ['关怀约束与预算均满足'] }],
     lowestMemberScore: 92,
     carePoints: ['单段步行不超过500米', '每90分钟安排休息'],
@@ -141,6 +141,15 @@ export const recommendationBundle = {
     unknownFacts: [],
     confirmationMessage: '地点事实与关怀约束已核验，请组织者确认。',
   },
+  factSetId: 'fact-set-t024-browser-fixture',
+  providerFactDigest: 'c'.repeat(64),
+  provenance: Array.from({ length: 6 }, (_, index) => ({
+    factRefId: `place-fact-${index + 1}`,
+    providerObjectId: `place-${index + 1}`,
+    sourceStatus: 'ONLINE',
+    fetchedAt: '2026-09-05T01:00:00Z',
+    isStale: false,
+  })),
 }
 
 export const organizerRevision = {

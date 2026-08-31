@@ -15,7 +15,7 @@ TRACE_PATH = (
     / "sprint2"
     / "lin_canhan_s2_t008_day1.json"
 )
-REMOTE_MAIN_COMMIT = "012fa364894ffc7dd36a6dd91cdd21641550da06"
+REMOTE_MAIN_COMMIT = "90bef1439aee70a3b02675b385bba05f96a65cf6"
 IMPLEMENTATION_COMMIT = "f376574a5c8c5c577d6ed43efd200293023b3b32"
 HISTORICAL_BASELINE_COMMIT = "a43ad37a5c8b97d2b90507fa9966998bfee038b9"
 CLOSURE_COMMIT = "1a7fcf7169f3e3656507be878e896bf4db1dd9fd"
@@ -221,7 +221,7 @@ def test_responsibility_boundary_forbids_planning_decisions() -> None:
 
 def test_local_verification_records_the_actual_acceptance_run() -> None:
     assert _trace()["localVerification"] == {
-        "status": "LATEST_MAIN_FULL_REGRESSION_PASS",
+        "status": "LATEST_MAIN_POST_TRACE_REFRESH_FULL_PASS",
         "verifiedAt": "2026-08-28",
         "latestMainCommit": REMOTE_MAIN_COMMIT,
         "latestMainTraceCommand": (
@@ -244,10 +244,16 @@ def test_local_verification_records_the_actual_acceptance_run() -> None:
         "historicalFrontendBuild": "npm run build passed",
         "historicalFrontendLint": "npm run lint passed with 2 existing warnings",
         "latestMainClosureCommit": CLOSURE_COMMIT,
-        "latestMainBackendResult": "633 passed in 78.57s",
-        "latestMainFrontendTest": "52 passed",
+        "baselineAuditScope": "ORIGIN_MAIN_PRE_TRACEABILITY_REFRESH",
+        "preClosureBackendResult": "685 passed",
+        "latestMainBackendResult": "688 passed",
+        "baselineLinFocusedResult": "119 passed",
+        "postClosureLinFocusedResult": "188 passed",
+        "latestMainFrontendTest": "56 passed",
         "latestMainFrontendBuild": "PASS",
-        "latestMainFrontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
+        "latestMainFrontendLint": "PASS",
+        "latestMainPlaywrightT024": "14 passed",
         "latestMainDiffCheck": "PASS",
-        "latestMainFunctionalRegression": "PASS",
+        "latestMainFunctionalRegression": "FULL_PASS",
+        "postTraceRefreshFullVerification": "PASS",
     }

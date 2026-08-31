@@ -19,7 +19,7 @@ import { invitationTokenFromText } from '../services/collaborationDraft'
 const questions = [
   ['trip', '这次行程的目标、城市、日期和可用时间是什么？'],
   ['party', '同行人数和组织者是谁？'],
-  ['endpoints_budget', '你的出发/结束地点，以及共享预算安排是什么？'],
+  ['endpoints_budget', '起点、终点与共享预算安排是什么？'],
   ['preferences', '你喜欢什么、必去哪里、希望避开什么？'],
   ['assistance', '你的预算上限、步行、换乘、休息或关怀限制是什么？'],
   ['confirm', '请确认以上描述；还有什么不能妥协的限制？'],
@@ -47,8 +47,6 @@ export function MemberConversationPage() {
   const [view, setView] = useState<MemberSessionView | null>(null)
   const [description, setDescription] = useState('')
   const [answers, setAnswers] = useState<string[]>(Array(questions.length).fill(''))
-  const [tripFields, setTripFields] = useState({ city: '', date: '', startTime: '', endTime: '' })
-  const [routeFields, setRouteFields] = useState({ start: '', end: '', budget: '' })
   const [step, setStep] = useState(0)
   const [reviewing, setReviewing] = useState(false)
   const [fallback, setFallback] = useState<FixedQuestionFallbackResponse | null>(null)
@@ -91,14 +89,6 @@ export function MemberConversationPage() {
         setView(current)
         const shared = current.sharedTrip
         const participant = current.participant
-        setTripFields({
-          city: shared.cityName ?? '', date: shared.travelDate ?? '',
-          startTime: shared.startTime ?? '', endTime: shared.endTime ?? '',
-        })
-        setRouteFields({
-          start: shared.startLocationText ?? '', end: shared.endLocationText ?? '',
-          budget: shared.budgetCents === null ? '' : String(shared.budgetCents / 100),
-        })
         setDescription(`参加组织者创建的${shared.cityName ?? ''}行程，并独立确认我的个人偏好与关怀限制。`)
         setAnswers([
           `城市：${shared.cityName ?? ''}；日期：${shared.travelDate ?? ''}；时间：${shared.startTime ?? ''}到${shared.endTime ?? ''}`,
@@ -122,35 +112,13 @@ export function MemberConversationPage() {
   }, [token])
 
   const ready = Boolean(description.trim() && answers.every((answer) => answer.trim()))
-  const currentStepReady = step === 0
-    ? Boolean(tripFields.city.trim() && tripFields.date.trim() && tripFields.startTime.trim() && tripFields.endTime.trim())
-    : step === 2
-      ? Boolean(routeFields.start.trim() && routeFields.end.trim() && routeFields.budget.trim())
-      : Boolean(answers[step].trim())
+  const currentStepReady = Boolean(answers[step].trim())
   const hasBlockingIssue = view?.confirmationItems.some((item) => item.code !== 'CONFLICT') ?? false
   const reviewedFallbackCount = reviewedFallbackAnswers.filter(Boolean).length
   const fallbackReviewComplete = reviewedFallbackCount === questions.length
 
   function updateAnswer(value: string) {
     setAnswers((items) => items.map((item, index) => index === step ? value : item))
-  }
-
-  function updateTripField(field: keyof typeof tripFields, value: string) {
-    setTripFields((current) => {
-      const next = { ...current, [field]: value }
-      setAnswers((items) => items.map((item, index) => index === 0
-        ? `目的城市：${next.city}；出行日期：${next.date}；可用时间：${next.startTime}到${next.endTime}` : item))
-      return next
-    })
-  }
-
-  function updateRouteField(field: keyof typeof routeFields, value: string) {
-    setRouteFields((current) => {
-      const next = { ...current, [field]: value }
-      setAnswers((items) => items.map((item, index) => index === 2
-        ? `从${next.start}出发；结束地：${next.end}；共享预算：${next.budget}元` : item))
-      return next
-    })
   }
 
   async function submit(reviewedFallback = false) {
@@ -238,7 +206,12 @@ export function MemberConversationPage() {
       <label className="field-label" htmlFor="member-goal">先说说你对这趟旅行的期待</label>
       <textarea id="member-goal" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="例如：我更喜欢慢节奏，也不想走太久。" />
       <section className="draft-confirmation"><div className="draft-confirmation__heading"><span><Sparkles size={18} /></span><div><strong>问题 {step + 1} / 6</strong><p>{questions[step][1]}</p></div></div>
-        {step === 0 ? <div className="question-field-cards question-field-cards--trip"><label><span><MapPin size={16} />目的城市</span><input value={tripFields.city} onChange={(event) => updateTripField('city', event.target.value)} placeholder="例如：杭州" /></label><label><span><CalendarDays size={16} />出行日期</span><input type="date" value={tripFields.date} onChange={(event) => updateTripField('date', event.target.value)} /></label><fieldset className="time-picker-card"><legend><Clock3 size={16} />可用时间</legend><div><label>开始<input type="time" value={tripFields.startTime} onChange={(event) => updateTripField('startTime', event.target.value)} /></label><span>—</span><label>结束<input type="time" value={tripFields.endTime} onChange={(event) => updateTripField('endTime', event.target.value)} /></label></div></fieldset></div> : step === 2 ? <div className="question-field-cards question-field-cards--route"><label><span><MapPin size={16} />出发地</span><input value={routeFields.start} onChange={(event) => updateRouteField('start', event.target.value)} placeholder="例如：杭州东站" /></label><label><span><MapPin size={16} />结束地</span><input value={routeFields.end} onChange={(event) => updateRouteField('end', event.target.value)} placeholder="例如：回到杭州东站" /></label><label><span><WalletCards size={16} />共享预算</span><input inputMode="decimal" value={routeFields.budget} onChange={(event) => updateRouteField('budget', event.target.value)} placeholder="例如：500" /></label></div> : <textarea value={answers[step]} onChange={(event) => updateAnswer(event.target.value)} placeholder="请输入你的回答" />}
+        {step < 3 ? <div className="shared-trip-card__grid" role="group" aria-label="组织者已确认的共享行程，只读">
+          {step === 0 && <><article><MapPin size={15} /><span>目的城市</span><strong>{view.sharedTrip.cityName || '待组织者补充'}</strong></article><article><CalendarDays size={15} /><span>出行日期</span><strong>{view.sharedTrip.travelDate || '待组织者补充'}</strong></article><article><Clock3 size={15} /><span>可用时间</span><strong>{view.sharedTrip.startTime && view.sharedTrip.endTime ? `${view.sharedTrip.startTime} — ${view.sharedTrip.endTime}` : '待组织者补充'}</strong></article></>}
+          {step === 1 && <article><UsersRound size={15} /><span>成员权限</span><strong>同行人数与组织者由创建者管理</strong></article>}
+          {step === 2 && <><article><MapPin size={15} /><span>起终点</span><strong>{view.sharedTrip.startLocationText || '待补充'} → {view.sharedTrip.endLocationText || '待补充'}</strong></article><article><WalletCards size={15} /><span>共享预算</span><strong>{view.sharedTrip.budgetCents === null ? '待补充' : `¥${view.sharedTrip.budgetCents / 100}`}</strong></article></>}
+        </div> : <textarea value={answers[step]} onChange={(event) => updateAnswer(event.target.value)} placeholder="请输入你的回答" />}
+        {step < 3 && <p className="field-help" role="status">这是组织者确认的共同安排。成员会话只能核对，不能改写共享事实。</p>}
         <div className="planner-actions"><button className="button button--ghost" type="button" disabled={step === 0 || loading} onClick={() => setStep((value) => value - 1)}>上一个问题</button>{step < 5 ? <button className="button button--primary" type="button" disabled={!currentStepReady || loading} onClick={() => setStep((value) => value + 1)}>下一个问题 <ArrowRight size={18} /></button> : <button className="button button--primary" type="button" disabled={!ready || loading} onClick={() => void submit()}>整理并查看确认 <ArrowRight size={18} /></button>}</div>
       </section>
     </>}

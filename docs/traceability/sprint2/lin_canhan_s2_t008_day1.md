@@ -2,7 +2,7 @@
 
 本交付对应 `S2-T008 / PBI-08-A / AC-08-A`（Must；修订表当前剩余工时为 0h）。需求口径来自 `doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx` 的 `SprintBacklog模板!A12:V12`、`LLM接入设计!A6:K6` 与 `LLM JSON契约!A5:K5`。
 
-实现提交仍为 `f376574a5c8c5c577d6ed43efd200293023b3b32`，本次兼容性核对基线更新为 `origin/main@012fa364894ffc7dd36a6dd91cdd21641550da06`，统一收口提交为 `1a7fcf7169f3e3656507be878e896bf4db1dd9fd`。机器可读追溯见 `lin_canhan_s2_t008_day1.json`；同一负责人的 S2-T019/T020 追溯见 `lin_canhan_day1.json`。
+实现提交仍为 `f376574a5c8c5c577d6ed43efd200293023b3b32`，本次兼容性核对基线更新为 `origin/main@90bef1439aee70a3b02675b385bba05f96a65cf6`，统一收口提交为 `1a7fcf7169f3e3656507be878e896bf4db1dd9fd`。机器可读追溯见 `lin_canhan_s2_t008_day1.json`；同一负责人的 S2-T019/T020 追溯见 `lin_canhan_day1.json`。
 
 ## PBI → AC → Task → 模块 → 验收证据
 
@@ -36,9 +36,9 @@
 
 ## 本地验收结果
 
-- 最新 `main@012fa36` 的 T008 追溯专项：`6 passed`。
+- 最新基线 `main@90bef14` 的 T008 追溯专项：`6 passed`。
 - T006/T008/T009 与推荐就绪守卫聚焦回归 `87 passed`、后端全量 `528 passed`、前端 `32 passed` 以及 build/lint 结果，均是原实现交付时基于 `a43ad37` 的历史记录，本次追溯刷新没有把它们冒充为最新 main 的重跑结果。
-- 最新 main 加收口提交已重跑：后端全量 `633 passed in 78.57s`，前端 `52 passed`，build 通过，lint 通过并保留 2 条既有 warning，diff check 通过。
+- 本轮修改前基线审计为后端全量 `685 passed`、林粲涵专项 `119 passed`、前端 `52 passed`；完成 T030→T008→签发快照→V1 顺序谱系收口后，最终验证为后端全量 `688 passed`、林粲涵及直接联动专项 `188 passed`、前端 `56 passed`、build/lint PASS、T024 Playwright `14 passed`。
 - 公网真实 FactRef、RouteBuilder 和百炼调用仍待外部验收。
 
 精确命令以 JSON 中 `localVerification` 为准；PR、CI、QA、PO、真实模型调用、生产 `RouteCandidateBuilderPort` 和公网 Provider 路线验证未发生时保持为空，不用追溯测试或本地 Mock 结果冒充外部证据。真实百炼验收还需要只配置在部署 Secret 中的已轮换 `BAILIAN_API_KEY`。

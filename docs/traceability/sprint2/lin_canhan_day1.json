@@ -3,8 +3,8 @@
   "sprint": "Sprint2",
   "deliveryDay": "Day1",
   "owner": "林粲涵",
-  "verifiedAgainstMainCommit": "012fa364894ffc7dd36a6dd91cdd21641550da06",
-  "integratedWithMainCommit": "012fa364894ffc7dd36a6dd91cdd21641550da06",
+  "verifiedAgainstMainCommit": "90bef1439aee70a3b02675b385bba05f96a65cf6",
+  "integratedWithMainCommit": "90bef1439aee70a3b02675b385bba05f96a65cf6",
   "deliveryBaseCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
   "implementationCommit": "f376574a5c8c5c577d6ed43efd200293023b3b32",
   "contractHardeningCommit": "0856b745075156e3da5365e74852aaa192329325",
@@ -143,7 +143,7 @@
       "from": "S2-T019",
       "to": "S2-T023",
       "artifact": "ExecutionEventDraft plus fixed clarification questions",
-      "status": "FIXTURE_AND_HTTP_CONTRACT_READY_UI_NOT_IMPLEMENTED_HERE"
+      "status": "T019_T020_CONTRACT_CONSUMED_BY_LOCAL_T023_UI_PUBLIC_E2E_PENDING"
     },
     {
       "from": "S2-T020",
@@ -159,11 +159,11 @@
     "same idempotencyKey requires identical payload and UTC-normalized occurredAt",
     "AssistanceProfile and S1-T007 confirmedConstraints are unchanged",
     "S2-T021 resolves eventId within the Trip and matches it to CURRENT and the inline confirmed adjustment",
-    "no frontend component is implemented by this delivery"
+    "T019 and T020 own no frontend component; downstream S2-T023 is locally integrated and public-browser E2E remains pending"
   ],
   "localVerification": {
-    "status": "LATEST_MAIN_FULL_REGRESSION_PASS",
-    "latestMainCommit": "012fa364894ffc7dd36a6dd91cdd21641550da06",
+    "status": "LATEST_MAIN_POST_TRACE_REFRESH_FULL_PASS",
+    "latestMainCommit": "90bef1439aee70a3b02675b385bba05f96a65cf6",
     "latestMainTraceCommand": "python -B -m pytest -p no:cacheprovider -q backend/tests/test_s2_lin_canhan_day1_traceability.py",
     "latestMainTraceResult": "4 passed",
     "historicalBaselineCommit": "a43ad37a5c8b97d2b90507fa9966998bfee038b9",
@@ -176,20 +176,26 @@
     "historicalFrontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
     "historicalDiffCheck": "PASS",
     "latestMainClosureCommit": "1a7fcf7169f3e3656507be878e896bf4db1dd9fd",
-    "latestMainBackendResult": "633 passed in 78.57s",
-    "latestMainFrontendTest": "52 passed",
+    "baselineAuditScope": "ORIGIN_MAIN_PRE_TRACEABILITY_REFRESH",
+    "preClosureBackendResult": "685 passed",
+    "latestMainBackendResult": "688 passed",
+    "baselineLinFocusedResult": "119 passed",
+    "postClosureLinFocusedResult": "188 passed",
+    "latestMainFrontendTest": "56 passed",
     "latestMainFrontendBuild": "PASS",
-    "latestMainFrontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
+    "latestMainFrontendLint": "PASS",
+    "latestMainPlaywrightT024": "14 passed",
     "latestMainDiffCheck": "PASS",
-    "latestMainFunctionalRegression": "PASS"
+    "latestMainFunctionalRegression": "FULL_PASS",
+    "postTraceRefreshFullVerification": "PASS"
   },
   "productDecisionsStillNeeded": [
     "PO must confirm MILD MODERATE SEVERE walking and rest thresholds",
     "PO must confirm whether lateMinutes beyond remaining time compiles to zero or returns an immediate conflict",
-    "Wang Jingbo must confirm S2-T023 endpoint and fixed question copy consumption"
+    "S2-T023 fixed clarification copy must remain aligned with the frozen six-question flow during public-browser acceptance"
   ],
   "externalAcceptanceStillNeeded": [
-    "S2-T023 frontend consumption and public-browser acceptance remain outside this delivery",
+    "S2-T023 frontend consumption is locally integrated; public-browser acceptance remains pending",
     "live Bailian acceptance requires a valid rotated BAILIAN_API_KEY supplied only through deployment secrets",
     "public end-to-end evidence plus non-author review, QA and PO sign-off are not claimed by this trace refresh"
   ]

@@ -107,7 +107,7 @@ const providerPlaces = Array.from({ length: 8 }, (_, index) => {
     latitude: 39.904179 + (index + 1) * 0.0001,
   }
   return {
-    placeId: `provider-place-${index + 1}`,
+    placeId: `place-${index + 1}`,
     name: `高德核验地点 ${index + 1}`,
     address: `北京市测试路 ${index + 1} 号`,
     cityCode: '110000',
@@ -128,6 +128,7 @@ const providerPlaces = Array.from({ length: 8 }, (_, index) => {
 
 async function mockRecommendationRouteBuild(page: Page) {
   let generatedCandidate: unknown = null
+  let placeSearchCalls = 0
   await page.route(`**/api/v2/trips/${T024_TRIP_ID}/planning-trip`, async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: api(tripSnapshot) })
   })
@@ -151,7 +152,26 @@ async function mockRecommendationRouteBuild(page: Page) {
       }),
     })
   })
+  await page.route('**/api/v1/trips/*/provider-fact-sets/*/places**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: api({
+        schemaVersion: '1.0',
+        factSetId: recommendationBundle.factSetId,
+        providerFactDigest: recommendationBundle.providerFactDigest,
+        tripId: T024_TRIP_ID,
+        places: recommendationBundle.candidates.map((candidate, index) => ({
+          factRefId: candidate.factRefId,
+          providerObjectId: candidate.placeId,
+          payloadDigest: `${index + 1}`.repeat(64),
+          place: providerPlaces[index],
+        })),
+      }),
+    })
+  })
   await page.route('**/api/v1/places/search', async (route) => {
+    placeSearchCalls += 1
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -197,6 +217,10 @@ async function mockRecommendationRouteBuild(page: Page) {
   await page.route(`**/api/v1/trips/${T024_TRIP_ID}`, async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: api(tripState('execute')) })
   })
+  return {
+    generatedCandidate: () => generatedCandidate as { taskFacts?: Array<{ place?: { placeId?: string } }> } | null,
+    placeSearchCalls: () => placeSearchCalls,
+  }
 }
 
 async function mockWorkspace(page: Page, kind: 'execute' | 'diff' | 'summary') {
@@ -225,7 +249,7 @@ test('six-question entry has no horizontal overflow and reachable actions', asyn
 
 test('mocked single-person UI integration confirms the recommendation and enters the workspace', async ({ page }) => {
   let ready = false
-  await mockRecommendationRouteBuild(page)
+  const routeAudit = await mockRecommendationRouteBuild(page)
   await page.route('**/api/v2/trips/conversations', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: api(organizerConversation) })
   })
@@ -278,6 +302,22 @@ test('mocked single-person UI integration confirms the recommendation and enters
   await expect(page.getByRole('heading', { name: /北京.*一日计划/ })).toBeVisible()
   await expect(page.getByRole('navigation', { name: '行程视图' })).toBeVisible()
   await expect(page.getByRole('button', { name: '执行旅程' })).toBeVisible()
+  expect(routeAudit.placeSearchCalls()).toBe(0)
+  expect(
+    routeAudit.generatedCandidate()?.taskFacts?.map((item) => item.place?.placeId),
+  ).toEqual(['place-3', 'place-1', 'place-2', expect.stringMatching(/^return-/)])
+  const trace = await page.evaluate(
+    (tripId) => JSON.parse(window.sessionStorage.getItem(`s2-recommendation-trace:${tripId}`) || 'null'),
+    T024_TRIP_ID,
+  )
+  expect(trace).toMatchObject({
+    factSetId: recommendationBundle.factSetId,
+    providerFactDigest: recommendationBundle.providerFactDigest,
+    selectedPlaces: recommendationBundle.trustedPlan.tasks.map((item) => ({
+      factRefId: item.factRefId,
+      placeId: item.placeId,
+    })),
+  })
   await assertResponsiveContract(page)
 })
 

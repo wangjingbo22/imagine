@@ -3,7 +3,7 @@
   "sprint": "Sprint2",
   "deliveryDay": "Day2",
   "owner": "林粲涵",
-  "verifiedAgainstMainCommit": "012fa364894ffc7dd36a6dd91cdd21641550da06",
+  "verifiedAgainstMainCommit": "90bef1439aee70a3b02675b385bba05f96a65cf6",
   "deliveryBaseCommit": "10d1742885675694ea0b13c5d20d2e498ef67608",
   "implementationCommit": "00f7ef692b5b3a5ef1b5d711af68456eeff41a66",
   "compatibilityClosureCommit": "1a7fcf7169f3e3656507be878e896bf4db1dd9fd",
@@ -158,13 +158,18 @@
   },
   "localVerification": {
     "status": "PASS",
-    "focusedBackendResult": "80 passed",
-    "backendResult": "633 passed in 78.57s",
-    "frontendTest": "52 passed",
+    "baselineAuditScope": "ORIGIN_MAIN_PRE_TRACEABILITY_REFRESH",
+    "preClosureFocusedBackendResult": "119 passed",
+    "focusedBackendResult": "188 passed",
+    "historicalT029AdjacentResult": "80 passed",
+    "preClosureBackendResult": "685 passed",
+    "backendResult": "688 passed",
+    "frontendTest": "56 passed",
     "frontendBuild": "PASS",
-    "frontendLint": "PASS_WITH_2_EXISTING_WARNINGS",
+    "frontendLint": "PASS",
     "diffCheck": "PASS",
-    "onlineE2E": "NOT_RUN_NOT_CLAIMED"
+    "onlineE2E": "NOT_RUN_NOT_CLAIMED",
+    "postTraceRefreshFullVerification": "PASS"
   },
   "neededInputs": [
     "可访问的最新公网前后端部署与两组独立浏览器会话",

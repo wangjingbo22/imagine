@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import type { CareDraft, TripDraftRevision } from '../src/domain/collaboration.ts'
 import {
+  collaborationPlanningDraft,
   invitationTokenFromText,
   singleParticipantPlanningDraft,
 } from '../src/services/collaborationDraft.ts'
@@ -85,6 +86,17 @@ test('only one complete authoritative revision maps to the legacy single plannin
     start: '12:30:00',
     end: '14:00:00',
   })
+})
+
+test('one to three confirmed members map to a shared planning draft without dropping member constraints', () => {
+  for (const participantCount of [1, 2, 3]) {
+    const draft = collaborationPlanningDraft(revision(participantCount))
+    assert.ok(draft)
+    assert.match(draft.naturalLanguageRequest, new RegExp(`${participantCount}人同行$`))
+    assert.deepEqual(draft.interests, ['美食'])
+    assert.deepEqual(draft.mustVisit, ['博物馆'])
+    assert.deepEqual(draft.avoidPlaces, ['拥挤商场'])
+  }
 })
 
 test('all READY single care presets and explicit overrides map without losing facts', () => {
@@ -176,16 +188,16 @@ test('collaboration API preserves capabilities and optimistic concurrency fields
   assert.doesNotMatch(api, /member-session[^'`]*\$\{[^}]*token/)
 })
 
-test('organizer page serially rolls the collaboration version and fails closed for group planning context', async () => {
+test('organizer page serially rolls the collaboration version and prepares READY group planning context', async () => {
   const page = await readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8')
   assert.match(page, /for \(const participant of state\.participants\.filter/)
   assert.match(page, /expectedVersion = invitation\.collaborationVersion/)
   assert.match(page, /const next = current\.some\(\(item\) => item\.link === link\)/)
   assert.match(page, /sessionStorage\.setItem\(`organizer-invitations:/)
   assert.match(page, /accessStatus: 'INVITED'/)
-  assert.match(page, /singleParticipantPlanningDraft\(revision\)/)
-  assert.match(page, /多人 Trip 尚不能无损转换/)
-  assert.doesNotMatch(page, /mode:\s*'GROUP'/)
+  assert.match(page, /collaborationPlanningDraft\(created\.revision\)/)
+  assert.match(page, /collaborationPlanningDraft\(revision\)/)
+  assert.match(page, /draft && canEnterRecommendation\(current\)/)
   assert.match(page, /function applyGroupOrganizerTestPreset\(\)/)
   assert.match(page, /setEntryMode\('group'\)/)
   assert.match(page, /setPartyCount\(2\)/)
@@ -221,7 +233,7 @@ test('recommendation route consumes the guarded server Trip without legacy recon
 
 test('recommendation page shares StrictMode requests and prevents duplicate route generation', async () => {
   const page = await readFile(new URL('../src/pages/RecommendationPage.tsx', import.meta.url), 'utf8')
-  assert.match(page, /const inFlightRecommendations = new Map<string, Promise<Bundle>>\(\)/)
+  assert.match(page, /const inFlightRecommendations = new Map<string, Promise<RecommendationBundle>>\(\)/)
   assert.match(page, /const existing = inFlightRecommendations\.get\(requestKey\)/)
   assert.match(page, /if \(existing\) return existing/)
   assert.match(page, /if \(buildingRef\.current\) return/)
@@ -264,6 +276,15 @@ test('a new invitation never falls through to another participant last session',
   assert.match(page, /旧标签页的会话会自动失效/)
   assert.match(page, /className="planner-panel motion-enter"/)
   assert.doesNotMatch(page, /className="planner-panel" data-reveal="panel"/)
+})
+
+test('member conversation keeps shared questions read-only and edits only personal answers', async () => {
+  const page = await readFile(new URL('../src/pages/MemberConversationPage.tsx', import.meta.url), 'utf8')
+  assert.match(page, /step < 3 \? <div className="shared-trip-card__grid"/)
+  assert.match(page, /组织者已确认的共享行程，只读/)
+  assert.match(page, /成员会话只能核对，不能改写共享事实/)
+  assert.match(page, /step === 1 && <article><UsersRound/)
+  assert.doesNotMatch(page, /setTripFields|setRouteFields|updateTripField|updateRouteField/)
 })
 
 test('organizer presents each reusable member invitation as a direct link with rotation guidance', async () => {

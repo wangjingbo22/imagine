@@ -1,9 +1,14 @@
 import type {
   AssistanceMode,
+  AssistanceProfile,
   CandidatePlanRequest,
   PreferenceType,
   TripDraftInput,
 } from '../domain/trip'
+import {
+  compileGroupAssistanceConstraints,
+  planningCareFromConstraints,
+} from './assistanceConstraints'
 
 const assistanceModeByType = {
   ORDINARY: 'standard',
@@ -16,19 +21,34 @@ function preferenceValues(
   request: CandidatePlanRequest,
   type: PreferenceType,
 ) {
-  return request.trip.participants[0].preferences
-    ?.filter((preference) => preference.type === type)
-    .map((preference) => preference.value) ?? []
+  return [...new Set(request.trip.participants.flatMap((participant) => (
+    participant.preferences
+      ?.filter((preference) => preference.type === type)
+      .map((preference) => preference.value) ?? []
+  )))]
+}
+
+function groupAssistanceMode(profiles: AssistanceProfile[]): AssistanceMode {
+  if (profiles.some((profile) => profile.type === 'MOBILITY_ASSISTANCE_BETA')) {
+    return 'assisted'
+  }
+  if (profiles.some((profile) => profile.type === 'PARENT_CHILD')) return 'family'
+  if (profiles.some((profile) => profile.type === 'LOW_STAMINA')) return 'low-mobility'
+  return 'standard'
 }
 
 export function restoreDraftFromPlanningFacts(
   request: CandidatePlanRequest,
 ): TripDraftInput {
-  const participant = request.trip.participants[0]
-  const profile = participant.assistanceProfile
-  const assistanceMode = profile
-    ? assistanceModeByType[profile.type]
-    : 'standard'
+  const profiles = request.trip.participants
+    .map((participant) => participant.assistanceProfile)
+    .filter((profile): profile is AssistanceProfile => Boolean(profile))
+  const care = planningCareFromConstraints(
+    compileGroupAssistanceConstraints(profiles),
+  )
+  const assistanceMode = profiles.length === 1
+    ? assistanceModeByType[profiles[0].type]
+    : groupAssistanceMode(profiles)
   return {
     schemaVersion: '1.0',
     cityName: request.trip.cityContext.cityName,
@@ -43,9 +63,9 @@ export function restoreDraftFromPlanningFacts(
     avoidPlaces: preferenceValues(request, 'AVOID_PLACE'),
     assistanceMode,
     assistanceProfile: {
-      maxSegmentWalkMeters: profile?.walkLimits.maxContinuousMeters ?? null,
-      maxTransfers: profile?.maxTransfers ?? null,
-      restIntervalMinutes: profile?.restInterval ?? null,
+      maxSegmentWalkMeters: care.maxContinuousMeters,
+      maxTransfers: care.maxTransfers,
+      restIntervalMinutes: care.restInterval,
     },
     naturalLanguageRequest: '从服务端签发的规划事实恢复',
   }

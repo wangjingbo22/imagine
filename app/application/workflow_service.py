@@ -15,7 +15,7 @@ from app.schemas.execution_adjustment import (
     ConfirmedExecutionAdjustmentEvent,
     CreateConfirmedExecutionAdjustmentEvent,
 )
-from app.schemas.trip import AssistanceProfile, CreateSingleDayTrip, Trip
+from app.schemas.trip import AssistanceProfile, CreateDayTrip, CreateSingleDayTrip, Trip
 from app.schemas.workflow import (
     ConstraintConfirmationResult,
     ConstraintProfileState,
@@ -63,8 +63,8 @@ class WorkflowService:
 
     def confirm_collaboration_trip(
         self,
-        trip: CreateSingleDayTrip,
-    ) -> CreateSingleDayTrip:
+        trip: CreateDayTrip,
+    ) -> CreateDayTrip:
         try:
             return self.repository.confirm_collaboration_trip(trip)
         except PlanStoreError as error:

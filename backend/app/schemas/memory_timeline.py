@@ -48,6 +48,12 @@ class MemoryTimelineItem(ContractModel):
     photo: MemoryPhoto | None = None
 
 
+class MemoryParticipantCare(ContractModel):
+    participant_id: UUID4
+    nickname: str
+    assistance_profile: AssistanceProfile | None = None
+
+
 class MemoryTimelineSummary(ContractModel):
     completed_task_count: Annotated[int, Field(ge=0)]
     skipped_task_count: Annotated[int, Field(ge=0)]
@@ -60,6 +66,11 @@ class MemoryTimelineSummary(ContractModel):
     current_plan_version: Annotated[int, Field(ge=1)]
     plan_change_count: Annotated[int, Field(ge=0)]
     photo_count: Annotated[int, Field(ge=0)]
+    participant_care_results: list[MemoryParticipantCare] = Field(
+        default_factory=list
+    )
+    # Retained for the original single-person T017 consumer. A group must not
+    # collapse distinct long-term profiles into one fabricated profile.
     assistance_profile: AssistanceProfile | None = None
 
 
@@ -72,6 +83,7 @@ class MemoryTimeline(ContractModel):
 
 __all__ = [
     "MemoryPhoto",
+    "MemoryParticipantCare",
     "MemoryTimeline",
     "MemoryTimelineItem",
     "MemoryTimelineItemKind",

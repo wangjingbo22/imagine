@@ -1,0 +1,307 @@
+{
+  "schemaVersion": "1.0",
+  "sprint": "Sprint2",
+  "deliveryDay": "Day3",
+  "owner": "林粲涵",
+  "verifiedAgainstMainCommit": "e248e9ad88db9b4f40b2ed087844df7fcdeae10b",
+  "implementationRevision": "WORKTREE_PENDING_COMMIT",
+  "requirementsSource": [
+    {
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
+      "sheet": "SprintBacklog模板",
+      "range": "A36:V36",
+      "role": "AUTHORITATIVE_TASK_ROW"
+    },
+    {
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
+      "sheet": "PBI追溯",
+      "range": "A17:J17",
+      "role": "AUTHORITATIVE_PBI_ROW"
+    },
+    {
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
+      "sheet": "用户功能验收清单",
+      "range": "A4:J15",
+      "role": "SUPPORTING_SUB_UATS_ONLY"
+    },
+    {
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
+      "sheet": "LLM接入设计",
+      "range": "A9:K10",
+      "role": "AUTHORITY_AND_MANUAL_ACCEPTANCE_BOUNDARY"
+    },
+    {
+      "file": "doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx",
+      "sheet": "版权说明",
+      "range": "A10:B14",
+      "role": "EVIDENCE_AND_EXTERNAL_INPUT_POLICY"
+    }
+  ],
+  "pbi": {
+    "pbiId": "PBI-17-A",
+    "acceptanceCriteriaId": "AC-17-A",
+    "coverage": "LOCAL_AUTOMATION_PASS_PUBLIC_UAT_NOT_RUN",
+    "productAcceptance": "公网环境完成组织者加两名成员、冲突处理、唯一推荐、执行、照片、V2、回忆以及 375px/768px 验收。"
+  },
+  "task": {
+    "taskId": "S2-T032",
+    "pbiId": "PBI-17-A",
+    "acceptanceCriteriaId": "AC-17-A",
+    "owner": "林粲涵",
+    "collaborators": "全员配合",
+    "deliveryDay": "Day3",
+    "priority": "Must",
+    "storyPoints": 3,
+    "sourceRemainingHours": 3,
+    "sourceStatus": "未开始",
+    "status": "LOCAL_AUTOMATION_PASS_PUBLIC_UAT_NOT_RUN",
+    "dependsOn": [
+      "S2-T025",
+      "S2-T026",
+      "S2-T027",
+      "S2-T028",
+      "S2-T029",
+      "S2-T030",
+      "S2-T031",
+      "S2-T012",
+      "S2-T023"
+    ],
+    "requirementImpliedDependencies": [
+      "S2-T013~S2-T016 GPS_AND_EXECUTION",
+      "S2-T017~S2-T018 MEMORY_TIMELINE"
+    ],
+    "journeyPhases": [
+      "ORGANIZER_SIX_QUESTION_CONFIRMATION",
+      "TWO_ONE_TIME_INVITATIONS",
+      "TWO_ISOLATED_MEMBER_SESSIONS",
+      "ALL_MEMBER_CONFIRMATION_GATE",
+      "HARD_CONFLICT_REVIEW_AND_RELAXATION",
+      "ALL_THREE_RECONFIRM_CURRENT_REVISION",
+      "READY_TO_PLAN",
+      "FACTREF_BACKED_UNIQUE_RECOMMENDATION",
+      "SHARED_THREE_PARTICIPANT_V1",
+      "EXECUTION_AND_ARRIVAL_EVIDENCE",
+      "TASK_BOUND_PHOTO_LIFECYCLE",
+      "LATE_OR_FATIGUE_PROPOSED_V2",
+      "ORGANIZER_DECISION",
+      "ORDERED_MEMORY_TIMELINE",
+      "PUBLIC_375_AND_768_ACCEPTANCE"
+    ],
+    "documentationFiles": [
+      "docs/traceability/sprint2/lin_canhan_s2_t032_day3.json",
+      "docs/traceability/sprint2/lin_canhan_s2_t032_day3.md",
+      "docs/testing/s2_t032_multiplayer_public_acceptance.md",
+      "docs/testing/evidence/s2_t032/README.md"
+    ],
+    "moduleFiles": [
+      "app/application/collaboration_planning_bridge.py",
+      "app/application/memory_timeline_service.py",
+      "app/application/workflow_service.py",
+      "app/infrastructure/workflow_store.py",
+      "backend/app/schemas/memory_timeline.py",
+      "frontend/src/components/MemoryTimelinePanel.tsx",
+      "frontend/src/components/MemoryPhotoStrip.tsx"
+    ],
+    "integrationFiles": [
+      "app/api/recommendation_routes.py",
+      "app/main.py",
+      "frontend/src/api/tripApi.ts",
+      "frontend/src/pages/ConversationPlannerPage.tsx",
+      "frontend/src/pages/MemberConversationPage.tsx",
+      "frontend/src/pages/RecommendationPage.tsx",
+      "frontend/src/pages/WorkspacePage.tsx",
+      "frontend/src/styles/white-web.css"
+    ],
+    "testFiles": [
+      "backend/tests/test_s2_t032_multiplayer_e2e.py",
+      "backend/tests/test_s2_lin_canhan_s2_t032_traceability.py",
+      "frontend/tests/s2T032MemoryTimeline.test.ts",
+      "frontend/e2e/s2-t032-multiplayer.spec.ts"
+    ]
+  },
+  "uat": {
+    "uatId": "UAT-S2-E2E-001",
+    "scenarioName": "E2E-S2-新增需求-多人六问到回忆闭环",
+    "registrationStatus": "PLANNED_ID_IN_BACKLOG_O36_NO_DEDICATED_UAT_ROW",
+    "sourceCell": "SprintBacklog模板!O36",
+    "supportingUatIds": [
+      "UAT-S2-001",
+      "UAT-S2-002",
+      "UAT-S2-003",
+      "UAT-S2-004",
+      "UAT-S2-005",
+      "UAT-S2-006",
+      "UAT-S2-007",
+      "UAT-S2-008",
+      "UAT-S2-009",
+      "UAT-S2-010",
+      "UAT-S2-011",
+      "UAT-S2-012"
+    ],
+    "viewports": [
+      {
+        "width": 375,
+        "height": 812
+      },
+      {
+        "width": 768,
+        "height": 1024
+      }
+    ],
+    "responsiveRequirements": [
+      "NO_HORIZONTAL_SCROLL",
+      "NO_TEXT_OR_CONTROL_OVERLAP",
+      "PRIMARY_ACTION_MIN_44_PX",
+      "STATUS_PERMISSION_AND_FAILURE_VISIBLE",
+      "KEY_AMOUNTS_TIMES_AND_DIFF_READABLE",
+      "KEYBOARD_FOCUS_VISIBLE_AND_ORDERED",
+      "REDUCED_MOTION_SUPPORTED"
+    ],
+    "localResult": "LOCAL_AUTOMATION_PASS",
+    "publicResult": "PUBLIC_UAT_NOT_RUN"
+  },
+  "crossTaskLinkages": [
+    {
+      "from": "S2-T025~S2-T027",
+      "to": "S2-T032",
+      "artifact": "固定六问、邀请和独立成员会话",
+      "status": "LOCAL_CONTRACT_CONSUMED_PUBLIC_THREE_BROWSER_NOT_RUN",
+      "evidenceFiles": [
+        "app/api/collaboration_routes.py",
+        "frontend/src/pages/ConversationPlannerPage.tsx",
+        "frontend/src/pages/MemberConversationPage.tsx",
+        "frontend/tests/collaborationFlow.test.ts"
+      ]
+    },
+    {
+      "from": "S2-T028~S2-T029",
+      "to": "S2-T032",
+      "artifact": "零调用门禁、结构化硬冲突、放宽和全员重确认",
+      "status": "LOCAL_ASGI_SQLITE_CONTRACT_CONSUMED_PUBLIC_NOT_RUN",
+      "evidenceFiles": [
+        "app/application/collaboration_service.py",
+        "backend/tests/test_s2_t028_zero_call_gate.py",
+        "backend/tests/test_s2_t029_conflict_acceptance.py"
+      ]
+    },
+    {
+      "from": "S2-T030~S2-T031",
+      "to": "S2-T032",
+      "artifact": "签发 FactRef、白名单推荐边界和确定性回退",
+      "status": "LOCAL_FACT_CONTRACT_CONSUMED_REAL_AMAP_AND_BAILIAN_NOT_RUN",
+      "evidenceFiles": [
+        "app/api/recommendation_routes.py",
+        "app/application/recommendation_service.py",
+        "backend/tests/test_s2_t030_provider_candidate_issuance.py"
+      ]
+    },
+    {
+      "from": "S2-T012~S2-T018",
+      "to": "S2-T032",
+      "artifact": "GPS/执行、任务照片和按真实事件时间排序的回忆",
+      "status": "LOCAL_DOMAIN_AND_UI_CONTRACT_CONSUMED_REAL_DEVICE_NOT_RUN",
+      "evidenceFiles": [
+        "backend/tests/test_s2_t012_media_lifecycle.py",
+        "backend/tests/test_s2_t013_arrival_evidence.py",
+        "backend/tests/test_s2_t017_memory_timeline.py",
+        "frontend/src/components/MemoryTimelinePanel.tsx",
+        "frontend/tests/s2T032MemoryTimeline.test.ts"
+      ]
+    },
+    {
+      "from": "S2-T019~S2-T023",
+      "to": "S2-T032",
+      "artifact": "LATE/FATIGUE、PROPOSED V2、结构化 Diff 和组织者决策",
+      "status": "LOCAL_BACKEND_AND_FRONTEND_CONTRACT_CONSUMED_PUBLIC_NOT_RUN",
+      "evidenceFiles": [
+        "app/application/planning_boundary_service.py",
+        "backend/tests/test_s2_t024_full_golden_path.py",
+        "frontend/src/services/executionReplan.ts",
+        "frontend/tests/s2T023ExecutionReplan.test.ts"
+      ]
+    },
+    {
+      "from": "S2-T032",
+      "to": "PBI-17-A",
+      "artifact": "UAT-S2-E2E-001 验收包",
+      "status": "LOCAL_AUTOMATION_PASS_PUBLIC_UAT_NOT_RUN",
+      "evidenceFiles": [
+        "docs/testing/s2_t032_multiplayer_public_acceptance.md",
+        "docs/testing/evidence/s2_t032/README.md"
+      ]
+    }
+  ],
+  "authorityBoundaries": {
+    "frontend": "COLLECT_DISPLAY_CONFIRM_AND_TRIGGER_ONLY_NO_FACT_AMOUNT_SCORE_OR_STATE_REWRITE",
+    "llm": "ONE_PARSE_PER_COMPLETED_TRANSCRIPT_EXTRACT_AND_EXPLAIN_ONLY_NO_FACT_OR_STATE_AUTHORITY",
+    "provider": "AMAP_OR_CACHE_OWNS_PLACE_ROUTE_PRICE_AND_FACILITY_FACTS",
+    "backend": "DETERMINISTIC_CONFLICT_SCORE_ORDER_PASS_PLAN_VERSION_AND_STATE_TRANSITIONS",
+    "organizer": "ONLY_ORGANIZER_MAY_CONFIRM_OR_REJECT_V1_AND_V2",
+    "participantSession": "MAY_READ_AND_EDIT_ONLY_BOUND_PARTICIPANT",
+    "acceptance": "OBSERVE_AND_ASSERT_ONLY_NO_PRECREATED_SUCCESS_OR_SYNTHETIC_PUBLIC_PASS"
+  },
+  "evidencePolicy": {
+    "root": "docs/testing/evidence/s2_t032/",
+    "requiredForPublicPass": [
+      "manifest tied to one deployed 40-hex build SHA",
+      "three independent browser sessions for organizer and two members",
+      "continuous redacted lineage from Trip through collaboration recommendation execution V2 and memory",
+      "375px and 768px videos traces and core screenshots",
+      "pre-READY zero-call and post-READY fact lineage evidence",
+      "real device GPS and camera or file permission results",
+      "non-author acceptance and teacher signoff"
+    ],
+    "forbidden": [
+      "API keys or deployment secret values",
+      "cookies authorization headers organizer credentials or participant sessions",
+      "one-time invitation tokens",
+      "unredacted precise personal location",
+      "photo EXIF or unrelated personal media"
+    ]
+  },
+  "localVerification": {
+    "status": "LOCAL_AUTOMATION_PASS",
+    "backendMultiplayerCommand": "python -m pytest -q backend/tests/test_s2_t032_multiplayer_e2e.py",
+    "backendMultiplayerResult": "PASS_1_TEST_LOCAL_ASGI_SQLITE_TEST_DOUBLES",
+    "traceabilityCommand": "python -m pytest -q backend/tests/test_s2_lin_canhan_s2_t032_traceability.py",
+    "traceabilityResult": "PASS_8_TESTS",
+    "frontendCommand": "npm test",
+    "frontendResult": "PASS_71_TESTS_INCLUDING_4_T032_MEMORY_CONTRACTS",
+    "frontendBuild": "PASS_WITH_RUNTIME_CONFIG_SCRIPT_WARNING",
+    "frontendPlaywrightCommand": "npx playwright test e2e/s2-t032-multiplayer.spec.ts",
+    "frontendPlaywrightResult": "PASS_4_LOCAL_MOCKED_UI_CONTRACTS_AT_375_AND_768",
+    "browserMode": "LOCAL_MOCKED_UI_CONTRACT_ONLY_NO_CONTINUOUS_REAL_BACKEND_CLAIM",
+    "responsiveEvidence": "PASS_LOCAL_MOCKED_375_AND_768_PUBLIC_NOT_RUN",
+    "formalPostRecommendationsOrchestration": "NOT_CLAIMED",
+    "fullRepositoryRegression": "PASS_708_TESTS"
+  },
+  "publicVerification": {
+    "status": "PUBLIC_UAT_NOT_RUN",
+    "targetBuildDeployed": "NOT_RUN_BUILD_SHA_UNVERIFIED",
+    "threeIndependentBrowserSessions": "NOT_RUN",
+    "realAmap": "NOT_RUN",
+    "realBailian": "NOT_RUN",
+    "realGps": "NOT_RUN",
+    "realCameraOrFileUpload": "NOT_RUN",
+    "viewport375": "NOT_RUN",
+    "viewport768": "NOT_RUN",
+    "teacherSignoff": "PENDING"
+  },
+  "knownGaps": {
+    "uatRegistration": "UAT_ID_EXISTS_ONLY_IN_BACKLOG_O36_NO_DEDICATED_ACCEPTANCE_ROW",
+    "localBackend": "ASGI_SQLITE_WITH_TEST_DOUBLES_NOT_PUBLIC_NETWORK",
+    "localFrontend": "VITEST_AND_LOCAL_MOCKED_PLAYWRIGHT_NOT_PUBLIC_MULTI_BROWSER",
+    "publicNetwork": "NOT_RUN_NOT_CLAIMED",
+    "providerAndLlm": "REAL_AMAP_AND_BAILIAN_NOT_RUN_NOT_CLAIMED",
+    "deviceEvidence": "REAL_GPS_CAMERA_AND_FILE_PERMISSION_NOT_RUN",
+    "publicRecommendation": "FORMAL_POST_RECOMMENDATIONS_ORCHESTRATION_NOT_CLAIMED",
+    "signoff": "NON_AUTHOR_AND_TEACHER_SIGNOFF_PENDING"
+  },
+  "neededInputs": [
+    "包含本次实现且可核验 40 位 build SHA 的公网前后端 URL",
+    "部署端仅确认高德与百炼 Secret 已配置，不提供明文",
+    "组织者与两名成员的三个独立浏览器会话",
+    "允许定位及相机或文件上传的真实设备或受控浏览器",
+    "非作者验收人、老师验收时间与签字"
+  ]
+}

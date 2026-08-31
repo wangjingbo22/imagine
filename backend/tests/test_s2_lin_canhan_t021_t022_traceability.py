@@ -14,7 +14,7 @@ TRACE = (
     / "sprint2"
     / "lin_canhan_s2_t021_t022_day2.json"
 )
-LATEST_MAIN_COMMIT = "012fa364894ffc7dd36a6dd91cdd21641550da06"
+LATEST_MAIN_COMMIT = "90bef1439aee70a3b02675b385bba05f96a65cf6"
 DELIVERY_BASE_COMMIT = "a43ad37a5c8b97d2b90507fa9966998bfee038b9"
 IMPLEMENTATION_COMMIT = "f376574a5c8c5c577d6ed43efd200293023b3b32"
 EVENT_HARDENING_COMMIT = "0856b745075156e3da5365e74852aaa192329325"
@@ -192,8 +192,8 @@ def test_known_upstream_and_external_gaps_are_explicit_not_claimed_done() -> Non
     gaps = trace["knownGaps"]
     assert gaps["s2T006ConcreteFactRefRegistry"] == "IMPLEMENTED"
     assert gaps["s2T006FormalOnlineRouteBuilder"] == "EXTERNAL_PENDING"
-    assert gaps["s2T005TwoThreePersonPlanVersionChain"] == (
-        "BLOCKED_BY_S2_T005_UPSTREAM_DELIVERY"
+    assert gaps["s2T005UnifiedPlanVersionChain"] == (
+        "AVAILABLE_ON_MAIN_ONE_TWO_THREE_PERSON_SHARED_STATE_MACHINE"
     )
     assert gaps["s2T023Frontend"] == (
         "LOCAL_CONTRACT_AND_UI_INTEGRATION_PASS_PUBLIC_E2E_PENDING"
@@ -203,11 +203,17 @@ def test_known_upstream_and_external_gaps_are_explicit_not_claimed_done() -> Non
     assert gaps["onlineE2E"] == "NOT_CLAIMED"
     assert trace["localVerification"]["onlineE2E"] == "NOT_RUN_NOT_CLAIMED"
     assert trace["externalAcceptanceStillNeeded"]
+    assert not any(
+        "must deliver" in item and "S2-T005" in item
+        for item in trace["externalAcceptanceStillNeeded"]
+    )
 
 
 def test_verification_separates_latest_trace_from_historical_functional_runs() -> None:
     verification = _trace()["localVerification"]
-    assert verification["status"] == "LATEST_MAIN_FULL_REGRESSION_PASS"
+    assert verification["status"] == (
+        "LATEST_MAIN_POST_TRACE_REFRESH_FULL_PASS"
+    )
     assert verification["latestMainCommit"] == LATEST_MAIN_COMMIT
     assert verification["latestMainTraceResult"] == "6 passed"
     assert verification["historicalBaselineCommit"] == DELIVERY_BASE_COMMIT
@@ -221,12 +227,18 @@ def test_verification_separates_latest_trace_from_historical_functional_runs() -
     )
     assert verification["historicalDiffCheck"] == "PASS"
     assert verification["latestMainClosureCommit"] == CLOSURE_COMMIT
-    assert verification["latestMainBackendResult"] == "633 passed in 78.57s"
-    assert verification["latestMainFrontendTest"] == "52 passed"
-    assert verification["latestMainFrontendBuild"] == "PASS"
-    assert verification["latestMainFrontendLint"] == (
-        "PASS_WITH_2_EXISTING_WARNINGS"
+    assert verification["baselineAuditScope"] == (
+        "ORIGIN_MAIN_PRE_TRACEABILITY_REFRESH"
     )
+    assert verification["preClosureBackendResult"] == "685 passed"
+    assert verification["latestMainBackendResult"] == "688 passed"
+    assert verification["baselineLinFocusedResult"] == "119 passed"
+    assert verification["postClosureLinFocusedResult"] == "188 passed"
+    assert verification["latestMainFrontendTest"] == "56 passed"
+    assert verification["latestMainFrontendBuild"] == "PASS"
+    assert verification["latestMainFrontendLint"] == "PASS"
+    assert verification["latestMainPlaywrightT024"] == "14 passed"
     assert verification["latestMainDiffCheck"] == "PASS"
-    assert verification["latestMainFunctionalRegression"] == "PASS"
+    assert verification["latestMainFunctionalRegression"] == "FULL_PASS"
+    assert verification["postTraceRefreshFullVerification"] == "PASS"
     assert verification["onlineE2E"] == "NOT_RUN_NOT_CLAIMED"

@@ -19,7 +19,7 @@ def test_t029_trace_locks_owner_pbi_ac_and_requirement_ranges() -> None:
     trace = _trace()
     assert trace["owner"] == "林粲涵"
     assert trace["verifiedAgainstMainCommit"] == (
-        "012fa364894ffc7dd36a6dd91cdd21641550da06"
+        "90bef1439aee70a3b02675b385bba05f96a65cf6"
     )
     implementation = trace["implementationCommit"]
     assert implementation == "00f7ef692b5b3a5ef1b5d711af68456eeff41a66"
@@ -103,15 +103,21 @@ def test_t029_upstream_runtime_is_integrated_but_public_e2e_is_not_claimed() -> 
     assert gaps["publicNetworkE2E"] == "NOT_RUN_NOT_CLAIMED"
     assert trace["localVerification"]["onlineE2E"] == "NOT_RUN_NOT_CLAIMED"
     assert trace["localVerification"]["status"] == "PASS"
-    assert re.fullmatch(
-        r"\d+ passed",
-        trace["localVerification"]["focusedBackendResult"],
+    assert trace["localVerification"]["baselineAuditScope"] == (
+        "ORIGIN_MAIN_PRE_TRACEABILITY_REFRESH"
     )
-    assert trace["localVerification"]["backendResult"] == "633 passed in 78.57s"
-    assert trace["localVerification"]["frontendTest"] == "52 passed"
+    assert trace["localVerification"]["preClosureFocusedBackendResult"] == (
+        "119 passed"
+    )
+    assert trace["localVerification"]["focusedBackendResult"] == "188 passed"
+    assert trace["localVerification"]["historicalT029AdjacentResult"] == (
+        "80 passed"
+    )
+    assert trace["localVerification"]["preClosureBackendResult"] == "685 passed"
+    assert trace["localVerification"]["backendResult"] == "688 passed"
+    assert trace["localVerification"]["frontendTest"] == "56 passed"
     assert trace["localVerification"]["frontendBuild"] == "PASS"
-    assert trace["localVerification"]["frontendLint"] == (
-        "PASS_WITH_2_EXISTING_WARNINGS"
-    )
+    assert trace["localVerification"]["frontendLint"] == "PASS"
     assert trace["localVerification"]["diffCheck"] == "PASS"
+    assert trace["localVerification"]["postTraceRefreshFullVerification"] == "PASS"
     assert trace["neededInputs"]
