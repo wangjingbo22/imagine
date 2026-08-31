@@ -128,7 +128,7 @@ export function HomePage() {
                 <span className="mode-link">立即开始 <ChevronRight size={17} /></span>
               </div>
             </Link>
-            <article className="mode-card mode-card--muted" data-reveal="card">
+            <Link className="mode-card mode-card--active" data-reveal="card" to="/plan?mode=group">
               <div className="mode-card__visual group-visual">
                 <Users size={42} />
                 <span className="avatar-bubble avatar-bubble--a" />
@@ -139,9 +139,9 @@ export function HomePage() {
                 <span className="mode-tag mode-tag--neutral">Sprint 2</span>
                 <h3>和朋友一起</h3>
                 <p>协调 2—3 人的兴趣、预算与体力差异，让每一次妥协都有清晰理由。</p>
-                <span className="mode-link mode-link--muted">即将开放</span>
+                <span className="mode-link">创建多人行程 <ChevronRight size={17} /></span>
               </div>
-            </article>
+            </Link>
           </div>
         </section>
       </main>

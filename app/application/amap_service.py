@@ -578,7 +578,10 @@ def _route_price(
     route = payload.get("route") or {}
     taxi_cost = route.get("taxi_cost")
     if _text(taxi_cost):
-        return _price_fact(taxi_cost, "TAXI_ESTIMATE", provenance)
+        estimated = provenance.model_copy(
+            update={"sourceStatus": SourceStatus.ESTIMATED}
+        )
+        return _price_fact(taxi_cost, "TAXI_ESTIMATE", estimated)
     return _price_fact(item.get("tolls"), "ROAD_TOLLS", provenance)
 
 

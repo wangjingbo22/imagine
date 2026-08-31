@@ -205,6 +205,19 @@ test('organizer page serially rolls the collaboration version and prepares READY
   assert.match(page, /填入北京多人组织者模板/)
 })
 
+test('home group card opens the planner directly in multiplayer creation mode', async () => {
+  const [home, planner] = await Promise.all([
+    readFile(new URL('../src/pages/HomePage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8'),
+  ])
+  assert.match(home, /to="\/plan\?mode=group"/)
+  assert.match(home, /创建多人行程/)
+  assert.doesNotMatch(home, /即将开放/)
+  assert.match(planner, /searchParams\.get\('mode'\) === 'group'/)
+  assert.match(planner, /opensGroupCreation \? 2 : 1/)
+  assert.match(planner, /opensGroupCreation \? 'group' : null/)
+})
+
 test('fixed-question fallback requires an explicit six-answer review and a fresh retry key', async () => {
   const page = await readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8')
   assert.match(page, /reviewedFallbackCount === questions\.length/)

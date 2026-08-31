@@ -45,10 +45,23 @@ from backend.tests.test_s2_t002_http import (
 class SingleTripProvider:
     """Deterministic external seam; all stateful services use production wiring."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        city_input: str = "北京",
+        city_name: str = "北京市",
+        city_code: str = "110000",
+        longitude: float = 116.407387,
+        latitude: float = 39.904179,
+        end_location: str = "北京市中心",
+    ) -> None:
         self.resolve_calls = 0
         self.search_calls = 0
         self.route_calls = 0
+        self.city_input = city_input
+        self.city_code = city_code
+        self.end_location = end_location
+        self._center = GeoPoint(longitude=longitude, latitude=latitude)
         self._provenance = Provenance(
             sourceStatus=SourceStatus.ONLINE,
             fetchedAt=datetime(2026, 9, 5, tzinfo=UTC),
@@ -56,9 +69,9 @@ class SingleTripProvider:
         )
         self._city = CityContext(
             country_code="CN",
-            city_code="110000",
-            city_name="北京市",
-            center=GeoPoint(longitude=116.407387, latitude=39.904179),
+            city_code=city_code,
+            city_name=city_name,
+            center=self._center,
             provider_config=ProviderConfig(
                 provider="AMAP",
                 coordinate_system="GCJ02",
@@ -67,7 +80,7 @@ class SingleTripProvider:
 
     async def resolve_city(self, city_name: str) -> CityResolution:
         self.resolve_calls += 1
-        assert city_name == "北京"
+        assert city_name == self.city_input
         return CityResolution(
             cityContext=self._city,
             provenance=self._provenance,
@@ -83,7 +96,7 @@ class SingleTripProvider:
         page_size: int,
     ) -> PlaceCollection:
         self.search_calls += 1
-        assert city.city_code == "110000"
+        assert city.city_code == self.city_code
         assert page == 1
         assert page_size in {1, 20, 25}
         if page_size == 25 or keywords == "museum":
@@ -97,10 +110,12 @@ class SingleTripProvider:
                 "北京风味午餐": (12, "北京风味午餐"),
                 "北京市中心": (13, "北京市中心"),
             }.get(keywords)
+            if selected is None and keywords == self.end_location:
+                selected = (13, self.end_location)
             assert selected is not None
             places = [self._place(selected[0], name=selected[1])]
         return PlaceCollection(
-            cityCode="110000",
+            cityCode=self.city_code,
             total=len(places),
             places=places,
             provenance=self._provenance,
@@ -108,18 +123,18 @@ class SingleTripProvider:
 
     def _place(self, index: int, *, name: str) -> Place:
         location = (
-            GeoPoint(longitude=116.407387, latitude=39.904179)
-            if name == "北京市中心"
+            self._center
+            if name == self.end_location
             else GeoPoint(
-                longitude=116.40 + index / 1000,
-                latitude=39.90 + index / 1000,
+                longitude=self._center.longitude + index / 1000,
+                latitude=self._center.latitude + index / 1000,
             )
         )
         return Place(
-            placeId=f"B000A{index:05d}",
+            placeId=f"{self.city_code}-A{index:05d}",
             name=name,
-            address=f"Beijing test address {index}",
-            cityCode="110000",
+            address=f"{self._city.city_name} test address {index}",
+            cityCode=self.city_code,
             location=location,
             category="museum",
             priceReference=PriceFact(
@@ -141,7 +156,7 @@ class SingleTripProvider:
         strategy: int | None,
     ) -> RouteCollection:
         self.route_calls += 1
-        assert city.city_code == "110000"
+        assert city.city_code == self.city_code
         assert strategy is None
         route = Route(
             routeId=f"route-s2-t024-{self.route_calls}",
@@ -163,7 +178,7 @@ class SingleTripProvider:
             provenance=self._provenance,
         )
         return RouteCollection(
-            cityCode="110000",
+            cityCode=self.city_code,
             routes=[route],
             provenance=self._provenance,
         )
@@ -190,14 +205,18 @@ def _provider_search_payload(trip_id: str) -> dict[str, object]:
     }
 
 
-def _ready_low_stamina_proposal() -> TripUnderstandingProposal:
+def _ready_low_stamina_proposal(
+    *,
+    city_input: str = "北京",
+    end_location: str = "北京市中心",
+) -> TripUnderstandingProposal:
     trip = TripUnderstandingTrip(
-        cityName="北京",
+        cityName=city_input,
         travelDate=date(2026, 9, 5),
         startTime="09:00",
         endTime="18:00",
-        startLocationText="北京市中心",
-        endLocationText="北京市中心",
+        startLocationText=end_location,
+        endLocationText=end_location,
         budgetCents=35_000,
     )
     participant = ParticipantUnderstanding(
@@ -221,12 +240,12 @@ def _ready_low_stamina_proposal() -> TripUnderstandingProposal:
         ),
     )
     evidence_specs = (
-        ("trip.cityName", None, "北京"),
+        ("trip.cityName", None, city_input),
         ("trip.travelDate", None, "2026-09-05"),
         ("trip.startTime", None, "09:00"),
         ("trip.endTime", None, "18:00"),
-        ("trip.startLocationText", None, "北京市中心"),
-        ("trip.endLocationText", None, "北京市中心"),
+        ("trip.startLocationText", None, end_location),
+        ("trip.endLocationText", None, end_location),
         ("trip.budgetCents", None, "35000"),
         ("participants[0].nickname", "member-1", "单人旅客"),
         ("participants[0].budgetCapCents", "member-1", "35000"),

@@ -24,8 +24,8 @@ from backend.tests.test_s2_t024_single_golden_path import (
 )
 
 
-def _conversation_payload() -> dict[str, object]:
-    proposal = _ready_low_stamina_proposal()
+def _conversation_payload(proposal=None) -> dict[str, object]:
+    proposal = proposal or _ready_low_stamina_proposal()
     evidence = " ".join(item.source_text for item in proposal.field_evidence)
     return {
         "schemaVersion": "1.0",
@@ -38,15 +38,22 @@ def _conversation_payload() -> dict[str, object]:
     }
 
 
-def _provider_search_payload(trip_id: str) -> dict[str, object]:
+def _provider_search_payload(
+    trip_id: str,
+    *,
+    city_code: str = "110000",
+    city_name: str = "北京市",
+    longitude: float = 116.407387,
+    latitude: float = 39.904179,
+) -> dict[str, object]:
     return {
         "schemaVersion": "1.0",
         "tripId": trip_id,
         "cityContext": {
             "countryCode": "CN",
-            "cityCode": "110000",
-            "cityName": "北京市",
-            "center": {"longitude": 116.407387, "latitude": 39.904179},
+            "cityCode": city_code,
+            "cityName": city_name,
+            "center": {"longitude": longitude, "latitude": latitude},
             "providerConfig": {
                 "provider": "AMAP",
                 "coordinateSystem": "GCJ02",
@@ -202,11 +209,13 @@ async def _candidate_request_from_trusted_plan(
 
 async def _create_ready_collaboration_trip(
     client: httpx.AsyncClient,
+    *,
+    proposal=None,
 ) -> tuple[str, str, str]:
     created = await client.post(
         "/api/v2/trips/conversations",
         headers={"Idempotency-Key": "s2-t024-full-create-0001"},
-        json=_conversation_payload(),
+        json=_conversation_payload(proposal),
     )
     assert created.status_code == 200, created.text
     data = created.json()["data"]
@@ -366,13 +375,40 @@ async def _persist_adjustment(
     return response.json()["data"]
 
 
+@pytest.mark.parametrize(
+    ("city_input", "city_name", "city_code", "longitude", "latitude"),
+    [
+        pytest.param("北京", "北京市", "110000", 116.407387, 39.904179, id="beijing"),
+        pytest.param("上海", "上海市", "310000", 121.473701, 31.230416, id="shanghai"),
+        pytest.param("成都", "成都市", "510100", 104.066541, 30.572269, id="chengdu"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_t024_single_trip_full_backend_golden_path(tmp_path: Path) -> None:
-    """One ASGI app and SQLite file carry the same Trip through the S2 path."""
+async def test_s3_t005_three_city_full_backend_golden_path(
+    tmp_path: Path,
+    city_input: str,
+    city_name: str,
+    city_code: str,
+    longitude: float,
+    latitude: float,
+) -> None:
+    """Each target city carries one Trip through the complete trusted S2 path."""
 
-    database_path = tmp_path / "s2-t024-full.sqlite3"
-    provider = SingleTripProvider()
-    gateway = CountingGateway(_ready_low_stamina_proposal())
+    database_path = tmp_path / f"s3-t005-{city_code}.sqlite3"
+    end_location = f"{city_name}中心"
+    proposal = _ready_low_stamina_proposal(
+        city_input=city_input,
+        end_location=end_location,
+    )
+    provider = SingleTripProvider(
+        city_input=city_input,
+        city_name=city_name,
+        city_code=city_code,
+        longitude=longitude,
+        latitude=latitude,
+        end_location=end_location,
+    )
+    gateway = CountingGateway(proposal)
     app = create_app(
         settings=Settings(
             _env_file=None,
@@ -390,24 +426,43 @@ async def test_t024_single_trip_full_backend_golden_path(tmp_path: Path) -> None
             base_url="http://testserver",
         ) as client:
             trip_id, organizer_id, organizer_token = (
-                await _create_ready_collaboration_trip(client)
+                await _create_ready_collaboration_trip(client, proposal=proposal)
             )
             assert gateway.calls == 1
             client.headers["X-Organizer-Token"] = organizer_token
 
             city = await client.post(
                 "/api/v1/cities/resolve",
-                json={"schemaVersion": "1.0", "cityName": "北京"},
+                json={"schemaVersion": "1.0", "cityName": city_input},
             )
             assert city.status_code == 200, city.text
             city_resolution = city.json()["data"]
+            assert city_resolution["cityContext"]["cityCode"] == city_code
+            assert city_resolution["provenance"]["sourceStatus"] == "ONLINE"
+            assert city_resolution["provenance"]["isStale"] is False
 
             provider_result = await client.post(
                 "/api/v1/places/search",
                 headers={"Idempotency-Key": "s2-t024-full-provider-0001"},
-                json=_provider_search_payload(trip_id),
+                json=_provider_search_payload(
+                    trip_id,
+                    city_code=city_code,
+                    city_name=city_name,
+                    longitude=longitude,
+                    latitude=latitude,
+                ),
             )
             assert provider_result.status_code == 200, provider_result.text
+            provider_data = provider_result.json()["data"]
+            assert provider_data["cityCode"] == city_code
+            assert {item["cityCode"] for item in provider_data["places"]} == {
+                city_code
+            }
+            assert all(
+                item["provenance"]["sourceStatus"] == "ONLINE"
+                and item["provenance"]["isStale"] is False
+                for item in provider_data["places"]
+            )
             recommendation = await client.get(
                 f"/api/v2/trips/{trip_id}/recommendations",
                 headers={"Idempotency-Key": "s2-t024-full-recommend-0001"},
@@ -432,6 +487,17 @@ async def test_t024_single_trip_full_backend_golden_path(tmp_path: Path) -> None
             )
             v1_id = v1["planId"]
             tasks = v1["days"][0]["tasks"]
+            assert v1["tripSnapshot"]["cityContext"]["cityCode"] == city_code
+            assert planning_request["trip"]["cityContext"]["cityCode"] == city_code
+            assert {
+                item["cityCode"] for item in planning_request["taskFacts"]
+            } == {city_code}
+            assert all(
+                item["place"]["provenance"]["sourceStatus"] == "ONLINE"
+                and item["route"]["provenance"]["sourceStatus"] == "ONLINE"
+                and item["route"]["walkingDistanceMeters"] <= 800
+                for item in planning_request["taskFacts"]
+            )
             trusted_tasks = recommendation_data["trustedPlan"]["tasks"]
             trusted_place_ids = [item["placeId"] for item in trusted_tasks]
             request_place_ids = [
