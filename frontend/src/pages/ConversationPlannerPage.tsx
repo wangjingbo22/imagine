@@ -197,9 +197,9 @@ export function ConversationPlannerPage() {
   function begin(mode: 'single' | 'group') {
     answersChanged()
     setEntryMode(mode)
-    if (mode === 'single') {
-      updateParty(1)
-    }
+    // The group select only contains 2 and 3. Keep its React state and the
+    // serialized answer in sync with the visually selected default option.
+    updateParty(mode === 'single' ? 1 : 2)
   }
 
   function applyTestPreset() {

@@ -8,7 +8,10 @@ from typing import Any
 import httpx
 import pytest
 
-from app.application.reviewed_fallback_understanding import reviewed_member_fallback_proposal
+from app.application.reviewed_fallback_understanding import (
+    reviewed_fallback_proposal,
+    reviewed_member_fallback_proposal,
+)
 from app.application.collaboration_planning_bridge import CollaborationPlanningBridge
 from app.application.planning_boundary_service import PlanningBoundaryService
 from app.application.recommendation_service import project_collaboration_recommendation_trip
@@ -225,6 +228,51 @@ async def test_reviewed_fixed_answers_create_deterministic_group_revision_when_m
     assert stored["recognition_source"] == "REVIEWED_FIXED_QUESTIONS"
     assert stored["degraded_reason"] == "LLM_UNAVAILABLE"
     assert stored["llm_call_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_group_model_failure_uses_structured_answers_without_repeating_party_question(
+    tmp_path: Path,
+) -> None:
+    gateway = CountingGateway(_result(failure_code="LLM_SCHEMA_INVALID"))
+    service, _ = _service(tmp_path, gateway)
+    request = _reviewed_request(participant_count=3).model_copy(
+        update={"reviewed_fallback": False}
+    )
+
+    outcome = await service.create_initial(
+        request,
+        idempotency_key="t004-three-person-no-repeat-01",
+    )
+
+    assert isinstance(outcome, TripDraftRevision)
+    assert len(outcome.understanding.participants) == 3
+    assert set(outcome.member_bindings) == {"member-1", "member-2", "member-3"}
+
+
+@pytest.mark.asyncio
+async def test_explicit_group_count_overrides_single_participant_model_proposal(
+    tmp_path: Path,
+) -> None:
+    single_proposal = reviewed_fallback_proposal(
+        _reviewed_request(participant_count=1)
+    )
+    gateway = CountingGateway(_result(proposal=single_proposal))
+    service, _ = _service(tmp_path, gateway)
+
+    outcome = await service.create_initial(
+        _reviewed_request(participant_count=2),
+        idempotency_key="t004-two-person-model-alignment-01",
+    )
+
+    assert isinstance(outcome, TripDraftRevision)
+    assert len(outcome.understanding.participants) == 2
+    assert set(outcome.member_bindings) == {"member-1", "member-2"}
+    assert all(
+        item.field_path != "participants"
+        for item in outcome.understanding.missing_fields
+    )
+    assert outcome.understanding.participants[1].care_draft is None
 
 
 @pytest.mark.asyncio

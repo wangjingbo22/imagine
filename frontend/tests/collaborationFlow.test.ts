@@ -201,6 +201,7 @@ test('organizer page serially rolls the collaboration version and prepares READY
   assert.match(page, /function applyGroupOrganizerTestPreset\(\)/)
   assert.match(page, /setEntryMode\('group'\)/)
   assert.match(page, /setPartyCount\(2\)/)
+  assert.match(page, /updateParty\(mode === 'single' \? 1 : 2\)/)
   assert.match(page, /填入北京多人组织者模板/)
 })
 

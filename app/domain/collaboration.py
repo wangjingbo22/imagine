@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import StrEnum
+import re
 from typing import Literal
 from uuid import UUID
 
@@ -129,12 +130,23 @@ class ConversationSubmission(CollaborationModel):
         return "\n\n".join((f"【用户初始描述】\n{self.natural_language_request}", *sections))
 
     @property
-    def participant_count(self) -> int:
+    def explicit_participant_count(self) -> int | None:
         text = self.answers[1].answer
-        for value in ("3", "三", "2", "二", "两", "1", "一"):
-            if value in text:
-                return {"3": 3, "三": 3, "2": 2, "二": 2, "两": 2, "1": 1, "一": 1}[value]
-        return 1
+        match = re.search(
+            r"(?<!\d)(?P<count>[123一二两三])\s*(?:个)?人(?:出行|同行)?",
+            text,
+        )
+        if match is not None:
+            return {
+                "3": 3, "三": 3,
+                "2": 2, "二": 2, "两": 2,
+                "1": 1, "一": 1,
+            }[match.group("count")]
+        return None
+
+    @property
+    def participant_count(self) -> int:
+        return self.explicit_participant_count or 1
 
 
 class OrganizerConversationRequest(ConversationSubmission):

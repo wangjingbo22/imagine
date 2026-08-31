@@ -251,6 +251,90 @@ class TripDraftRevisionService(TripDraftRevisionPort):
             createdAt=created_at,
         )
 
+    @staticmethod
+    def _align_organizer_participant_count(
+        proposal: TripUnderstandingProposal,
+        expected_count: int,
+    ) -> TripUnderstandingProposal:
+        """Keep the explicit party answer authoritative over model inference."""
+
+        candidate = proposal.model_dump(mode="python", by_alias=True)
+        participants = list(candidate["participants"][:expected_count])
+        while len(participants) < expected_count:
+            index = len(participants)
+            member_key = f"member-{index + 1}"
+            participants.append(
+                {
+                    "memberKey": member_key,
+                    "nickname": None,
+                    "budgetCapCents": None,
+                    "interests": [],
+                    "mustVisit": [],
+                    "avoidPlaces": [],
+                    "careDraft": None,
+                }
+            )
+        candidate["participants"] = participants
+        allowed_member_keys = {f"member-{index}" for index in range(1, expected_count + 1)}
+
+        def applies_to_kept_participant(item: dict[str, object]) -> bool:
+            field_path = str(item.get("fieldPath", ""))
+            if field_path == "participants":
+                return False
+            member_key = item.get("memberKey")
+            if member_key is not None and member_key not in allowed_member_keys:
+                return False
+            match = re.match(r"participants\[(\d+)\]", field_path)
+            return match is None or int(match.group(1)) < expected_count
+
+        for collection in (
+            "fieldEvidence",
+            "missingFields",
+            "ambiguities",
+            "confirmationQuestions",
+        ):
+            candidate[collection] = [
+                item
+                for item in candidate[collection]
+                if applies_to_kept_participant(item)
+            ]
+
+        existing_missing_members = {
+            item.get("memberKey")
+            for item in candidate["missingFields"]
+            if str(item.get("fieldPath", "")).endswith(
+                ".careDraft.assistanceTypeHint"
+            )
+        }
+        for index, participant in enumerate(participants):
+            member_key = str(participant["memberKey"])
+            if participant.get("careDraft") is not None or member_key in existing_missing_members:
+                continue
+            field_path = f"participants[{index}].careDraft.assistanceTypeHint"
+            candidate["missingFields"].append(
+                {
+                    "fieldPath": field_path,
+                    "memberKey": member_key,
+                    "code": "MISSING",
+                    "questionKey": "MEMBER_CARE_PRESET",
+                }
+            )
+            candidate["confirmationQuestions"].append(
+                {
+                    "fieldPath": field_path,
+                    "memberKey": member_key,
+                    "questionKey": "MEMBER_CARE_PRESET",
+                    "prompt": "请由该成员确认自己的关怀模式。",
+                    "choices": [
+                        "ORDINARY",
+                        "PARENT_CHILD",
+                        "LOW_STAMINA",
+                        "MOBILITY_ASSISTANCE_BETA",
+                    ],
+                }
+            )
+        return TripUnderstandingProposal.model_validate(candidate)
+
     async def create_initial(
         self,
         payload: OrganizerConversationRequest,
@@ -284,7 +368,10 @@ class TripDraftRevisionService(TripDraftRevisionPort):
         try:
             extraction = await self._understand(request)
             if extraction.decision == "FIXED_QUESTIONS":
-                if payload.reviewed_fallback:
+                if (
+                    payload.reviewed_fallback
+                    or (payload.explicit_participant_count or 1) > 1
+                ):
                     proposal = validate_trip_understanding(
                         request,
                         reviewed_fallback_proposal(payload),
@@ -320,7 +407,16 @@ class TripDraftRevisionService(TripDraftRevisionPort):
                 )
                 return outcome
             assert extraction.proposal is not None
-            proposal = validate_trip_understanding(request, extraction.proposal)
+            proposal = (
+                self._align_organizer_participant_count(
+                    extraction.proposal,
+                    payload.explicit_participant_count,
+                )
+                if payload.explicit_participant_count is not None
+                else extraction.proposal
+            )
+            proposal = validate_trip_understanding(request, proposal)
+            extraction = extraction.model_copy(update={"proposal": proposal})
             bindings = {
                 participant.member_key: uuid4()
                 for participant in proposal.participants

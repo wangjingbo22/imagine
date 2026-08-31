@@ -10,6 +10,7 @@ from app.domain.collaboration import (
     CollaborationStatus,
     ConversationAnswer,
     ConversationSubmission,
+    QUESTION_IDS,
     TripFlowKind,
 )
 from app.infrastructure.collaboration_store import (
@@ -83,6 +84,31 @@ def test_fixed_six_questions_must_be_complete_and_ordered() -> None:
         answers=answers,
     )
     assert submission.participant_count == 1
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        ("2个人出行；组织者昵称：张三", 2),
+        ("三人同行；组织者昵称：小二", 3),
+        ("1个人出行；组织者昵称：两两", 1),
+    ],
+)
+def test_party_count_comes_from_the_party_phrase_not_the_nickname(
+    answer: str,
+    expected: int,
+) -> None:
+    answers = [
+        ConversationAnswer(questionId=question, answer="已回答")
+        for question in QUESTION_IDS
+    ]
+    answers[1] = ConversationAnswer(questionId="party", answer=answer)
+    submission = ConversationSubmission(
+        naturalLanguageRequest="测试同行人数",
+        answers=answers,
+    )
+
+    assert submission.participant_count == expected
     assert "【个人偏好（兴趣与地点限制）】" in submission.transcript
     assert "preferences:" not in submission.transcript
     with pytest.raises(ValueError):
