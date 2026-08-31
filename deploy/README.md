@@ -1,4 +1,4 @@
-# Sprint 1 公网部署
+# 公网部署与本地生产演练
 
 ## Render HTTPS
 
@@ -12,8 +12,10 @@ Render 会为两个服务自动签发 HTTPS 证书，并为每个服务提供 `o
 `AMAP_WEB_SERVICE_KEY`。要启用百炼自然语言识别，还必须填写
 `BAILIAN_API_KEY`；两项都应使用 Render Secret，不能提交真实值。
 
+当前公网地址是独立部署快照。部署后应通过 API 健康检查中的 `buildSha` 确认实际版本；公网可访问不等于最新 `main` 已部署，也不等于 S2-T032 多人公网验收通过。
+
 前端镜像默认以真实 API 模式构建：`VITE_USE_MOCK_API=false`。浏览器只会请求
-同源的 `/api/*`，再由 Nginx 转发给 API 服务；不要在前端环境变量中填写高德 Key。
+同源的 `/api/*`，再由 Nginx 转发给 API 服务；不要在前端环境变量中填写后端 Web Service Key。容器启动时还需要为前端 Web 服务配置 `VITE_AMAP_JS_API_KEY` 和 `VITE_AMAP_SECURITY_JS_CODE`，否则真实地图脚本可能不可用；这两个值不能提交到 Git。
 
 ### 首次创建
 
@@ -28,6 +30,8 @@ Render 会为两个服务自动签发 HTTPS 证书，并为每个服务提供 `o
 Render 的临时文件系统会在重新部署或实例替换时丢失 SQLite 数据。需要保留行程、
 执行记录和高德缓存时，请在 API 服务添加一个挂载到 `/app/data` 的 Persistent Disk；
 然后保持 `PLAN_VERSION_DB_PATH` 与 `AMAP_CACHE_DB_PATH` 的默认配置不变。
+
+S2-T032 当前仍为 `LOCAL_AUTOMATION_PASS / PUBLIC_UAT_NOT_RUN`。真实高德/百炼、三浏览器成员会话、GPS/相机权限和 375px/768px 公网连续链路，必须按仓库中的专项验收文档单独留证。
 
 首次部署后检查：
 

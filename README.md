@@ -20,7 +20,9 @@
   <img src="docs/assets/readme/hero-home.png" alt="行知旅伴项目首页，展示预算约束、关怀出行与高德事实核验流程" width="1100">
 </p>
 
-> 当前阶段：**Sprint 2 Beta** —— 单人单日正式计划与执行闭环保持稳定，2—3 人需求理解、成员确认、冲突处理、候选规划和公平评分已进入主线；多人正式 PlanVersion 与执行链仍保持失败关闭。
+> 当前阶段：**Sprint 2 Beta** —— 单人单日闭环保持稳定；S2-T032 已完成多人六问、成员确认、冲突处理、GROUP Trip、共享 Plan V1、执行/到达、照片、迟到/疲劳、Plan V2 与 MemoryTimeline 的本地自动化链路。
+
+> 当前基线：`main@8d82c4f`。T032 当前结论为 `LOCAL_AUTOMATION_PASS / PUBLIC_UAT_NOT_RUN`；生产级 `RouteCandidateBuilderPort`、真实高德/百炼、公网三会话连续验收以及真实 GPS/相机权限验收仍未完成。
 
 > 公网说明：Web 与 API 已通过 HTTPS 提供。公网环境是独立部署的演示快照，功能与健康检查返回的 `buildSha` 可能暂时落后于当前 `main`，不能替代本地提交和验收记录。
 
@@ -56,15 +58,16 @@ Sprint 2 在此基础上增加 2—3 人草稿修订、邀请与成员确认、�
 单人主链：自然语言需求 → 关怀确认 → 高德事实 → 确定性校验 → Plan V1
           → 执行与实际消费 → 单次后缀重规划评估 → Plan V2 决策 → 旅行总结
 
-多人候选链：组织者建草稿 → 邀请成员 → 各自确认 → 冲突复核
-            → GROUP 候选规划与公平评分 → 唯一推荐
+多人本地闭环：组织者建草稿 → 邀请成员 → 各自确认 → 冲突复核
+              → GROUP 候选规划与公平评分 → 唯一推荐
+              → 共享 Plan V1 → 执行/到达/照片 → LATE/FATIGUE → Plan V2 → 回忆
 ```
 
-多人候选当前不能继续签发正式 PlanVersion，也不能进入执行状态机；推荐链中的生产级真实路线候选构建仍在收口。
+多人链路已在本地 ASGI/SQLite/stub 集成测试中贯通。正式推荐编排仍依赖生产级路线候选构建器；当前默认装配未提供该依赖，不能据此宣称生产推荐和公网闭环已完成。
 
 ## 产品演示
 
-首屏由当前 `main` 的项目首页直接截取；以下业务状态图由当前前端结合无敏感信息的本地验收 Fixture 渲染，用于稳定复现 UI 能力，不代表公网数据，也不表示多人候选已经签发为正式 PlanVersion。所有图片均不含 API Key 或临时调试页。
+首屏由当前 `main` 的项目首页直接截取；业务状态图由当前前端结合无敏感信息的本地验收 Fixture 渲染，用于稳定复现 UI 能力。图片不代表公网数据或公网验收结果；T032 的本地测试已覆盖多人 Plan V1、执行、V2 和回忆，但仍不能替代公网连续链路。
 
 ### 多人候选与公平推荐
 
@@ -72,7 +75,7 @@ Sprint 2 在此基础上增加 2—3 人草稿修订、邀请与成员确认、�
   <img src="docs/assets/readme/collaboration-review.png" alt="行知旅伴两人成员公平评分、照顾点与妥协说明页面" width="1100">
 </p>
 
-候选层按最低成员分优先排序，并同时展示各成员得分、照顾点和妥协说明。该能力当前止于多人候选与唯一推荐，尚未进入多人正式 PlanVersion 和执行状态机。
+候选层按最低成员分优先排序，并同时展示各成员得分、照顾点和妥协说明。多人推荐结果可在本地闭环中进入共享 GROUP Plan V1 及后续执行链；生产级路线候选构建和公网验收仍待完成。
 
 ### 执行总结与旅途回忆
 
@@ -204,6 +207,8 @@ npm run build
 
 这些命令对应当前仓库的 `pyproject.toml` 与 `frontend/package.json`；测试结果应以最近一次本地验证输出或对应提交记录为准，不在首页硬编码易过时的通过数量。
 
+T032 专项范围和验收边界见 [多人本地/公网验收说明](docs/testing/s2_t032_multiplayer_public_acceptance.md)、[T032 追溯记录](docs/traceability/sprint2/lin_canhan_s2_t032_day3.md) 和 [证据目录说明](docs/testing/evidence/s2_t032/README.md)。当前专项结论为 `LOCAL_AUTOMATION_PASS / PUBLIC_UAT_NOT_RUN`；全量回归、构建和公网结果应以最新命令输出及脱敏证据为准。
+
 ## 路线图
 
 勾选项表示已在稳定提交状态中验证；未完成项保持未勾选。
@@ -230,7 +235,8 @@ npm run build
 - [x] 2—3 人严格需求契约、草稿修订、邀请与成员独立确认
 - [x] 结构化硬冲突复核、权限范围与重新确认门禁
 - [x] GROUP 候选规划、逐成员 HARD 校验、公平评分与唯一排序
-- [ ] 生产级真实路线候选构建器与多人正式 PlanVersion/执行链
+- [x] GROUP canonical Trip、共享 Plan V1、本地执行/到达、Plan V2 与 MemoryTimeline 集成链
+- [ ] 正式 recommendations 编排中的生产级 `RouteCandidateBuilderPort`
 - [x] 一次定位证据、确定性到达判断与统一完成事件服务端链
 - [ ] 浏览器一次性定位交互与公网移动设备验收
 - [x] 任务照片压缩、隐私处理、替换、删除与数量守卫
@@ -271,6 +277,8 @@ npm run build
 - [Sprint 2 主线合并后独立验收](docs/testing/2026-08-27-s2-t001-post-main-integration-acceptance-report.md)
 - [Sprint 2 主线合并后产品一致性复核](docs/reviews/2026-08-27-s2-t001-post-main-final-conformance-review.md)
 - [Sprint 2 追溯目录](docs/traceability/sprint2/)
+- [S2-T032 多人公网闭环验收说明](docs/testing/s2_t032_multiplayer_public_acceptance.md)
+- [S2-T032 验收证据目录](docs/testing/evidence/s2_t032/README.md)
 - [迟到/疲劳重规划规则](docs/rules/s2_t021_t022_execution_replanning.md)
 - [AI 使用说明](doc/ai_usage.md)
 
@@ -283,7 +291,7 @@ npm run build
 - 起终点只支持显式输入和有限自然语言表达，复杂自由表达仍需用户确认。
 - T017 与 S2-T021 当前都只从可信事实生成一个确定性后缀候选；T018 可以校验并排序调用方显式提交的多个候选。S2 推荐模块已具备百炼白名单提议、确定性枚举和公平排序，但生产级 `RouteCandidateBuilderPort` 尚未装配，因此服务端自主真实路线多候选 E2E 仍未完成。
 - S2-T021 已具备确认事件、可信事实恢复、事件感知后缀、冻结、四域重验、零写入无解和 readiness 绑定决策；地点、路线、价格及设施事实不会被规划器改写。
-- 2—3 人能力当前只开放到 `CandidatePlanRequest → CandidatePlan → fairness` 候选层。GROUP 候选不能签发正式 V1/V2，也不能进入 PlanVersion 与执行状态链。
+- 2—3 人的 GROUP Trip、共享 V1、执行、调整、V2 和 MemoryTimeline 已完成本地集成；正式推荐编排仍受 `RouteCandidateBuilderPort` 装配状态限制，公网三会话链仍未验收。
 - 一次定位的证据、到达判断和完成事件服务端链已经存在，但浏览器真实定位交互与移动设备公网验收仍待完成；系统明确不做持续 GPS。
 - 任务照片与回忆属于课程原型能力，媒体保存在 SQLite；公网 Render 使用临时文件系统时，未挂载 Persistent Disk 的数据会在重新部署或实例替换后丢失。
 - 公网 HTTPS Web 与 API 当前可访问，但它们是独立部署快照；应通过健康检查的 `buildSha` 判断版本，不把公网可访问性等同于最新 `main` 已部署，也不展示没有可核验运行页的 build 徽章。
