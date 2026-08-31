@@ -1,6 +1,6 @@
 import { ArrowRight, CalendarDays, Check, Clock3, Copy, Link2, LockKeyhole, MapPin, Sparkles, UserRound, UsersRound, WalletCards } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   confirmOrganizerParticipant,
   createOrganizerConversation,
@@ -58,15 +58,23 @@ function questionIndexForConfirmationDetails(
 }
 
 export function ConversationPlannerPage() {
+  const [searchParams] = useSearchParams()
+  const opensGroupCreation = searchParams.get('mode') === 'group'
   const [description, setDescription] = useState('')
-  const [answers, setAnswers] = useState<string[]>(Array(questions.length).fill(''))
+  const [answers, setAnswers] = useState<string[]>(() => {
+    const initial = Array<string>(questions.length).fill('')
+    if (opensGroupCreation) initial[1] = '2个人出行；组织者昵称：'
+    return initial
+  })
   const [tripFields, setTripFields] = useState({ city: '', date: '', startTime: '', endTime: '' })
   const [routeFields, setRouteFields] = useState({ start: '', end: '', budget: '' })
   const [organizerNickname, setOrganizerNickname] = useState('')
-  const [partyCount, setPartyCount] = useState(1)
+  const [partyCount, setPartyCount] = useState(opensGroupCreation ? 2 : 1)
   const [personalBudget, setPersonalBudget] = useState('')
   const [assistanceMode, setAssistanceMode] = useState('ORDINARY')
-  const [entryMode, setEntryMode] = useState<'single' | 'group' | null>(null)
+  const [entryMode, setEntryMode] = useState<'single' | 'group' | null>(
+    opensGroupCreation ? 'group' : null,
+  )
   const [inviteLink, setInviteLink] = useState('')
   const [step, setStep] = useState(0)
   const [loading, setLoading] = useState(false)

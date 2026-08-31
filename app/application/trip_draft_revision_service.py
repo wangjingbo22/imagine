@@ -214,7 +214,14 @@ class TripDraftRevisionService(TripDraftRevisionPort):
         self,
         request: TripUnderstandingRequest,
     ) -> TripUnderstandingGatewayResult:
-        result = await self.gateway.understand(request)
+        raw_result = await self.gateway.understand(request)
+        try:
+            result = TripUnderstandingGatewayResult.model_validate(
+                raw_result,
+                from_attributes=True,
+            )
+        except ValidationError as error:
+            raise self._app_error("TRIP_UNDERSTANDING_INVALID") from error
         if result.decision == "FIXED_QUESTIONS":
             if result.failure_code is None or result.proposal is not None:
                 raise self._app_error("TRIP_UNDERSTANDING_INVALID")

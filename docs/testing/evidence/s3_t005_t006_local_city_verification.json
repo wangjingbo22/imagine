@@ -1,0 +1,73 @@
+{
+  "schemaVersion": "1.0",
+  "verifiedAt": "2026-08-31",
+  "scope": "LOCAL_ONLY",
+  "remoteModified": false,
+  "branch": "zq-S2-NEW",
+  "syncedBaseCommit": "58d72a4",
+  "source": {
+    "workbook": "行知旅伴_V2.3_Sprint3收尾待办列表_含负责人.xlsx",
+    "sheet": "Sprint3收尾待办",
+    "range": "A14:M15"
+  },
+  "tasks": {
+    "S3-T005": {
+      "status": "PASS",
+      "cities": [
+        {"cityName": "北京市", "cityCode": "110000", "status": "PASS"},
+        {"cityName": "上海市", "cityCode": "310000", "status": "PASS"},
+        {"cityName": "成都市", "cityCode": "510100", "status": "PASS"}
+      ],
+      "coveredStages": [
+        "CITY_CONTEXT",
+        "CARE_CONSTRAINTS",
+        "PLACES_AND_ROUTES",
+        "PROVIDER_FACT_REFS",
+        "UNIQUE_V1",
+        "EXECUTION_EVENTS",
+        "V2_ACCEPT_DECISION",
+        "MEMORY_TIMELINE",
+        "SQLITE_LINEAGE",
+        "CACHE_ISOLATION",
+        "PROVENANCE"
+      ]
+    },
+    "S3-T006": {
+      "status": "PASS",
+      "provider": "AMAP",
+      "online": true,
+      "cities": [
+        {
+          "cityName": "西安市",
+          "cityCode": "610100",
+          "placeSearch": "PASS",
+          "walkingRoute": "PASS",
+          "transitRoute": "PASS",
+          "careRisk": "PASS"
+        },
+        {
+          "cityName": "杭州市",
+          "cityCode": "330100",
+          "placeSearch": "PASS",
+          "walkingRoute": "PASS",
+          "transitRoute": "PASS",
+          "careRisk": "PASS"
+        }
+      ],
+      "assertions": {
+        "sameCityPlaces": true,
+        "cityCodeInProviderRequest": true,
+        "cityCodeInCacheKey": true,
+        "missingFacilityEvidenceNeedsConfirmation": true,
+        "unknownPriceIsNullNotZero": true,
+        "taxiEstimateUsesEstimatedStatus": true
+      }
+    }
+  },
+  "testResults": {
+    "targeted": "6 passed, 2 skipped",
+    "live": "3 passed, 1 deselected",
+    "compatibility": "8 passed",
+    "fullBackend": "719 passed, 2 skipped"
+  }
+}
