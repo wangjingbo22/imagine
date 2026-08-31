@@ -317,3 +317,12 @@ Schema 校验失败沿用人工确认结构：
 - 放宽会创建新的 T002 revision。旧确认随即变为 `NEEDS_RECONFIRMATION`，状态进入 `COLLECTING_MEMBERS`；只有所有成员在新 revision 重新确认且硬冲突为零，才可进入 `READY_TO_PLAN`。
 - `MemberSessionView` 返回 `collaborationVersion`，确保成员解决自己的确认项时能提交严格 `expectedVersion`。
 - 生产 `POST /api/v2/trips/conversations` 已接入 T002 `TripDraftRevision`；S2-T029 必须复用该 revision、权限与 readiness 结果，任何失败均不得伪造 READY 或规划成功。
+
+## 15. S2-T012 任务照片生命周期接口
+
+- `GET /api/v2/trips/{tripId}/tasks/{taskId}/media`：读取任务当前活跃照片；无照片时返回 `data: null`。
+- `POST /api/v2/trips/{tripId}/tasks/{taskId}/media`：请求体为 `dataUrl`、`mimeType`（`image/jpeg` 或 `image/webp`）和 `byteSize`；同一任务已有照片时软替换，且同一行程最多保留 8 张活跃照片。
+- `DELETE /api/v2/trips/{tripId}/tasks/{taskId}/media`：软删除任务当前活跃照片。
+- 成功响应沿用 `{ "code": 200, "message": "success", "data": ... }`；照片对象字段为 `mediaId/taskId/dataUrl/mimeType/byteSize/createdAt`。
+- `TRIP_MEDIA_LIMIT_REACHED` 为 HTTP 409 且不可重试；`TASK_MEDIA_NOT_FOUND` 为 HTTP 404 且不可重试；`MEDIA_STORAGE_UNAVAILABLE` 为 HTTP 503 且可重试。
+- `MEDIA_STORAGE_UNAVAILABLE` 覆盖媒体 SQLite 初始化、读取、替换和删除故障；替换必须保持单事务语义，写入失败时旧照片仍可读，重试成功后才完成替换。
