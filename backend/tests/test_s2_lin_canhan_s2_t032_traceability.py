@@ -192,7 +192,9 @@ def test_t032_local_pass_cannot_be_mistaken_for_public_or_device_pass() -> None:
     base = trace["verifiedAgainstMainCommit"]
     assert base == "e248e9ad88db9b4f40b2ed087844df7fcdeae10b"
     assert re.fullmatch(r"[0-9a-f]{40}", base)
-    assert trace["implementationRevision"] == "WORKTREE_PENDING_COMMIT"
+    implementation = trace["implementationRevision"]
+    assert implementation == "49025a07e0dde8ebc9012722422f63daeb2ef38f"
+    assert re.fullmatch(r"[0-9a-f]{40}", implementation)
 
     local = trace["localVerification"]
     assert local["status"] == "LOCAL_AUTOMATION_PASS"
