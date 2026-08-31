@@ -48,6 +48,18 @@ async function assertResponsiveContract(page: Page) {
     }),
   )
   expect(undersized).toEqual([])
+  await page.keyboard.press('Tab')
+  const keyboardFocus = await page.locator(':focus').evaluate((element) => {
+    const style = getComputedStyle(element)
+    return {
+      tagName: element.tagName,
+      outlineStyle: style.outlineStyle,
+      outlineWidth: Number.parseFloat(style.outlineWidth),
+    }
+  })
+  expect(['BUTTON', 'A', 'INPUT', 'TEXTAREA']).toContain(keyboardFocus.tagName)
+  expect(keyboardFocus.outlineStyle).not.toBe('none')
+  expect(keyboardFocus.outlineWidth).toBeGreaterThan(0)
   await assertReducedMotionContract(page)
 }
 

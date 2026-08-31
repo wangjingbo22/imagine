@@ -5,6 +5,14 @@ export const S2_T024_VIEWPORTS = [
   { id: 'RESP-S2-001-768', width: 768, height: 1024 },
 ] as const
 
+// Sprint 3 keeps the Sprint 2 phone/tablet gates and adds the desktop
+// breakpoints required for the release candidate visual QA.
+export const S3_T001_VIEWPORTS = [
+  ...S2_T024_VIEWPORTS,
+  { id: 'RESP-S3-001-1366', width: 1366, height: 900 },
+  { id: 'RESP-S3-001-1440', width: 1440, height: 900 },
+] as const
+
 export const S2_T024_GOLDEN_PHASES = [
   'SIX_QUESTION_CONFIRMATION',
   'UNIQUE_RECOMMENDATION',

@@ -4,6 +4,7 @@ import {
   S2_T024_GOLDEN_PHASES,
   S2_T024_MINIMUM_TARGET_PX,
   S2_T024_VIEWPORTS,
+  S3_T001_VIEWPORTS,
   hasNoHorizontalOverflow,
   isPrimaryTargetReachable,
   isT024AcceptanceScope,
@@ -16,6 +17,13 @@ test('RESP-S2-001 freezes the 375px and 768px viewports', () => {
       { id: 'RESP-S2-001-375', width: 375 },
       { id: 'RESP-S2-001-768', width: 768 },
     ],
+  )
+})
+
+test('RESP-S3-001 adds the 1366px and 1440px release-candidate desktop gates', () => {
+  assert.deepEqual(
+    S3_T001_VIEWPORTS.map(({ width }) => width),
+    [375, 768, 1366, 1440],
   )
 })
 

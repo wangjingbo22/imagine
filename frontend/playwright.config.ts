@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test'
-import { S2_T024_VIEWPORTS } from './src/services/s2T024Acceptance'
+import { S3_T001_VIEWPORTS } from './src/services/s2T024Acceptance'
 
 const publicBaseUrl = process.env.S2_T024_BASE_URL?.trim()
 
@@ -30,7 +30,7 @@ export default defineConfig({
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,
       },
-  projects: S2_T024_VIEWPORTS.map((viewport) => ({
+  projects: S3_T001_VIEWPORTS.map((viewport) => ({
     name: viewport.id,
     use: {
       viewport: { width: viewport.width, height: viewport.height },
