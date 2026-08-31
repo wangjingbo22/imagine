@@ -24,6 +24,7 @@ import {
   collaborationPlanningDraft,
   invitationTokenFromText,
 } from '../services/collaborationDraft'
+import { getStoredOrganizerToken, setStoredOrganizerToken, setStoredPlanContext } from '../services/organizerStorage'
 
 const questions = [
   ['trip', '这次想去哪里、哪天出发、当天大约什么时间可用？'],
@@ -96,7 +97,7 @@ export function ConversationPlannerPage() {
   const preview = useMemo(() => revision?.understanding.trip, [revision])
   const previewParticipant = revision?.understanding.participants[0]
   const organizerToken = revision
-    ? result?.organizerAccess.organizerToken ?? window.sessionStorage.getItem(`organizer-token:${revision.tripId}`)
+    ? result?.organizerAccess.organizerToken ?? getStoredOrganizerToken(revision.tripId)
     : null
   const organizerConfirmed = collaboration?.participants.some((item) => item.role === 'ORGANIZER' && item.confirmationStatus === 'CONFIRMED') ?? false
   const memberParticipants = collaboration?.participants.filter((item) => item.role === 'MEMBER') ?? []
@@ -280,7 +281,7 @@ export function ConversationPlannerPage() {
       }
       setFallback(null)
       setResult(created)
-      window.sessionStorage.setItem(`organizer-token:${created.revision.tripId}`, created.organizerAccess.organizerToken)
+      setStoredOrganizerToken(created.revision.tripId, created.organizerAccess.organizerToken)
       setPlanningDraft(collaborationPlanningDraft(created.revision))
       setCollaboration(await getOrganizerCollaboration(created.revision.tripId, created.organizerAccess.organizerToken))
     } catch (caught) {
@@ -365,7 +366,7 @@ export function ConversationPlannerPage() {
         : null
       setPlanningDraft(draft)
       if (draft && canEnterRecommendation(current)) {
-        window.sessionStorage.setItem(`s2-plan-context:${revision.tripId}`, JSON.stringify({ draft }))
+        setStoredPlanContext(revision.tripId, draft)
       }
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === 'PARTICIPANT_CONFIRMATION_REQUIRED') {
@@ -446,7 +447,10 @@ export function ConversationPlannerPage() {
           </div>}
           {collaboration && hasMemberParticipants && links.length === 0 && <div className="invite-card invite-card--pending"><strong>成员邀请入口</strong><p>{!organizerConfirmed ? '点击上方“确认组织者资料并生成成员邀请链接”，生成后成员可直接打开或复制自己的专属链接。' : needsInvitations ? '点击上方“生成成员邀请链接”，生成后成员可直接打开或复制自己的专属链接。' : '邀请已创建，但当前标签页没有可展示的链接密钥。请返回创建页面重新发起一趟多人行程。'}</p></div>}
           {links.length > 0 && <div className="invite-card"><strong>成员邀请链接</strong><p>每个链接只对应一名成员，在该成员确认资料前可以重复打开。再次打开会生成新会话，并让该成员上一次打开的旧标签页失效。</p>{links.map((item, index) => <div className="invite-row" key={item.invitationId}><span>成员 {index + 1}</span><code>{item.link}</code><div className="invite-row__actions"><a className="button button--soft" href={item.link}><ArrowRight size={14} />进入成员页</a><button type="button" className="button button--soft" onClick={() => void navigator.clipboard.writeText(item.link)}><Copy size={14} />复制</button></div></div>)}</div>}
-          {collaboration && canEnterRecommendation(collaboration) && <button className="button button--primary" type="button" onClick={() => { if (planningDraft) window.sessionStorage.setItem(`s2-plan-context:${collaboration.tripId}`, JSON.stringify({ draft: planningDraft })); navigate(`/recommendation/${collaboration.tripId}`) }}>查看唯一推荐 <ArrowRight size={18} /></button>}
+          {collaboration && canEnterRecommendation(collaboration) && <button className="button button--primary" type="button" onClick={() => {
+            if (planningDraft) setStoredPlanContext(collaboration.tripId, planningDraft)
+            navigate(`/recommendation/${collaboration.tripId}`)
+          }}>查看唯一推荐 <ArrowRight size={18} /></button>}
         </section>}
       </section>
     </main>

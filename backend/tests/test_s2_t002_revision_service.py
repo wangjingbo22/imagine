@@ -178,6 +178,34 @@ async def test_concurrent_initial_same_answer_calls_gateway_once(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_cancelled_initial_answer_releases_pending_revision(tmp_path: Path) -> None:
+    gateway = CountingTripUnderstandingGateway(
+        _extraction(),
+        entered=asyncio.Event(),
+        release=asyncio.Event(),
+    )
+    service, repository = _service(tmp_path, gateway)
+
+    operation = asyncio.create_task(
+        service.create_initial(_organizer_request(), idempotency_key="initial-cancelled-0001")
+    )
+    await gateway.entered.wait()
+    operation.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await operation
+
+    with repository._connect() as connection:
+        head = connection.execute(
+            "SELECT current_revision, pending_revision FROM trip_draft_heads"
+        ).fetchone()
+        command = connection.execute(
+            "SELECT status, failure_code FROM trip_draft_commands"
+        ).fetchone()
+    assert tuple(head) == (0, None)
+    assert tuple(command) == ("FAILED", "DRAFT_OPERATION_INTERRUPTED")
+
+
+@pytest.mark.asyncio
 async def test_member_correction_preserves_other_members_and_bindings(tmp_path: Path) -> None:
     initial_gateway = CountingTripUnderstandingGateway(_extraction())
     service, repository = _service(tmp_path, initial_gateway)
@@ -216,6 +244,198 @@ async def test_member_correction_preserves_other_members_and_bindings(tmp_path: 
     assert revised.understanding.trip == initial.understanding.trip
     assert revised.understanding.participants[1] == initial.understanding.participants[1]
     assert _revision_count(repository) == 2
+
+
+@pytest.mark.asyncio
+async def test_compact_member_profile_is_merged_before_persistence(tmp_path: Path) -> None:
+    initial_gateway = CountingTripUnderstandingGateway(_extraction())
+    service, repository = _service(tmp_path, initial_gateway)
+    initial = await service.create_initial(
+        _organizer_request(),
+        idempotency_key="initial-before-compact-member-0001",
+    )
+    compact = TripUnderstandingProposal.model_validate(
+        {
+            "schemaVersion": "1.0",
+            "trip": {
+                "cityName": None,
+                "travelDate": None,
+                "startTime": None,
+                "endTime": None,
+                "startLocationText": None,
+                "endLocationText": None,
+                "budgetCents": None,
+            },
+            "participants": [
+                {
+                    "memberKey": "member-1",
+                    "nickname": "Bao updated",
+                    "budgetCapCents": 45_000,
+                    "interests": ["tea"],
+                    "mustVisit": ["Yu Garden"],
+                    "avoidPlaces": ["nightclubs"],
+                    "careDraft": None,
+                }
+            ],
+            "fieldEvidence": [
+                {
+                    "fieldPath": "participants[0].nickname",
+                    "memberKey": "member-1",
+                    "sourceType": "USER_TEXT",
+                    "sourceText": "Bao updated",
+                },
+                {
+                    "fieldPath": "participants[0].budgetCapCents",
+                    "memberKey": "member-1",
+                    "sourceType": "USER_TEXT",
+                    "sourceText": "45000",
+                },
+                {
+                    "fieldPath": "participants[0].interests[0]",
+                    "memberKey": "member-1",
+                    "sourceType": "USER_TEXT",
+                    "sourceText": "tea",
+                },
+                {
+                    "fieldPath": "participants[0].mustVisit[0]",
+                    "memberKey": "member-1",
+                    "sourceType": "USER_TEXT",
+                    "sourceText": "Yu Garden",
+                },
+                {
+                    "fieldPath": "participants[0].avoidPlaces[0]",
+                    "memberKey": "member-1",
+                    "sourceType": "USER_TEXT",
+                    "sourceText": "nightclubs",
+                },
+            ],
+            "missingFields": [],
+            "ambiguities": [],
+            "confirmationQuestions": [],
+        }
+    )
+    service.gateway = CountingTripUnderstandingGateway(
+        GatewayResult(
+            decision="MODEL_PROPOSAL",
+            proposal=compact,
+            failure_code=None,
+            call_count=1,
+            model="compact-member-model",
+        )
+    )
+
+    revised = await service.submit_participant_conversation(
+        trip_id=initial.trip_id,
+        participant_id=initial.member_bindings["member-2"],
+        base_revision=initial.revision,
+        submission=_submission(
+            "Bao updated",
+            "45000",
+            "tea",
+            "Yu Garden",
+            "nightclubs",
+        ),
+        idempotency_key="compact-member-answer-0001",
+    )
+
+    assert revised.revision == 2
+    assert revised.understanding.participants[0] == initial.understanding.participants[0]
+    member = revised.understanding.participants[1]
+    assert member.member_key == "member-2"
+    assert member.nickname == "Bao updated"
+    assert member.budget_cap_cents == 45_000
+    assert member.interests == ["tea"]
+    assert member.must_visit == ["Yu Garden"]
+    assert member.avoid_places == ["nightclubs"]
+    assert repository.get_current(initial.trip_id) == revised
+    with repository._connect() as connection:
+        stored = connection.execute(
+            """SELECT recognition_source, recognition_model, llm_call_count
+               FROM trip_draft_revisions WHERE revision=2"""
+        ).fetchone()
+    assert tuple(stored) == ("MODEL_PROPOSAL", "compact-member-model", 1)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_member_answer_releases_pending_and_keeps_current_readable(tmp_path: Path) -> None:
+    gateway = CountingTripUnderstandingGateway(_extraction())
+    service, repository = _service(tmp_path, gateway)
+    initial = await service.create_initial(
+        _organizer_request(),
+        idempotency_key="initial-before-member-cancel-0001",
+    )
+    gateway.entered = asyncio.Event()
+    gateway.release = asyncio.Event()
+    participant_id = initial.member_bindings["member-1"]
+
+    operation = asyncio.create_task(
+        service.submit_participant_conversation(
+            trip_id=initial.trip_id,
+            participant_id=participant_id,
+            base_revision=initial.revision,
+            submission=_submission(),
+            idempotency_key="member-cancelled-0001",
+        )
+    )
+    await gateway.entered.wait()
+    operation.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await operation
+
+    assert repository.get_current(initial.trip_id) == initial
+    with repository._connect() as connection:
+        head = connection.execute(
+            "SELECT current_revision, pending_revision FROM trip_draft_heads"
+        ).fetchone()
+        command = connection.execute(
+            """SELECT status, failure_code FROM trip_draft_commands
+               WHERE operation='MEMBER_ANSWER'"""
+        ).fetchone()
+    assert tuple(head) == (1, None)
+    assert tuple(command) == ("FAILED", "DRAFT_OPERATION_INTERRUPTED")
+
+
+@pytest.mark.asyncio
+async def test_member_setup_failure_before_gateway_releases_pending_revision(tmp_path: Path) -> None:
+    gateway = CountingTripUnderstandingGateway(_extraction())
+    service, repository = _service(tmp_path, gateway)
+    initial = await service.create_initial(
+        _organizer_request(),
+        idempotency_key="initial-before-member-setup-failure-0001",
+    )
+    participant_id = initial.member_bindings["member-1"]
+
+    def fail_request_setup(*args, **kwargs):
+        del args, kwargs
+        raise AppError(
+            "TRIP_UNDERSTANDING_INVALID",
+            "request setup failed",
+            502,
+            False,
+        )
+
+    service._understanding_request = fail_request_setup
+    with pytest.raises(AppError) as caught:
+        await service.submit_participant_conversation(
+            trip_id=initial.trip_id,
+            participant_id=participant_id,
+            base_revision=initial.revision,
+            submission=_submission(),
+            idempotency_key="member-setup-failure-0001",
+        )
+
+    assert caught.value.code == "TRIP_UNDERSTANDING_INVALID"
+    assert repository.get_current(initial.trip_id) == initial
+    with repository._connect() as connection:
+        head = connection.execute(
+            "SELECT current_revision, pending_revision FROM trip_draft_heads"
+        ).fetchone()
+        command = connection.execute(
+            """SELECT status, failure_code FROM trip_draft_commands
+               WHERE operation='MEMBER_ANSWER'"""
+        ).fetchone()
+    assert tuple(head) == (1, None)
+    assert tuple(command) == ("FAILED", "TRIP_UNDERSTANDING_INVALID")
 
 
 @pytest.mark.asyncio

@@ -90,15 +90,36 @@ class CollaborationService:
             status = 404
         else:
             status = 409
-        invitation_messages = {
+        messages = {
+            "ORGANIZER_PERMISSION_REQUIRED": (
+                "组织者凭证缺失、已失效或不属于当前行程，请从创建行程的浏览器页面重新进入。"
+            ),
+            "ORGANIZER_SELF_INVITE_FORBIDDEN": "组织者不能给自己创建成员邀请。",
+            "PARTICIPANT_SESSION_REQUIRED": "成员会话已失效，请重新打开最新的邀请链接。",
             "INVITATION_EXPIRED": "该邀请链接已过期，请联系组织者重新邀请。",
             "INVITATION_UNAVAILABLE": "该邀请链接不存在或已被组织者撤销。",
+            "INVITATION_ACTIVE_EXISTS": "该成员已有有效邀请，请使用现有链接或先撤销后重建。",
+            "PARTICIPANT_CONFIRMATION_REQUIRED": "请先确认当前成员资料，再继续协作操作。",
+            "PARTICIPANT_DRAFT_MISSING": "当前成员尚未提交资料，请先完成成员问答。",
+            "COLLABORATION_NOT_FOUND": "未找到当前行程的协作会话，请重新创建行程。",
+            "PARTICIPANT_NOT_BOUND": "该成员不属于当前行程，请刷新协作页面。",
+            "CONFLICT_NOT_FOUND": "该冲突项已变化或不存在，请刷新后重新处理。",
+            "COLLABORATION_VERSION_STALE": "协作状态已被其他页面更新，请刷新后重试。",
+            "DRAFT_REVISION_STALE": "行程资料已更新，请刷新后基于最新内容继续。",
+            "COLLABORATION_OPERATION_IN_PROGRESS": "该行程正在执行另一个规划请求，请稍候再试。",
+            "COLLABORATION_OPERATION_STALE": "本次规划请求已过期，请刷新后重试。",
+            "IDEMPOTENCY_KEY_REUSED": "重复请求与原操作内容不一致，请重新发起操作。",
+            "BINDING_INVALID": "成员绑定关系无效，请重新创建行程。",
+        }
+        retryable = code in {
+            "COLLABORATION_OPERATION_IN_PROGRESS",
+            "COLLABORATION_OPERATION_STALE",
         }
         return AppError(
             code,
-            invitation_messages.get(code, "协作操作无法完成"),
+            messages.get(code, f"协作操作无法完成（{code}）"),
             status,
-            status == 503,
+            status == 503 or retryable,
         )
 
     def _current(self, trip_id: UUID) -> TripDraftRevisionView:

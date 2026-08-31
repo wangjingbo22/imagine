@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from app.application.collaboration_ports import UnresolvedAnswerAttempt
 from app.domain.trip_draft import TripDraftRevision, TripUnderstandingExtraction
@@ -75,15 +75,20 @@ def _canonical_json(value: object) -> str:
     )
 
 
+_PROCESS_OWNER_ID = str(uuid4())
+
+
 class SqliteTripDraftRevisionRepository:
     def __init__(
         self,
         database_path: Path,
         *,
         clock: Callable[[], datetime] | None = None,
+        owner_id: str | None = None,
     ) -> None:
         self._path = Path(database_path)
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._owner_id = owner_id or _PROCESS_OWNER_ID
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
@@ -152,6 +157,7 @@ class SqliteTripDraftRevisionRepository:
                     status TEXT NOT NULL CHECK (status IN ('CLAIMED', 'COMPLETED', 'FAILED')),
                     failure_code TEXT,
                     outcome_json TEXT,
+                    owner_id TEXT,
                     claimed_at TEXT NOT NULL,
                     completed_at TEXT,
                     PRIMARY KEY (actor_scope, actor_id, operation, idempotency_key)
@@ -167,6 +173,51 @@ class SqliteTripDraftRevisionRepository:
                 connection.execute(
                     "ALTER TABLE trip_draft_commands ADD COLUMN outcome_json TEXT"
                 )
+            if "owner_id" not in command_columns:
+                connection.execute(
+                    "ALTER TABLE trip_draft_commands ADD COLUMN owner_id TEXT"
+                )
+            self._recover_orphaned_claims(connection)
+
+    def _recover_orphaned_claims(self, connection: sqlite3.Connection) -> None:
+        now = self._clock()
+        rows = connection.execute(
+            """SELECT command.rowid AS command_rowid,
+                      command.draft_id, command.base_revision,
+                      command.target_revision
+               FROM trip_draft_commands AS command
+               JOIN trip_draft_heads AS head
+                 ON head.draft_id = command.draft_id
+               WHERE command.status='CLAIMED'
+                 AND (command.owner_id IS NULL OR command.owner_id<>?)
+                 AND head.current_revision=command.base_revision
+                 AND head.pending_revision=command.target_revision""",
+            (self._owner_id,),
+        ).fetchall()
+        if not rows:
+            return
+        completed_at = now.isoformat()
+        for row in rows:
+            released = connection.execute(
+                """UPDATE trip_draft_heads
+                   SET pending_revision=NULL, updated_at=?
+                   WHERE draft_id=? AND current_revision=? AND pending_revision=?""",
+                (
+                    completed_at,
+                    row["draft_id"],
+                    row["base_revision"],
+                    row["target_revision"],
+                ),
+            ).rowcount
+            if released != 1:
+                continue
+            connection.execute(
+                """UPDATE trip_draft_commands
+                   SET status='FAILED', failure_code='DRAFT_OPERATION_INTERRUPTED',
+                       outcome_json=NULL, completed_at=?
+                   WHERE rowid=? AND status='CLAIMED'""",
+                (completed_at, row["command_rowid"]),
+            )
 
     @staticmethod
     def _find_command(
@@ -248,8 +299,8 @@ class SqliteTripDraftRevisionRepository:
             raise TripDraftRevisionStoreError("DRAFT_REVISION_STALE")
         return head
 
-    @staticmethod
     def _insert_claim(
+        self,
         connection: sqlite3.Connection,
         command: AnswerCommand,
         *,
@@ -262,8 +313,8 @@ class SqliteTripDraftRevisionRepository:
             """INSERT INTO trip_draft_commands
                (actor_scope, actor_id, operation, idempotency_key, request_digest,
                 draft_id, base_revision, target_revision, status, failure_code,
-                claimed_at, completed_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CLAIMED', NULL, ?, NULL)""",
+                owner_id, claimed_at, completed_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CLAIMED', NULL, ?, ?, NULL)""",
             (
                 command.actor_scope,
                 command.actor_id,
@@ -273,6 +324,7 @@ class SqliteTripDraftRevisionRepository:
                 str(draft_id),
                 base_revision,
                 target_revision,
+                self._owner_id,
                 claimed_at,
             ),
         )
@@ -285,6 +337,7 @@ class SqliteTripDraftRevisionRepository:
         trip_id: UUID,
     ) -> CommandClaim:
         with self._immediate_transaction() as connection:
+            self._recover_orphaned_claims(connection)
             prior = self._find_command(connection, command)
             if prior is not None:
                 return self._replay_or_conflict(connection, prior, command)
@@ -333,6 +386,7 @@ class SqliteTripDraftRevisionRepository:
         base_revision: int,
     ) -> CommandClaim:
         with self._immediate_transaction() as connection:
+            self._recover_orphaned_claims(connection)
             prior = self._find_command(connection, command)
             if prior is not None:
                 return self._replay_or_conflict(connection, prior, command)
@@ -556,14 +610,14 @@ class SqliteTripDraftRevisionRepository:
                 raise TripDraftRevisionStoreError("TRIP_DRAFT_REVISION_UNAVAILABLE")
 
     def get_current(self, trip_id: UUID) -> TripDraftRevision:
-        with self._connect() as connection:
+        with self._immediate_transaction() as connection:
+            self._recover_orphaned_claims(connection)
             head = connection.execute(
                 "SELECT * FROM trip_draft_heads WHERE trip_id=?",
                 (str(trip_id),),
             ).fetchone()
             if (
                 head is None
-                or head["pending_revision"] is not None
                 or head["current_revision"] < 1
             ):
                 raise TripDraftRevisionStoreError("TRIP_DRAFT_REVISION_UNAVAILABLE")

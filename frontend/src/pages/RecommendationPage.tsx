@@ -6,6 +6,7 @@ import { tripApi } from '../api/tripApi'
 import { AppShell } from '../components/AppShell'
 import { loadAmapPlan } from '../services/amapPlan'
 import { planningDraftFromConfirmedTrip } from '../services/collaborationDraft'
+import { getStoredOrganizerToken } from '../services/organizerStorage'
 import {
   confirmRecommendationSelection,
   createLatestRecommendationRequestGate,
@@ -52,7 +53,7 @@ export function RecommendationPage() {
 
   const load = useCallback(async () => {
     const requestGeneration = requestGate.current.begin()
-    const token = window.sessionStorage.getItem(`organizer-token:${tripId}`)
+    const token = getStoredOrganizerToken(tripId)
     setBundle(null)
     setConfirmedSelection(null)
     window.sessionStorage.removeItem(traceStorageKey)
@@ -104,7 +105,7 @@ export function RecommendationPage() {
 
   async function buildRoute() {
     if (buildingRef.current) return
-    const token = window.sessionStorage.getItem(`organizer-token:${tripId}`)
+    const token = getStoredOrganizerToken(tripId)
     if (!token || !confirmedSelection) { setError('当前浏览器缺少组织者凭证或已确认推荐事实。请刷新推荐并重新确认后继续。'); return }
     buildingRef.current = true
     try {

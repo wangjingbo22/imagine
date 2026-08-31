@@ -73,6 +73,7 @@ def test_trip_understanding_timeout_default_is_forty_five_seconds() -> None:
     settings = Settings(_env_file=None)
     assert settings.bailian_request_timeout_seconds == 45.0
     assert settings.bailian_model == "qwen-plus"
+    assert settings.bailian_organizer_model == "qwen-turbo"
 
 
 @pytest.mark.parametrize("timeout", [7.99, 45.01])
@@ -123,7 +124,9 @@ async def test_understanding_request_uses_existing_openai_compatible_client() ->
     body = json.loads(captured["body"])
     assert body["model"] == "qwen-fixture"
     assert body["temperature"] == 0
+    assert body["enable_thinking"] is False
     assert body["response_format"] == {"type": "json_object"}
+    assert "Return the smallest valid JSON object" in body["messages"][0]["content"]
     assert '"schemaVersion"' in body["messages"][0]["content"]
     assert '"additionalProperties":false' in body["messages"][0]["content"]
     assert json.loads(body["messages"][1]["content"]) == _request().model_dump(
@@ -169,7 +172,7 @@ async def test_understanding_repair_reuses_schema_and_sends_validation_context()
 
 
 @pytest.mark.asyncio
-async def test_read_timeout_is_retryable_and_stops_after_two_attempts() -> None:
+async def test_read_timeout_stops_after_one_organizer_attempt() -> None:
     calls = 0
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -192,7 +195,7 @@ async def test_read_timeout_is_retryable_and_stops_after_two_attempts() -> None:
         await extractor.close()
 
     assert result.failure_code == "LLM_TIMEOUT"
-    assert result.call_count == calls == 2
+    assert result.call_count == calls == 1
 
 
 @pytest.mark.asyncio
@@ -202,8 +205,8 @@ async def test_read_timeout_is_retryable_and_stops_after_two_attempts() -> None:
         (401, "LLM_AUTH_FAILED", 1),
         (403, "LLM_AUTH_FAILED", 1),
         (422, "LLM_UNAVAILABLE", 1),
-        (429, "LLM_UNAVAILABLE", 2),
-        (500, "LLM_UNAVAILABLE", 2),
+        (429, "LLM_UNAVAILABLE", 1),
+        (500, "LLM_UNAVAILABLE", 1),
     ],
 )
 async def test_http_statuses_retry_only_when_transient(

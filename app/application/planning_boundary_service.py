@@ -366,14 +366,37 @@ class PlanningBoundaryService:
         expected = self._revision_planning_projection(revision)
         actual = self._request_planning_projection(request)
         paths = self._projection_mismatch_paths(expected, actual)
-        if paths:
+        # cityContext is Provider-derived. A county-level input such as 瑞安 can
+        # legitimately materialize as the 温州市 planning scope. The exact
+        # server-confirmed Trip below remains authoritative for that field.
+        revision_paths = [path for path in paths if path != "cityName"]
+        if revision_paths:
             raise AppError(
                 code="COLLABORATION_PLAN_SNAPSHOT_MISMATCH",
                 message="规划请求与当前协作修订快照不一致",
                 http_status=409,
                 retryable=False,
-                errors=[{"field": path} for path in paths],
+                errors=[{"field": path} for path in revision_paths],
             )
+        if paths:
+            try:
+                self.workflow_service.require_confirmed_trip(
+                    permit.trip_id,
+                    request.trip,
+                )
+            except AppError as error:
+                if error.code not in {
+                    "TRIP_NOT_CONFIRMED",
+                    "CONFIRMED_TRIP_MISMATCH",
+                }:
+                    raise
+                raise AppError(
+                    code="COLLABORATION_PLAN_SNAPSHOT_MISMATCH",
+                    message="规划请求与当前协作修订快照不一致",
+                    http_status=409,
+                    retryable=False,
+                    errors=[{"field": path} for path in paths],
+                ) from error
 
     @staticmethod
     def _adjustment_identity_digest(

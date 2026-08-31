@@ -219,6 +219,70 @@ def test_migration_backfills_strict_confirmed_singles_only(tmp_path) -> None:
     assert registry.get(UUID("30000000-0000-4000-8000-000000000003")) is None
 
 
+def test_migration_keeps_collaboration_projection_in_collaboration_flow(tmp_path) -> None:
+    path = tmp_path / "collaboration-projection.sqlite3"
+    trip_id = UUID("30000000-0000-4000-8000-000000000007")
+    trip = CreateSingleDayTrip(
+        schemaVersion="1.0",
+        tripId=trip_id,
+        mode="SINGLE",
+        status="DRAFT",
+        cityContext={
+            "countryCode": "CN",
+            "cityCode": "330100",
+            "cityName": "杭州市",
+            "center": {"longitude": 120.20, "latitude": 30.24},
+            "providerConfig": {"provider": "AMAP", "coordinateSystem": "GCJ02"},
+        },
+        startDate=date(2026, 8, 31),
+        endDate=date(2026, 8, 31),
+        currency="CNY",
+        totalBudgetCents=10000,
+        participants=[
+            {
+                "participantId": UUID("10000000-0000-4000-8000-000000000007"),
+                "nickname": "organizer",
+                "budgetCapCents": 10000,
+                "preferences": [],
+                "assistanceProfile": None,
+            }
+        ],
+        days=[
+            {
+                "dayIndex": 0,
+                "date": date(2026, 8, 31),
+                "dailyBudgetCents": 10000,
+                "startLocationText": "杭州东站",
+                "endLocationText": "杭州东站",
+                "timeWindow": {"start": "08:00:00", "end": "20:00:00"},
+            }
+        ],
+    )
+
+    SqliteCollaborationRepository(path)
+    registry = SqliteTripFlowRegistry(path)
+    registry.register(trip_id, TripFlowKind.COLLABORATION_V2)
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """CREATE TABLE confirmed_trip_inputs (
+                trip_id TEXT PRIMARY KEY,
+                trip_json TEXT NOT NULL,
+                semantic_json TEXT NOT NULL,
+                confirmed_at TEXT NOT NULL
+            )"""
+        )
+        connection.execute(
+            """INSERT INTO confirmed_trip_inputs
+            (trip_id, trip_json, semantic_json, confirmed_at)
+            VALUES (?, ?, '{}', '2026-08-31T00:00:00+00:00')""",
+            (str(trip_id), trip.model_dump_json(by_alias=True)),
+        )
+
+    SqliteCollaborationRepository(path)
+
+    assert registry.get(trip_id) is TripFlowKind.COLLABORATION_V2
+
+
 def test_migration_records_invalid_and_group_rows_without_raw_json(tmp_path) -> None:
     path = tmp_path / "migration-errors.sqlite3"
     connection = sqlite3.connect(path)

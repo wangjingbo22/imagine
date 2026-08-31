@@ -41,6 +41,7 @@ class BailianExecutionEventExtractor:
             base_url=base_url.rstrip("/"),
             timeout=timeout_seconds,
             transport=transport,
+            trust_env=False,
         )
         self._headers = {"Authorization": f"Bearer {api_key}"}
 

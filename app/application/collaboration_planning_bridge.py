@@ -72,8 +72,9 @@ class CollaborationPlanningBridge:
                 errors=[{"path": path, "message": "required"} for path in missing],
             )
 
+        assert shared.budget_cents is not None
         projected_participants: list[Participant] = []
-        for index, participant in enumerate(ordered_members):
+        for index, participant in enumerate(ordered_members, start=1):
             care = participant.care_draft
             member_id = revision.member_bindings.get(participant.member_key)
             if care is None or not isinstance(member_id, UUID):
@@ -92,6 +93,12 @@ class CollaborationPlanningBridge:
                     409,
                     False,
                 ) from error
+            nickname = participant.nickname or f"成员 {index}"
+            budget_cap_cents = (
+                participant.budget_cap_cents
+                if participant.budget_cap_cents is not None
+                else shared.budget_cents
+            )
             preferences = [
                 Preference(
                     type=PreferenceType.INTEREST,
@@ -119,16 +126,11 @@ class CollaborationPlanningBridge:
                 )
                 for value in participant.avoid_places
             )
-            assert shared.budget_cents is not None
             projected_participants.append(
                 Participant(
                     participant_id=member_id,
-                    nickname=participant.nickname or f"成员 {index + 1}",
-                    budget_cap_cents=(
-                        participant.budget_cap_cents
-                        if participant.budget_cap_cents is not None
-                        else shared.budget_cents
-                    ),
+                    nickname=nickname,
+                    budget_cap_cents=budget_cap_cents,
                     preferences=preferences,
                     assistance_profile=assistance,
                 )

@@ -230,6 +230,7 @@ def create_app(
             api_key=bailian_api_key,
             base_url=resolved_settings.bailian_base_url,
             model=resolved_settings.bailian_model,
+            organizer_model=resolved_settings.bailian_organizer_model,
             timeout_seconds=resolved_settings.bailian_request_timeout_seconds,
         )
 

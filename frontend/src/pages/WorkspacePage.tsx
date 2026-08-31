@@ -78,6 +78,7 @@ import {
 } from '../services/executionAdjustment'
 import { facilityEvidenceNeedsConfirmation } from '../services/routeRiskFacts'
 import { restoreDraftFromPlanningFacts } from '../services/planningFacts'
+import { getStoredOrganizerToken } from '../services/organizerStorage'
 import {
   canRequestS1PlanV2,
   S1_REPLAN_LIMIT_MESSAGE,
@@ -261,7 +262,7 @@ export function WorkspacePage() {
   const tripId =
     new URLSearchParams(location.search).get('tripId') ?? navigationState?.tripId ?? null
   const organizerToken = tripId
-    ? window.sessionStorage.getItem(`organizer-token:${tripId}`)
+    ? getStoredOrganizerToken(tripId)
     : null
   const [view, setView] = useState<WorkspaceView>('plan')
   const [summary, setSummary] = useState<TripSummary | null>(null)

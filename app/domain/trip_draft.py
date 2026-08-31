@@ -242,6 +242,7 @@ class TripUnderstandingExplicitFields(UnderstandingContractModel):
 
 class TripUnderstandingRequest(UnderstandingContractModel):
     schema_version: Literal["1.0"]
+    scope: Literal["FULL_TRIP", "MEMBER_PROFILE"] = "FULL_TRIP"
     reference_date: date
     raw_conversation: str = Field(max_length=8000)
     explicit_fields: TripUnderstandingExplicitFields

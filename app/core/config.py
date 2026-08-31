@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     bailian_api_key: SecretStr | None = None
     bailian_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     bailian_model: str = "qwen-plus"
+    bailian_organizer_model: str = "qwen-turbo"
     bailian_request_timeout_seconds: float = Field(
         default=45.0,
         ge=8,
