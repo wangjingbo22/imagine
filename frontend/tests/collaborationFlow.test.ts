@@ -186,6 +186,10 @@ test('organizer page serially rolls the collaboration version and fails closed f
   assert.match(page, /singleParticipantPlanningDraft\(revision\)/)
   assert.match(page, /多人 Trip 尚不能无损转换/)
   assert.doesNotMatch(page, /mode:\s*'GROUP'/)
+  assert.match(page, /function applyGroupOrganizerTestPreset\(\)/)
+  assert.match(page, /setEntryMode\('group'\)/)
+  assert.match(page, /setPartyCount\(2\)/)
+  assert.match(page, /填入北京多人组织者模板/)
 })
 
 test('fixed-question fallback requires an explicit six-answer review and a fresh retry key', async () => {
