@@ -59,11 +59,6 @@ class CollaborationPlanningBridge:
             missing.extend(
                 path
                 for path, value in (
-                    (f"participants[{index}].nickname", participant.nickname),
-                    (
-                        f"participants[{index}].budgetCapCents",
-                        participant.budget_cap_cents,
-                    ),
                     (f"participants[{index}].careDraft", participant.care_draft),
                 )
                 if value is None
@@ -78,7 +73,7 @@ class CollaborationPlanningBridge:
             )
 
         projected_participants: list[Participant] = []
-        for participant in ordered_members:
+        for index, participant in enumerate(ordered_members):
             care = participant.care_draft
             member_id = revision.member_bindings.get(participant.member_key)
             if care is None or not isinstance(member_id, UUID):
@@ -124,13 +119,16 @@ class CollaborationPlanningBridge:
                 )
                 for value in participant.avoid_places
             )
-            assert participant.nickname is not None
-            assert participant.budget_cap_cents is not None
+            assert shared.budget_cents is not None
             projected_participants.append(
                 Participant(
                     participant_id=member_id,
-                    nickname=participant.nickname,
-                    budget_cap_cents=participant.budget_cap_cents,
+                    nickname=participant.nickname or f"成员 {index + 1}",
+                    budget_cap_cents=(
+                        participant.budget_cap_cents
+                        if participant.budget_cap_cents is not None
+                        else shared.budget_cents
+                    ),
                     preferences=preferences,
                     assistance_profile=assistance,
                 )

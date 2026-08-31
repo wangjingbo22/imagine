@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any
 
 import httpx
@@ -15,11 +16,18 @@ class AmapClient:
         base_url: str,
         timeout_seconds: float,
         transport: httpx.AsyncBaseTransport | None = None,
+        retry_attempts: int = 3,
+        retry_backoff_seconds: float = 0.4,
     ) -> None:
         self.api_key = api_key
+        self._retry_attempts = max(1, retry_attempts)
+        self._retry_backoff_seconds = max(0.0, retry_backoff_seconds)
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
-            timeout=timeout_seconds,
+            timeout=httpx.Timeout(
+                timeout_seconds,
+                connect=max(timeout_seconds, 15.0),
+            ),
             transport=transport,
         )
 
@@ -39,20 +47,76 @@ class AmapClient:
             "key": self.api_key,
             "output": "JSON",
         }
-        try:
-            response = await self._client.get(path, params=request_parameters)
-            response.raise_for_status()
-            payload = response.json()
-        except httpx.TimeoutException as exc:
-            raise AppError("PROVIDER_TIMEOUT", "高德接口请求超时", 503, True) from exc
-        except (httpx.HTTPError, ValueError) as exc:
-            raise AppError("PROVIDER_UNAVAILABLE", "高德接口暂时不可用", 503, True) from exc
+        for attempt in range(self._retry_attempts):
+            try:
+                response = await self._client.get(path, params=request_parameters)
+                response.raise_for_status()
+                payload = response.json()
+            except httpx.TimeoutException as exc:
+                error = AppError(
+                    "PROVIDER_TIMEOUT",
+                    "高德接口请求超时",
+                    503,
+                    True,
+                )
+                if attempt == self._retry_attempts - 1:
+                    raise error from exc
+            except httpx.HTTPStatusError as exc:
+                error = AppError(
+                    "PROVIDER_UNAVAILABLE",
+                    "高德接口暂时不可用",
+                    503,
+                    True,
+                )
+                retryable_status = exc.response.status_code in {
+                    429,
+                    500,
+                    502,
+                    503,
+                    504,
+                }
+                if not retryable_status or attempt == self._retry_attempts - 1:
+                    raise error from exc
+            except httpx.RequestError as exc:
+                error = AppError(
+                    "PROVIDER_UNAVAILABLE",
+                    "高德接口暂时不可用",
+                    503,
+                    True,
+                )
+                if attempt == self._retry_attempts - 1:
+                    raise error from exc
+            except ValueError as exc:
+                raise AppError(
+                    "PROVIDER_UNAVAILABLE",
+                    "高德接口返回了无效数据",
+                    503,
+                    True,
+                ) from exc
+            else:
+                provider_error: AppError | None = None
+                if "errcode" in payload and str(payload.get("errcode")) not in {
+                    "0",
+                    "10000",
+                }:
+                    provider_error = error_from_amap(
+                        str(payload.get("errcode", "")),
+                        str(payload.get("errmsg", "")),
+                    )
+                elif str(payload.get("status", "1")) != "1":
+                    provider_error = error_from_amap(
+                        str(payload.get("infocode", "")),
+                        str(payload.get("info", "")),
+                    )
 
-        if "errcode" in payload and str(payload.get("errcode")) not in {"0", "10000"}:
-            raise error_from_amap(str(payload.get("errcode", "")), str(payload.get("errmsg", "")))
-        if str(payload.get("status", "1")) != "1":
-            raise error_from_amap(str(payload.get("infocode", "")), str(payload.get("info", "")))
-        return payload
+                if provider_error is None:
+                    return payload
+                if not provider_error.retryable or attempt == self._retry_attempts - 1:
+                    raise provider_error
+
+            await asyncio.sleep(self._retry_backoff_seconds * (2**attempt))
+
+        raise AssertionError("unreachable")
 
     async def resolve_city(self, city_name: str) -> dict[str, Any]:
         return await self._get("/v3/geocode/geo", {"address": city_name, "city": city_name})

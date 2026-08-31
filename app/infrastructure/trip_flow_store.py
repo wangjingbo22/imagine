@@ -96,6 +96,15 @@ def backfill_confirmed_single_flows(connection: sqlite3.Connection) -> None:
     ).fetchall()
     for row in rows:
         source_trip_id = row[0]
+        # New collaboration flows also persist their canonical Trip in this
+        # table.  An existing registry entry is authoritative and must not be
+        # reclassified as a legacy single during a later application startup.
+        registered = connection.execute(
+            "SELECT flow_kind FROM trip_flow_registry WHERE trip_id = ?",
+            (str(source_trip_id),),
+        ).fetchone()
+        if registered is not None:
+            continue
         try:
             payload = json.loads(row[1])
         except (TypeError, ValueError, json.JSONDecodeError):

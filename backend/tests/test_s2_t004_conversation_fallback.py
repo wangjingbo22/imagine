@@ -9,6 +9,9 @@ import httpx
 import pytest
 
 from app.application.reviewed_fallback_understanding import reviewed_member_fallback_proposal
+from app.application.collaboration_planning_bridge import CollaborationPlanningBridge
+from app.application.planning_boundary_service import PlanningBoundaryService
+from app.application.recommendation_service import project_collaboration_recommendation_trip
 from app.application.trip_draft_revision_service import TripDraftRevisionService
 from app.core.config import Settings
 from app.core.errors import AppError
@@ -22,6 +25,7 @@ from app.infrastructure.trip_draft_revision_store import (
     SqliteTripDraftRevisionRepository,
 )
 from app.main import create_app
+from app.schemas.trip import CityContext, GeoPoint, ProviderConfig
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "trip_understanding" / "one_participant.json"
@@ -259,6 +263,36 @@ async def test_reviewed_member_answers_complete_deterministic_organizer_draft(
     assert revised.understanding.participants[0] == initial.understanding.participants[0]
     assert revised.understanding.participants[1].care_draft is not None
     assert revised.understanding.participants[1].care_draft.assistance_type_hint == "ORDINARY"
+    assert revised.understanding.participants[1].nickname is None
+    assert revised.understanding.participants[1].budget_cap_cents is None
+
+    projected = project_collaboration_recommendation_trip(
+        revised,
+        CityContext(
+            countryCode="CN",
+            cityCode="110000",
+            cityName="北京市",
+            center=GeoPoint(longitude=116.407387, latitude=39.904179),
+            providerConfig=ProviderConfig(provider="AMAP", coordinateSystem="GCJ02"),
+        ),
+    )
+    assert projected.mode.value == "GROUP"
+    assert projected.participants[1].nickname == "成员 2"
+    assert projected.participants[1].budget_cap_cents == 50_000
+
+    class RecordingWorkflow:
+        def confirm_collaboration_trip(self, trip):
+            return trip
+
+    persisted = CollaborationPlanningBridge(
+        RecordingWorkflow(),  # type: ignore[arg-type]
+    ).materialize(revised, projected.city_context)
+    assert persisted.participants[1].nickname == "成员 2"
+    assert persisted.participants[1].budget_cap_cents == 50_000
+
+    boundary_projection = PlanningBoundaryService._revision_planning_projection(revised)
+    assert boundary_projection["participants"][1]["nickname"] == "成员 2"
+    assert boundary_projection["participants"][1]["budgetCents"] == 50_000
     assert _revision_count(repository) == 2
 
 

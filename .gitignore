@@ -9,7 +9,11 @@ htmlcov/
 data/*.sqlite3
 data/*.sqlite3-*
 log_/
+.pnpm-store/
 
 # Test-only materials are maintained on the dedicated test branch.
 /scripts/
 /tests/
+
+# Office temporary files
+~$*

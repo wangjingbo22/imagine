@@ -767,18 +767,27 @@ def project_collaboration_recommendation_trip(
     projected_participants: list[Participant] = []
     for index, item in enumerate(revision.understanding.participants):
         participant_id = revision.member_bindings.get(item.member_key)
+        # Nickname and personal budget are optional collaboration inputs.  A
+        # member who leaves them unset still has a complete planning profile:
+        # use a stable display label and the already-confirmed shared budget as
+        # the effective upper bound for the canonical planning participant.
+        effective_nickname = item.nickname or f"成员 {index + 1}"
+        effective_budget_cents = (
+            item.budget_cap_cents
+            if item.budget_cap_cents is not None
+            else shared.budget_cents
+        )
         fields = {
             f"participants[{index}].participantId": participant_id,
-            f"participants[{index}].nickname": item.nickname,
-            f"participants[{index}].budgetCapCents": item.budget_cap_cents,
             f"participants[{index}].careDraft": item.care_draft,
         }
         missing.extend(path for path, value in fields.items() if value is None)
-        if any(value is None for value in fields.values()):
+        if (
+            any(value is None for value in fields.values())
+            or effective_budget_cents is None
+        ):
             continue
         assert isinstance(participant_id, UUID)
-        assert item.nickname is not None
-        assert item.budget_cap_cents is not None
         assert item.care_draft is not None
         preferences = [
             Preference(
@@ -810,8 +819,8 @@ def project_collaboration_recommendation_trip(
         projected_participants.append(
             Participant(
                 participant_id=participant_id,
-                nickname=item.nickname,
-                budget_cap_cents=item.budget_cap_cents,
+                nickname=effective_nickname,
+                budget_cap_cents=effective_budget_cents,
                 preferences=preferences,
                 assistance_profile=assistance_profile_from_care(item.care_draft),
             )

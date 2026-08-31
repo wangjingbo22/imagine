@@ -216,12 +216,13 @@ class PlanningBoundaryService:
         cls,
         revision: TripDraftRevisionView,
     ) -> dict[str, Any]:
+        trip = revision.understanding.trip
         participants_by_key = {
             participant.member_key: participant
             for participant in revision.understanding.participants
         }
         participants: list[dict[str, Any]] = []
-        for member_key in sorted(revision.member_bindings):
+        for index, member_key in enumerate(sorted(revision.member_bindings), start=1):
             participant = participants_by_key.get(member_key)
             participant_id = revision.member_bindings.get(member_key)
             if participant is None or participant_id is None:
@@ -230,8 +231,12 @@ class PlanningBoundaryService:
                 cls._participant_projection(
                     member_key=member_key,
                     participant_id=participant_id,
-                    nickname=participant.nickname,
-                    budget_cap_cents=participant.budget_cap_cents,
+                    nickname=participant.nickname or f"成员 {index}",
+                    budget_cap_cents=(
+                        participant.budget_cap_cents
+                        if participant.budget_cap_cents is not None
+                        else trip.budget_cents
+                    ),
                     interests=participant.interests,
                     must_visit=participant.must_visit,
                     avoid_places=participant.avoid_places,
@@ -242,7 +247,6 @@ class PlanningBoundaryService:
                     ),
                 )
             )
-        trip = revision.understanding.trip
         return {
             "tripId": str(revision.trip_id),
             "mode": "SINGLE" if len(participants) == 1 else "GROUP",

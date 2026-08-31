@@ -408,6 +408,34 @@ function directDistanceMeters(origin: GeoPoint, destination: GeoPoint) {
   return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
+const comfortableWalkDistanceMeters = 1_800
+const practicalBicycleDistanceMeters = 8_000
+
+export function routeModeCandidates(
+  directDistance: number,
+  maxWalkMeters: number,
+  cyclingAllowed = true,
+): TravelMode[] {
+  const walkThreshold = Math.min(maxWalkMeters, comfortableWalkDistanceMeters)
+  if (directDistance <= walkThreshold) {
+    return unique([
+      'WALKING',
+      cyclingAllowed ? 'BICYCLING' : 'TRANSIT',
+      'TRANSIT',
+      'DRIVING',
+    ]) as TravelMode[]
+  }
+  if (cyclingAllowed && directDistance <= practicalBicycleDistanceMeters) {
+    return ['BICYCLING', 'TRANSIT', 'DRIVING', 'WALKING']
+  }
+  return unique([
+    'TRANSIT',
+    cyclingAllowed ? 'BICYCLING' : 'DRIVING',
+    'DRIVING',
+    'WALKING',
+  ]) as TravelMode[]
+}
+
 function orderByShortestNextSegment(places: Place[]) {
   if (places.length <= 2) return places
   const ordered = [places[0]]
@@ -472,13 +500,9 @@ async function selectRoute(
     ? Number.POSITIVE_INFINITY
     : Math.max(100, maxWalkLimit)
   const directDistance = directDistanceMeters(origin, destination)
-  const preferred: TravelMode = directDistance <= maxWalk * 0.8 ? 'WALKING' : 'TRANSIT'
-  const attempts: TravelMode[] = unique([
-    preferred,
-    preferred === 'WALKING' ? 'TRANSIT' : 'DRIVING',
-    'DRIVING',
-    'WALKING',
-  ]) as TravelMode[]
+  const cyclingAllowed = draft.assistanceMode !== 'low-mobility' &&
+    draft.assistanceMode !== 'assisted'
+  const attempts = routeModeCandidates(directDistance, maxWalk, cyclingAllowed)
   let lastError: unknown
   for (const mode of attempts) {
     try {
