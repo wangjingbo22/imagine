@@ -27,7 +27,7 @@ import {
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { tripApi, USE_PLAN_VERSION_API } from '../api/tripApi'
 import { AppShell } from '../components/AppShell'
@@ -90,11 +90,13 @@ import {
 import { facilityEvidenceNeedsConfirmation } from '../services/routeRiskFacts'
 import { restoreDraftFromPlanningFacts } from '../services/planningFacts'
 import { getStoredOrganizerToken } from '../services/organizerStorage'
+import { hasPlannerLocalDraft } from '../services/plannerLocalDraft'
 import {
   canRequestS1PlanV2,
   executionAdjustmentBlockReason,
   S1_REPLAN_LIMIT_MESSAGE,
 } from '../services/replanPolicy'
+import { useAccountSession } from '../session/useAccountSession'
 
 type WorkspaceView = 'plan' | 'execute' | 'diff' | 'summary'
 
@@ -367,6 +369,8 @@ function planningFactsRecoveryMessage(error: unknown) {
 
 export function WorkspacePage() {
   const location = useLocation()
+  const navigate = useNavigate()
+  const { user } = useAccountSession()
   const evidenceReviewRef = useRef<HTMLElement>(null)
   const planningIssueRef = useRef<HTMLElement>(null)
   const navigationState = location.state as {
@@ -463,6 +467,20 @@ export function WorkspacePage() {
       ? '缺少 T004 已确认 Trip，不能猜测起点、终点或参与者；请返回新建行程重新确认。'
       : '',
   )
+  const [localPlannerDraftAvailable, setLocalPlannerDraftAvailable] = useState(false)
+
+  useEffect(() => {
+    if (tripId || !user) {
+      setLocalPlannerDraftAvailable(false)
+      return
+    }
+    try {
+      setLocalPlannerDraftAvailable(hasPlannerLocalDraft(window.localStorage, user.userId))
+    } catch {
+      setLocalPlannerDraftAvailable(false)
+    }
+  }, [tripId, user])
+
   const applyTripState = useCallback((state: TripPlanState) => {
     const current = state.currentPlan
     if (current) {
@@ -663,6 +681,7 @@ export function WorkspacePage() {
                 : locationEvidenceError || '没有可恢复的真实计划，请从“新建行程”重新进入。'}
             </p>
             {locationEvidenceError && <p className="media-error">不会使用固定数据或 Mock 自动回退。</p>}
+            {localPlannerDraftAvailable && <button className="button button--primary" type="button" onClick={() => navigate('/plan')}>继续填写未完成行程</button>}
           </section>
         </main>
       </AppShell>

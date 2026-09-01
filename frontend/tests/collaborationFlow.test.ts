@@ -188,7 +188,7 @@ test('collaboration API preserves capabilities and optimistic concurrency fields
   assert.doesNotMatch(api, /member-session[^'`]*\$\{[^}]*token/)
 })
 
-test('organizer page serially rolls the collaboration version and prepares READY group planning context', async () => {
+test('organizer page keeps test presets out of the user-facing entry flow', async () => {
   const page = await readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8')
   assert.match(page, /for \(const participant of state\.participants\.filter/)
   assert.match(page, /expectedVersion = invitation\.collaborationVersion/)
@@ -198,12 +198,10 @@ test('organizer page serially rolls the collaboration version and prepares READY
   assert.match(page, /collaborationPlanningDraft\(created\.revision\)/)
   assert.match(page, /collaborationPlanningDraft\(revision\)/)
   assert.match(page, /draft && canEnterRecommendation\(current\)/)
-  assert.match(page, /function applyGroupOrganizerTestPreset\(\)/)
-  assert.match(page, /setEntryMode\('group'\)/)
-  assert.match(page, /setPartyCount\(2\)/)
-  assert.match(page, /updateParty\(1, '旅行者'\)/)
-  assert.match(page, /updateParty\(2, ''\)/)
-  assert.match(page, /填入北京多人组织者模板/)
+  assert.doesNotMatch(page, /function applyTestPreset\(\)/)
+  assert.doesNotMatch(page, /function applyGroupOrganizerTestPreset\(\)/)
+  assert.doesNotMatch(page, /填入北京单人测试模板/)
+  assert.doesNotMatch(page, /填入北京多人组织者模板/)
 })
 
 test('READY collaboration always exposes the authoritative recommendation action', async () => {
@@ -252,6 +250,34 @@ test('fixed-question fallback requires an explicit visible-answer review and a f
   assert.match(page, /智能整理服务暂不可用/)
   assert.match(page, /已保留 \$\{visibleQuestionCount\} \/ \$\{visibleQuestionCount\} 核对结果/)
   assert.match(page, /再次尝试智能整理/)
+})
+
+test('planner restores an account-isolated local form draft before autosaving and clears it only after authoritative creation', async () => {
+  const page = await readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8')
+
+  assert.match(page, /loadPlannerLocalDraft/)
+  assert.match(page, /savePlannerLocalDraft/)
+  assert.match(page, /clearPlannerLocalDraft/)
+  assert.match(page, /setHydratedDraftScope/)
+  assert.match(page, /window\.setTimeout\([\s\S]*500/)
+  assert.match(page, /clearPlannerLocalDraft\(window\.localStorage, user\.userId, plannerDraftScope\)/)
+  assert.match(page, /if \(isFixedQuestionFallback\(created\)\) \{[\s\S]*setFallback\(created\)/)
+  assert.match(page, /if \(restored\)[\s\S]*else \{[\s\S]*setDescription\(''\)[\s\S]*setEntryMode\(initialEntryMode\)/)
+  assert.match(page, /localDraftWriteGate\.current\.blockAfterAuthoritativeCreation\(\)/)
+  assert.match(page, /if \(!localDraftWriteGate\.current\.canPersist\(\)\) return/)
+  assert.match(page, /persistPlannerFallbackDraft\([\s\S]*submittedAnswers[\s\S]*\)[\s\S]*setFallback\(created\)/)
+  assert.match(page, /const parentDayIndexRaw = searchParams\.get\('dayIndex'\)/)
+  assert.match(page, /Number\.isSafeInteger\(parsedParentDayIndex\)/)
+  assert.match(page, /parentTripId && parentDayIndex !== null/)
+})
+
+test('an empty workspace offers the current account a return to its local unfinished planner draft', async () => {
+  const page = await readFile(new URL('../src/pages/WorkspacePage.tsx', import.meta.url), 'utf8')
+
+  assert.match(page, /hasPlannerLocalDraft/)
+  assert.match(page, /localPlannerDraftAvailable/)
+  assert.match(page, /继续填写未完成行程/)
+  assert.match(page, /navigate\('\/plan'\)/)
 })
 
 test('reviewed fallback revision renders authoritative degradation without model success copy', async () => {

@@ -83,13 +83,13 @@ test('application shell has no pointer-tracking grid effect', async () => {
   assert.doesNotMatch(styles, /grid-focus|Pointer-aware grid/)
 })
 
-test('account page sends signed-in users to model binding without collecting a profile', async () => {
+test('account page sends signed-in users to a validated return route without collecting a profile', async () => {
   const page = await readFile(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8')
 
   assert.match(page, /registerAccount/)
   assert.match(page, /loginAccount/)
   assert.match(page, /useAccountSession/)
-  assert.match(page, /navigate\('\/model-settings', \{ replace: true \}\)/)
+  assert.match(page, /safeReturnPath\(location\.search\) \?\? '\/model-settings'/)
   assert.match(page, /绑定模型/)
   assert.doesNotMatch(page, /updateAccountProfile|常用城市|保存画像|ProfileDraft/)
   assert.doesNotMatch(page, /localStorage/)
@@ -181,12 +181,11 @@ test('an HTTP 200 body code 401 is not treated as an invalid account session', a
   assert.doesNotMatch(provider, /error\.code === 401/)
 })
 
-test('account flow enters model binding directly after login', async () => {
+test('account flow defaults to model binding when no validated return route exists', async () => {
   const page = await readFile(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8')
 
-  assert.match(page, /navigate\('\/model-settings', \{ replace: true \}\)/)
+  assert.match(page, /navigate\(safeReturnPath\(location\.search\) \?\? '\/model-settings', \{ replace: true \}\)/)
   assert.doesNotMatch(page, /用户画像|常用城市|保存画像/)
-  assert.doesNotMatch(page, /navigate\(returnTo/)
   assert.doesNotMatch(page, /window\.location\s*=/)
 })
 
@@ -207,6 +206,21 @@ test('account return path safely restores recommendation routes and their parent
   assert.equal(safeReturnPath('?returnTo=https%3A%2F%2Fexample.com'), null)
   assert.equal(safeReturnPath(`?returnTo=${encodeURIComponent(`${recommendation}?next=/admin`)}`), null)
   assert.equal(safeReturnPath(`?returnTo=${encodeURIComponent(`${recommendation}#lost`)}`), null)
+})
+
+test('account return path safely restores planner routes with only known query parameters', () => {
+  const parentTripId = '22222222-2222-4222-8222-222222222222'
+
+  assert.equal(safeReturnPath(`?returnTo=${encodeURIComponent('/plan')}`), '/plan')
+  assert.equal(safeReturnPath(`?returnTo=${encodeURIComponent('/plan?mode=group')}`), '/plan?mode=group')
+  assert.equal(
+    safeReturnPath(`?returnTo=${encodeURIComponent(`/plan?parentTripId=${parentTripId}&dayIndex=1&city=%E5%AE%81%E5%BE%B7&date=2026-09-12&budget=50000`)}`),
+    `/plan?parentTripId=${parentTripId}&dayIndex=1&city=%E5%AE%81%E5%BE%B7&date=2026-09-12&budget=50000`,
+  )
+  assert.equal(safeReturnPath(`?returnTo=${encodeURIComponent('/plan?next=/admin')}`), null)
+  assert.equal(safeReturnPath(`?returnTo=${encodeURIComponent('/plan?mode=admin')}`), null)
+  assert.equal(safeReturnPath(`?returnTo=${encodeURIComponent('/plan?mode=single&mode=group')}`), null)
+  assert.equal(safeReturnPath(`?returnTo=${encodeURIComponent('/plan?parentTripId=wrong&dayIndex=1')}`), null)
 })
 
 test('account inputs keep a visible keyboard focus indicator', async () => {

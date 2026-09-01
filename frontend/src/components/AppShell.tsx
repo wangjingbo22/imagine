@@ -20,7 +20,7 @@ export function AppShell({
   const { user, isInitializing, sessionError } = useAccountSession()
   const modelSettingsPath = user ? '/model-settings' : '/account?returnTo=%2Fmodel-settings'
   const currentPath = `${location.pathname}${location.search}`
-  const accountPath = location.pathname.startsWith('/recommendation/')
+  const accountPath = location.pathname.startsWith('/recommendation/') || location.pathname === '/plan'
     ? `/account?returnTo=${encodeURIComponent(currentPath)}`
     : '/account'
 

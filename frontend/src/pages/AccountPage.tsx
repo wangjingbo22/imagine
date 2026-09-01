@@ -1,11 +1,12 @@
 import { LogIn, LogOut, UserRound } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   loginAccount,
   registerAccount,
 } from '../api/accountApi'
 import { AppShell } from '../components/AppShell'
+import { safeReturnPath } from '../services/accountReturnPath'
 import { useAccountSession } from '../session/useAccountSession'
 
 type AccountMode = 'login' | 'register'
@@ -16,6 +17,7 @@ function errorMessage(error: unknown, fallback: string): string {
 
 export function AccountPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { user, isInitializing, setCurrentUser, logout } = useAccountSession()
   const [mode, setMode] = useState<AccountMode>('login')
   const [email, setEmail] = useState('')
@@ -43,7 +45,7 @@ export function AccountPage() {
       setCurrentUser(response.data)
       setRegisterDisplayName('')
       setPassword('')
-      navigate('/model-settings', { replace: true })
+      navigate(safeReturnPath(location.search) ?? '/model-settings', { replace: true })
     } catch (caught) {
       setError(errorMessage(caught, '账户请求失败，请稍后重试'))
     } finally {

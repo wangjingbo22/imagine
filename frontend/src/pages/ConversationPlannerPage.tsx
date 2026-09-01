@@ -27,12 +27,19 @@ import {
   invitationTokenFromText,
 } from '../services/collaborationDraft'
 import { getStoredOrganizerToken, setStoredOrganizerToken, setStoredPlanContext } from '../services/organizerStorage'
+import {
+  clearPlannerLocalDraft,
+  createPlannerLocalDraftWriteGate,
+  loadPlannerLocalDraft,
+  plannerLocalDraftScope,
+  persistPlannerFallbackDraft,
+  savePlannerLocalDraft,
+} from '../services/plannerLocalDraft'
 import { clearRecommendationSession } from '../services/recommendationSelection'
 import {
   DEFAULT_PLANNING_END_TIME,
   DEFAULT_PLANNING_START_TIME,
   defaultPlanningTimeWindow,
-  futureDateValue,
   localDateValue,
   localTimeValue,
   type PlanningTimeWindow,
@@ -40,6 +47,7 @@ import {
   validateTripDateRange,
   validateTripSchedule,
 } from '../services/tripTimeConstraints'
+import { useAccountSession } from '../session/useAccountSession'
 
 // 20 人是当前协作会话、邀请链接和公平评分共同支持的安全上限。
 // 前端校验与服务端模型使用同一上限，避免界面可填但提交后被拒绝。
@@ -108,13 +116,24 @@ function questionIndexForConfirmationDetails(
 
 export function ConversationPlannerPage() {
   const [searchParams] = useSearchParams()
+  const { user } = useAccountSession()
   const requestedMode = searchParams.get('mode')
   const parentTripId = searchParams.get('parentTripId')
-  const parentDayIndex = Number(searchParams.get('dayIndex'))
+  const parentDayIndexRaw = searchParams.get('dayIndex')
+  const parsedParentDayIndex = parentDayIndexRaw !== null && /^(0|[1-9]\d*)$/.test(parentDayIndexRaw)
+    ? Number(parentDayIndexRaw)
+    : null
+  const parentDayIndex = parsedParentDayIndex !== null && Number.isSafeInteger(parsedParentDayIndex)
+    ? parsedParentDayIndex
+    : null
   const parentCity = searchParams.get('city') ?? ''
   const parentDate = searchParams.get('date') ?? ''
   const parentBudgetCents = Number(searchParams.get('budget'))
-  const isParentDay = Boolean(parentTripId && Number.isInteger(parentDayIndex) && parentDayIndex >= 0)
+  const isParentDay = Boolean(parentTripId && parentDayIndex !== null)
+  const plannerDraftScope = plannerLocalDraftScope(
+    isParentDay ? parentTripId : null,
+    isParentDay ? parentDayIndex : null,
+  )
   const initialEntryMode: EntryMode | null = requestedMode === 'group'
     ? 'group'
     : requestedMode === 'single' || isParentDay
@@ -158,7 +177,10 @@ export function ConversationPlannerPage() {
   const [planningDraft, setPlanningDraft] = useState<TripDraftInput | null>(null)
   const [error, setError] = useState('')
   const [temporalNow, setTemporalNow] = useState(() => new Date())
+  const [hydratedDraftScope, setHydratedDraftScope] = useState<string | null>(null)
+  const [localDraftStatus, setLocalDraftStatus] = useState<'idle' | 'saved' | 'unavailable'>('idle')
   const conversationKey = useRef<string | null>(null)
+  const localDraftWriteGate = useRef(createPlannerLocalDraftWriteGate())
   const outcomeRef = useRef<HTMLElement | null>(null)
   const navigate = useNavigate()
 
@@ -229,10 +251,125 @@ export function ConversationPlannerPage() {
   const fallbackReviewComplete = reviewedFallbackCount === visibleQuestionCount
   const hasOutcome = Boolean(result || fallback)
 
+  const localDraftIdentity = user ? `${user.userId}:${plannerDraftScope}` : null
+
   useEffect(() => {
     const timer = window.setInterval(() => setTemporalNow(new Date()), 30_000)
     return () => window.clearInterval(timer)
   }, [])
+
+  useEffect(() => {
+    setHydratedDraftScope(null)
+    localDraftWriteGate.current.allowAfterUserEdit()
+    if (!user || !localDraftIdentity) return
+
+    let restored = null
+    try {
+      restored = loadPlannerLocalDraft(window.localStorage, user.userId, plannerDraftScope)
+    } catch {
+      setLocalDraftStatus('unavailable')
+    }
+    if (restored) {
+      const restoredMode = restored.entryMode ?? initialEntryMode
+      const restoredQuestionIndexes = restoredMode === 'single' ? singleQuestionIndexes : groupQuestionIndexes
+      const restoredVisibleIndexes = isParentDay
+        ? restoredQuestionIndexes.filter((questionIndex) => questionIndex !== 0)
+        : restoredQuestionIndexes
+      const restoredStep = restoredVisibleIndexes.includes(restored.step)
+        ? restored.step
+        : (restoredVisibleIndexes[0] ?? 0)
+      setDescription(restored.description)
+      setAnswers([...restored.answers])
+      setTripFields(restored.tripFields)
+      setCustomTimeWindow(restored.customTimeWindow)
+      setTimeDraft(restored.customTimeWindow ?? {
+        startTime: DEFAULT_PLANNING_START_TIME,
+        endTime: DEFAULT_PLANNING_END_TIME,
+      })
+      setRouteFields(restored.routeFields)
+      setOrganizerNickname(restored.organizerNickname)
+      setPartyCount(restored.partyCount)
+      setPersonalBudget(restored.personalBudget)
+      setAssistanceMode(restored.assistanceMode)
+      setEntryMode(restoredMode)
+      setQuestionnaireStarted(restored.questionnaireStarted)
+      setStep(restoredStep)
+      setError('')
+      setLocalDraftStatus('saved')
+    } else {
+      const defaultAnswers = Array<string>(questions.length).fill('')
+      if (initialEntryMode === 'group') defaultAnswers[1] = '2个人出行；组织者昵称：'
+      if (initialEntryMode === 'single') defaultAnswers[1] = '1个人出行；组织者昵称：旅行者'
+      setDescription('')
+      setAnswers(defaultAnswers)
+      setTripFields({
+        city: parentCity,
+        startDate: parentDate || localDateValue(),
+        endDate: parentDate || localDateValue(),
+      })
+      setCustomTimeWindow(null)
+      setTimeDraft({ startTime: DEFAULT_PLANNING_START_TIME, endTime: DEFAULT_PLANNING_END_TIME })
+      setTimeEditorOpen(false)
+      setRouteFields({
+        start: '',
+        end: '',
+        budget: Number.isFinite(parentBudgetCents) ? String(parentBudgetCents / 100) : '',
+      })
+      setOrganizerNickname(initialEntryMode === 'single' ? '旅行者' : '')
+      setPartyCount(initialEntryMode === 'group' ? 2 : 1)
+      setPersonalBudget('')
+      setAssistanceMode('ORDINARY')
+      setEntryMode(initialEntryMode)
+      setQuestionnaireStarted(false)
+      setStep(isParentDay ? initialEntryMode === 'group' ? 1 : 2 : 0)
+      setResult(null)
+      setFallback(null)
+      setCollaboration(null)
+      setPlanningDraft(null)
+      setLinks([])
+      setReviewedFallbackAnswers(Array(questions.length).fill(false))
+      setFallbackReviewNotice('')
+      conversationKey.current = null
+      setLocalDraftStatus('idle')
+    }
+    setHydratedDraftScope(localDraftIdentity)
+  }, [initialEntryMode, isParentDay, localDraftIdentity, plannerDraftScope, user])
+
+  useEffect(() => {
+    if (!user || !localDraftIdentity || hydratedDraftScope !== localDraftIdentity || hasOutcome || !localDraftWriteGate.current.canPersist()) return
+    const hasMeaningfulInput = entryMode !== null || Boolean(
+      description.trim() || answers.some((answer) => answer.trim()) || routeFields.start.trim() || routeFields.end.trim()
+      || routeFields.budget.trim() || organizerNickname.trim() || personalBudget.trim(),
+    )
+    if (!hasMeaningfulInput) {
+      setLocalDraftStatus('idle')
+      return
+    }
+    const timer = window.setTimeout(() => {
+      if (!localDraftWriteGate.current.canPersist()) return
+      let saved = false
+      try {
+        saved = savePlannerLocalDraft(window.localStorage, user.userId, plannerDraftScope, {
+          entryMode,
+          questionnaireStarted,
+          step,
+          description,
+          answers,
+          tripFields,
+          customTimeWindow,
+          routeFields,
+          organizerNickname,
+          partyCount,
+          personalBudget,
+          assistanceMode,
+        })
+      } catch {
+        saved = false
+      }
+      setLocalDraftStatus(saved ? 'saved' : 'unavailable')
+    }, 500)
+    return () => window.clearTimeout(timer)
+  }, [answers, assistanceMode, customTimeWindow, description, entryMode, hasOutcome, hydratedDraftScope, localDraftIdentity, organizerNickname, partyCount, personalBudget, plannerDraftScope, questionnaireStarted, routeFields, step, tripFields, user])
 
   useEffect(() => {
     if (!hasOutcome) return
@@ -285,6 +422,7 @@ export function ConversationPlannerPage() {
 
   function answersChanged() {
     conversationKey.current = null
+    localDraftWriteGate.current.allowAfterUserEdit()
     setError('')
   }
 
@@ -381,62 +519,6 @@ export function ConversationPlannerPage() {
     }
   }
 
-  function applyTestPreset() {
-    const presetDate = futureDateValue()
-    answersChanged()
-    setEntryMode('single')
-    setDescription('想在北京轻松玩一天，参观历史景点并品尝北京特色美食。')
-    setTripFields({ city: '北京', startDate: presetDate, endDate: presetDate })
-    setCustomTimeWindow(null)
-    setTimeEditorOpen(false)
-    setRouteFields({ start: '北京站', end: '北京站', budget: '500' })
-    setOrganizerNickname('测试用户')
-    setPartyCount(1)
-    setPersonalBudget('500')
-    setAssistanceMode('ORDINARY')
-    setQuestionnaireStarted(true)
-    setAnswers([
-      tripAnswer(
-        { city: '北京', startDate: presetDate, endDate: presetDate },
-        { startTime: DEFAULT_PLANNING_START_TIME, endTime: DEFAULT_PLANNING_END_TIME },
-      ),
-      '1个人出行；组织者昵称：测试用户',
-      '从北京站出发；结束地：北京站；本次行程总预算：500',
-      '喜欢历史文化和美食，必去故宫和天坛，不去酒吧。',
-      '组织者个人预算上限：500元；关怀模式：ORDINARY（普通出行（无额外关怀限制））。',
-      '请安排节奏舒适、路线顺畅的一日行程。',
-    ])
-    setStep(0)
-  }
-
-  function applyGroupOrganizerTestPreset() {
-    const presetDate = futureDateValue()
-    answersChanged()
-    setEntryMode('group')
-    setDescription('和朋友在北京轻松游览一天，兼顾历史文化、美食和舒适的步行节奏。')
-    setTripFields({ city: '北京', startDate: presetDate, endDate: presetDate })
-    setCustomTimeWindow(null)
-    setTimeEditorOpen(false)
-    setRouteFields({ start: '北京站', end: '北京站', budget: '900' })
-    setOrganizerNickname('组织者小王')
-    setPartyCount(2)
-    setPersonalBudget('500')
-    setAssistanceMode('ORDINARY')
-    setQuestionnaireStarted(true)
-    setAnswers([
-      tripAnswer(
-        { city: '北京', startDate: presetDate, endDate: presetDate },
-        { startTime: DEFAULT_PLANNING_START_TIME, endTime: DEFAULT_PLANNING_END_TIME },
-      ),
-      '2个人出行；组织者昵称：组织者小王',
-      '从北京站出发；结束地：北京站；同行行程总预算：900',
-      '喜欢历史文化和美食，必去故宫和天坛，不去酒吧。',
-      '组织者个人预算上限：500元；关怀模式：ORDINARY（普通出行，无额外关怀限制）。',
-      '请安排节奏舒适、路线顺畅的一日行程，并为同行成员保留独立填写偏好的空间。',
-    ])
-    setStep(0)
-  }
-
   function joinExistingTrip() {
     const token = invitationTokenFromText(inviteLink)
     if (!token) { setError('请粘贴完整的成员邀请链接或 43 位邀请码。'); return }
@@ -523,6 +605,28 @@ export function ConversationPlannerPage() {
         reviewedFallback: preserveReviewedFallback,
       }, key)
       if (isFixedQuestionFallback(created)) {
+        if (user) {
+          let saved = false
+          try {
+            saved = persistPlannerFallbackDraft(window.localStorage, user.userId, plannerDraftScope, {
+              entryMode,
+              questionnaireStarted,
+              step,
+              description,
+              answers: submittedAnswers,
+              tripFields,
+              customTimeWindow,
+              routeFields,
+              organizerNickname,
+              partyCount,
+              personalBudget,
+              assistanceMode,
+            }, localDraftWriteGate.current)
+          } catch {
+            saved = false
+          }
+          setLocalDraftStatus(saved ? 'saved' : 'unavailable')
+        }
         setFallback(created)
         if (preserveReviewedFallback) {
           setFallbackReviewNotice(`智能整理服务暂不可用（${created.recognition.failureCode}），本次已自动尝试 ${created.recognition.callCount} 次。已保留 ${visibleQuestionCount} / ${visibleQuestionCount} 核对结果，请稍后再次尝试。`)
@@ -537,6 +641,10 @@ export function ConversationPlannerPage() {
       }
       if (!created.organizerAccess.organizerToken || !created.organizerAccess.organizerTokenAvailable) {
         throw new Error('组织者凭证未生成；为避免越权，当前行程不能继续。')
+      }
+      localDraftWriteGate.current.blockAfterAuthoritativeCreation()
+      if (user) {
+        clearPlannerLocalDraft(window.localStorage, user.userId, plannerDraftScope)
       }
       setStoredOrganizerToken(created.revision.tripId, created.organizerAccess.organizerToken)
       const nextPlanningDraft = collaborationPlanningDraft(created.revision)
@@ -584,7 +692,7 @@ export function ConversationPlannerPage() {
     if (!revision || !organizerToken || !collaboration) return
     setLoading(true); setError('')
     try {
-      if (parentTripId && Number.isInteger(parentDayIndex) && parentDayIndex >= 0) {
+      if (parentTripId && parentDayIndex !== null) {
         const parentToken = window.sessionStorage.getItem(`parent-trip-token:${parentTripId}`)
         if (!parentToken) throw new Error('父行程组织者凭证已丢失，不能绑定当日行程。')
         await linkParentTripDay({
@@ -737,8 +845,8 @@ export function ConversationPlannerPage() {
         <div className="privacy-note"><LockKeyhole size={17} /><span>{entryMode === 'group' ? '你的回答仅用于整理行程偏好。成员资料各自独立确认。' : '你的回答仅用于整理本次行程偏好。'}</span></div>
       </aside>
       <section className="planner-panel conversation-panel" data-reveal="panel">
-        <header className="planner-panel__header"><div><span className="section-kicker">CONVERSATIONAL TRIP</span><h2>{hasOutcome ? '确认你的旅行需求' : isParentDay ? '从今天的期待开始' : '从一句期待开始'}</h2></div><span className="save-state"><span className="status-dot" /> 已自动保存当前回答</span></header>
-        {!hasOutcome && entryMode === null && <section className="entry-mode-card"><div><span className="section-kicker">CHOOSE YOUR WAY</span><h3>这次，怎么出发？</h3><p>单人行程直接开始；多人由组织者创建后发送邀请链接，成员各自填写自己的资料。</p></div><div className="entry-mode-grid"><button type="button" onClick={() => begin('single')}><UserRound size={21} /><strong>单人创建</strong><small>我自己规划一趟行程</small><ArrowRight size={17} /></button><button type="button" onClick={() => begin('group')}><UsersRound size={21} /><strong>多人创建</strong><small>我是组织者，邀请同行成员</small><ArrowRight size={17} /></button></div><div className="planner-actions"><button className="button button--soft" type="button" onClick={applyTestPreset}>填入北京单人测试模板</button><button className="button button--soft" type="button" onClick={applyGroupOrganizerTestPreset}>填入北京多人组织者模板</button></div><div className="join-entry"><span><Link2 size={16} />已有多人邀请？</span><input value={inviteLink} onChange={(event) => setInviteLink(event.target.value)} placeholder="粘贴邀请链接" /><button className="button button--soft" type="button" onClick={joinExistingTrip}>加入行程</button></div></section>}
+        <header className="planner-panel__header"><div><span className="section-kicker">CONVERSATIONAL TRIP</span><h2>{hasOutcome ? '确认你的旅行需求' : isParentDay ? '从今天的期待开始' : '从一句期待开始'}</h2></div><span className="save-state"><span className="status-dot" /> {localDraftStatus === 'saved' ? '本地草稿已保存' : localDraftStatus === 'unavailable' ? '本地草稿未保存' : '填写后自动保存'}</span></header>
+        {!hasOutcome && entryMode === null && <section className="entry-mode-card"><div><span className="section-kicker">CHOOSE YOUR WAY</span><h3>这次，怎么出发？</h3><p>单人行程直接开始；多人由组织者创建后发送邀请链接，成员各自填写自己的资料。</p></div><div className="entry-mode-grid"><button type="button" onClick={() => begin('single')}><UserRound size={21} /><strong>单人创建</strong><small>我自己规划一趟行程</small><ArrowRight size={17} /></button><button type="button" onClick={() => begin('group')}><UsersRound size={21} /><strong>多人创建</strong><small>我是组织者，邀请同行成员</small><ArrowRight size={17} /></button></div><div className="join-entry"><span><Link2 size={16} />已有多人邀请？</span><input value={inviteLink} onChange={(event) => setInviteLink(event.target.value)} placeholder="粘贴邀请链接" /><button className="button button--soft" type="button" onClick={joinExistingTrip}>加入行程</button></div></section>}
         {!hasOutcome && entryMode !== null && <section className="conversation-card"><div className="conversation-intro"><span><Sparkles size={18} /></span><div><strong>{questionnaireStarted ? isParentDay ? '今天的期待' : '总体期待' : isParentDay ? '先填写今天的期待' : '先填写总体期待'}</strong><p>{questionnaireStarted ? `这段${isParentDay ? '今天的' : ''}期待会和全部回答一起整理，你仍可以继续修改。` : `填写后才能开始回答 ${visibleQuestionCount} 个问题。`}</p></div></div>
           <label className="field-label" htmlFor="goal">{isParentDay ? '今天，你最希望得到什么？' : '这趟旅行，你最希望得到什么？'}</label>
           <textarea id="goal" className="conversation-textarea" required value={description} onChange={(event) => { answersChanged(); setDescription(event.target.value) }} placeholder={isParentDay ? '例如：今天想轻松逛历史景点，也想吃一顿当地特色。' : '例如：和朋友去驻马店玩一天，想轻松一点，也想吃当地特色。'} />
