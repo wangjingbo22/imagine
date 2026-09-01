@@ -1,5 +1,5 @@
 import { ArrowLeft, CircleHelp, SlidersHorizontal, UserRound } from 'lucide-react'
-import type { PropsWithChildren } from 'react'
+import type { PointerEvent, PropsWithChildren } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAccountSession } from '../session/useAccountSession'
 import { BrandMark } from './BrandMark'
@@ -38,8 +38,23 @@ export function AppShell({
     navigate('/', { replace: true })
   }
 
+  const updateGridFocus = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'touch') return
+    event.currentTarget.style.setProperty('--grid-focus-x', `${event.clientX}px`)
+    event.currentTarget.style.setProperty('--grid-focus-y', `${event.clientY}px`)
+  }
+
+  const clearGridFocus = (event: PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.style.removeProperty('--grid-focus-x')
+    event.currentTarget.style.removeProperty('--grid-focus-y')
+  }
+
   return (
-    <div className={compact ? 'app-shell app-shell--compact' : 'app-shell'}>
+    <div
+      className={compact ? 'app-shell app-shell--compact' : 'app-shell'}
+      onPointerLeave={clearGridFocus}
+      onPointerMove={updateGridFocus}
+    >
       <header className="topbar">
         <div className="topbar__inner">
           {isHome || !showBackButton ? (

@@ -4722,3 +4722,91 @@ select:focus-visible {
 
   .recommendation-actions .button { width: 100%; }
 }
+
+/* Pointer-aware grid: a restrained blue bloom follows desktop cursors. */
+.app-shell {
+  --grid-focus-x: -400px;
+  --grid-focus-y: -400px;
+  background-image:
+    radial-gradient(260px circle at var(--grid-focus-x) var(--grid-focus-y), rgba(43, 126, 241, 0.16), transparent 70%),
+    linear-gradient(rgba(23, 105, 224, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 105, 224, 0.035) 1px, transparent 1px);
+  background-size: auto, 28px 28px, 28px 28px;
+  transition: background-image 0.2s ease;
+}
+
+.app-shell--compact {
+  background-image:
+    radial-gradient(260px circle at var(--grid-focus-x) var(--grid-focus-y), rgba(43, 126, 241, 0.13), transparent 70%),
+    linear-gradient(rgba(23, 105, 224, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 105, 224, 0.028) 1px, transparent 1px);
+}
+
+/* Final blue-white overrides for legacy collaboration and confirmation surfaces. */
+.confirmation-card,
+.confirmation-edit-panel,
+.member-flow-guide,
+.member-answer-card,
+.conflict-review,
+.conflict-review.is-ready,
+.change-proposal-card,
+.proposal-panel-toggle,
+.parent-place-memory__days article,
+.recommendation-place-memory li {
+  border-color: #d5e4f6;
+  background: #f8fbff;
+}
+
+.confirmation-edit-grid button,
+.member-answer-card--goal,
+.answer-hints article,
+.question-field-cards label {
+  border-color: #d5e4f6;
+  background: #ffffff;
+}
+
+.confirmation-edit-grid button > span,
+.member-answer-card--goal > svg,
+.conflict-review__heading > span,
+.conflict-review__icon,
+.parent-place-memory > header > div,
+.recommendation-place-memory header {
+  color: #1769e0;
+  background: #eaf2ff;
+}
+
+.confirmation-edit-grid button > span,
+.member-answer-card--goal > svg {
+  background: #eaf2ff;
+}
+
+.confirmation-edit-grid button:hover,
+.proposal-panel-toggle:hover,
+.collaboration-refresh-button:hover:not(:disabled) {
+  border-color: #8db8f4;
+  background: #edf5ff;
+}
+
+.proposal-status--approved,
+.proposal-status--pending,
+.parent-day-status--actual_recorded,
+.evidence-review-row > button.is-confirmed {
+  color: #165cb8;
+  border-color: #bad6fb;
+  background: #edf5ff;
+}
+
+.parent-place-memory__days article,
+.recommendation-place-memory li {
+  border-left-color: #2a7df1;
+}
+
+@media (hover: none) {
+  .app-shell,
+  .app-shell--compact {
+    background-image:
+      linear-gradient(rgba(23, 105, 224, 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(23, 105, 224, 0.025) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+}
