@@ -85,6 +85,16 @@ def calculate_plan_diff(
                 )
             )
 
+        if old is not None and new is not None and old.note != new.note:
+            items.append(PlanDiffItem(
+                category=PlanDiffCategory.CARE,
+                change_type=PlanDiffChangeType.CHANGED,
+                key=f"task:{task_id}:note",
+                label=f"{task_title} · 休息与执行安排",
+                before=old.note,
+                after=new.note,
+            ))
+
     base_constraints = {
         constraint.rule_id: constraint
         for constraint in base.constraints_snapshot

@@ -608,7 +608,19 @@ class DeterministicCandidatePlanner:
                     place_id=item.place.placeId,
                     route_id=item.route.routeId,
                     end_location_text=item.end_location_text,
-                    note=item.note,
+                    note=(
+                        (
+                            f"出发前在上一地点休息 {item.rest_before.start_at.isoformat()}"
+                            f"—{item.rest_before.end_at.isoformat()}；休息设施需自行核实。"
+                            + (
+                                f"到达后休息 {item.rest_on_arrival.start_at.isoformat()}"
+                                f"—{item.rest_on_arrival.end_at.isoformat()}，再开始活动。"
+                                if item.rest_on_arrival is not None else ""
+                            ) +
+                            f"{item.note}"
+                        )[:500]
+                        if item.rest_before is not None else item.note
+                    ),
                 )
             )
 

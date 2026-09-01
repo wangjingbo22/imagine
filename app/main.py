@@ -21,6 +21,7 @@ from app.api.collaboration_routes import router as collaboration_router
 from app.api.recommendation_routes import router as recommendation_router
 from app.api.media_routes import router as media_router
 from app.api.memory_timeline_routes import router as memory_timeline_router
+from app.api.parent_trip_routes import router as parent_trip_router
 from app.application.arrival_decision_service import ArrivalDecisionService
 from app.application.arrival_evidence_service import ArrivalEvidenceService
 from app.application.arrival_execution_service import ArrivalExecutionService
@@ -83,6 +84,8 @@ from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.infrastructure.provider_fact_registry import SqliteProviderFactRegistry
 from app.infrastructure.trusted_planning_store import SqliteTrustedPlanningRepository
 from app.infrastructure.workflow_store import SqliteWorkflowRepository
+from app.infrastructure.parent_trip_store import SqliteParentTripRepository
+from app.application.parent_trip_service import ParentTripService
 from app.schemas.validation_error import TripSchemaError, issues_from_pydantic
 from app.services.replanning import SuffixPlanner
 
@@ -306,6 +309,12 @@ def create_app(
         revisions=resolved_revision_port,
         evaluator=DeterministicHardConflictEvaluator(),
     )
+    parent_trip_service = ParentTripService(
+        SqliteParentTripRepository(planning_database_path),
+        trip_draft_revision_creator,
+        collaboration_service,
+        plan_service,
+    )
     collaboration_planning_bridge = CollaborationPlanningBridge(
         workflow_service
     )
@@ -499,6 +508,7 @@ def create_app(
         workflow_service,
     )
     app.state.collaboration_service = collaboration_service
+    app.state.parent_trip_service = parent_trip_service
     app.state.collaboration_planning_bridge = collaboration_planning_bridge
     app.state.trip_draft_revision_creator = trip_draft_revision_creator
     app.state.trip_understanding_gateway = trip_understanding_gateway
@@ -528,6 +538,7 @@ def create_app(
     app.include_router(recommendation_router)
     app.include_router(media_router)
     app.include_router(memory_timeline_router)
+    app.include_router(parent_trip_router)
     app.include_router(workflow_router)
 
     @app.get("/health", tags=["系统"], summary="健康检查")

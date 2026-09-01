@@ -734,6 +734,25 @@ def _normalized_text(value: str) -> str:
     return " ".join(normalize("NFKC", value).strip().casefold().split())
 
 
+_INTEREST_MATCH_TERMS: dict[str, tuple[str, ...]] = {
+    "历史文化": ("历史", "文化", "博物馆", "纪念馆", "古迹", "文物", "古城"),
+    "美食": ("美食", "餐饮", "餐厅", "小吃", "菜", "咖啡", "茶馆"),
+    "特色餐饮": ("特色", "餐饮", "餐厅", "小吃", "菜"),
+    "自然风光": ("自然", "风景", "公园", "景区", "山", "湖", "江", "湿地"),
+    "亲子": ("亲子", "儿童", "乐园", "动物园", "科技馆"),
+    "购物": ("购物", "商场", "商业", "步行街", "市场"),
+    "艺术": ("艺术", "美术馆", "展览", "剧院", "画廊"),
+}
+
+
+def _interest_matches(selected_text: str, interest: str) -> bool:
+    normalized = _normalized_text(interest)
+    if not normalized:
+        return False
+    terms = _INTEREST_MATCH_TERMS.get(normalized, (normalized,))
+    return any(term in selected_text for term in terms)
+
+
 def _place_matches_label(place: Place, label: str) -> bool:
     expected = _normalized_text(label)
     if not expected:
@@ -1155,28 +1174,47 @@ class TrustedRecommendationService:
     def _score_members(
         tasks: Sequence[CandidatePlace], members: Sequence[MemberPreference],
     ) -> list[MemberScore]:
-        selected_text = " ".join(
-            f"{item.name} {item.category or ''}".casefold() for item in tasks
+        selected_text = _normalized_text(
+            " ".join(f"{item.name} {item.category or ''}" for item in tasks)
         )
         scores: list[MemberScore] = []
         for member in members:
-            interests = tuple(item.casefold() for item in member.interests if item.strip())
-            must_visit = tuple(item.casefold() for item in member.must_visit if item.strip())
-            interest_hits = sum(word in selected_text for word in interests)
+            interests = tuple(item.strip() for item in member.interests if item.strip())
+            must_visit = tuple(_normalized_text(item) for item in member.must_visit if item.strip())
+            matched_interests = [
+                item for item in interests if _interest_matches(selected_text, item)
+            ]
+            missing_interests = [
+                item for item in interests if item not in matched_interests
+            ]
             missing_must = [place for place in must_visit if place not in selected_text]
-            score = min(100, 70 + min(20, interest_hits * 10) + (10 if must_visit and not missing_must else 0))
+            # Keep this compatibility view aligned with the canonical T007
+            # fairness rule: start at 100 and deduct 20 points for each
+            # confirmed interest not covered by the selected task set.  The
+            # previous 70-point base made most real AMap categories appear as
+            # an unexplained constant score.
+            interest_deduction = 20 * len(missing_interests)
+            score = max(0, 100 - interest_deduction)
             penalties: list[str] = []
             reasons: list[str] = []
-            if interest_hits:
-                reasons.append(f"覆盖 {interest_hits} 项已确认兴趣")
+            if interests:
+                reasons.append(
+                    f"兴趣覆盖 {len(matched_interests)}/{len(interests)}"
+                )
+            else:
+                reasons.append("未设置软兴趣，当前不扣兴趣分")
+            if missing_interests:
+                penalties.append("FAIR.INTEREST.UNMET")
+                reasons.append(
+                    "未覆盖“" + "、".join(missing_interests) +
+                    f"”，扣 {interest_deduction} 分"
+                )
             if must_visit and not missing_must:
-                reasons.append("已纳入必去地点")
+                reasons.append("硬性必去地点已全部纳入")
             if missing_must:
-                score = max(0, score - 45)
-                penalties.append("MUST_VISIT_NOT_SELECTED")
-                reasons.append("部分必去地点未进入本轮任务")
-            if not reasons:
-                reasons.append("按已确认约束保留可行候选")
+                score = max(0, score - 60)
+                penalties.append("FAIR.HARD.MUST_VISIT_MISSING")
+                reasons.append("缺少硬性必去地点，额外扣 60 分")
             scores.append(MemberScore(
                 participant_id=member.participant_id, score=score,
                 penalty_rule_ids=penalties, reasons=reasons,

@@ -150,7 +150,26 @@ def _evaluate_constraint(
         domain = ReplanRuleDomain.CARE
         hint = "替换最长步行路段或增加接驳方式"
     else:
-        observed = max(item.elapsed_since_rest_minutes for item in suffix_facts)
+        # Reconstruct continuous activity from scheduled breaks, routes and
+        # visits. A caller-supplied elapsed counter is never proof of a break.
+        seconds = lambda value: value.hour * 3600 + value.minute * 60 + value.second
+        last_rest_end = seconds(anchor_end)
+        longest = 0
+        for fact in suffix_facts:
+            for rest in (fact.rest_before, fact.rest_on_arrival):
+                if rest is not None and seconds(rest.end_at) - seconds(rest.start_at) >= 30 * 60:
+                    if (
+                        rest is fact.rest_on_arrival
+                        and fact.route.mode.value in {"TRANSIT", "DRIVING"}
+                    ):
+                        # Seated motorized travel is not continuous exertion.
+                        # The explicit arrival break still separates it from
+                        # the following visit; walking/cycling never get this.
+                        last_rest_end = max(last_rest_end, seconds(rest.start_at))
+                    longest = max(longest, seconds(rest.start_at) - last_rest_end)
+                    last_rest_end = seconds(rest.end_at)
+            longest = max(longest, seconds(fact.end_at) - last_rest_end)
+        observed = (longest + 59) // 60
         domain = ReplanRuleDomain.CARE
         hint = "缩短连续活动时间并在剩余后缀增加休息"
 

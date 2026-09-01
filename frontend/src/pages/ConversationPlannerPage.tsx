@@ -10,6 +10,7 @@ import {
   newIdempotencyKey,
   resolveOrganizerConfirmationItem,
 } from '../api/collaborationApi'
+import { linkParentTripDay } from '../api/parentTripApi'
 import { ApiError } from '../api/client'
 import { AppShell } from '../components/AppShell'
 import { ConflictReviewPanel } from '../components/ConflictReviewPanel'
@@ -59,14 +60,19 @@ function questionIndexForConfirmationDetails(
 export function ConversationPlannerPage() {
   const [searchParams] = useSearchParams()
   const opensGroupCreation = searchParams.get('mode') === 'group'
+  const parentTripId = searchParams.get('parentTripId')
+  const parentDayIndex = Number(searchParams.get('dayIndex'))
+  const parentCity = searchParams.get('city') ?? ''
+  const parentDate = searchParams.get('date') ?? ''
+  const parentBudgetCents = Number(searchParams.get('budget'))
   const [description, setDescription] = useState('')
   const [answers, setAnswers] = useState<string[]>(() => {
     const initial = Array<string>(questions.length).fill('')
     if (opensGroupCreation) initial[1] = '2个人出行；组织者昵称：'
     return initial
   })
-  const [tripFields, setTripFields] = useState({ city: '', date: '', startTime: '', endTime: '' })
-  const [routeFields, setRouteFields] = useState({ start: '', end: '', budget: '' })
+  const [tripFields, setTripFields] = useState({ city: parentCity, date: parentDate, startTime: '', endTime: '' })
+  const [routeFields, setRouteFields] = useState({ start: '', end: '', budget: Number.isFinite(parentBudgetCents) ? String(parentBudgetCents / 100) : '' })
   const [organizerNickname, setOrganizerNickname] = useState('')
   const [partyCount, setPartyCount] = useState(opensGroupCreation ? 2 : 1)
   const [personalBudget, setPersonalBudget] = useState('')
@@ -286,9 +292,16 @@ export function ConversationPlannerPage() {
       if (!created.organizerAccess.organizerToken || !created.organizerAccess.organizerTokenAvailable) {
         throw new Error('组织者凭证未生成；为避免越权，当前行程不能继续。')
       }
+      window.sessionStorage.setItem(`organizer-token:${created.revision.tripId}`, created.organizerAccess.organizerToken)
+      if (parentTripId && Number.isInteger(parentDayIndex) && parentDayIndex >= 0) {
+        const parentToken = window.sessionStorage.getItem(`parent-trip-token:${parentTripId}`)
+        if (!parentToken) throw new Error('父行程组织者凭证已丢失，不能绑定当日行程。')
+        await linkParentTripDay({ parentTripId, dayIndex: parentDayIndex,
+          childTripId: created.revision.tripId, parentToken,
+          organizerToken: created.organizerAccess.organizerToken })
+      }
       setFallback(null)
       setResult(created)
-      window.sessionStorage.setItem(`organizer-token:${created.revision.tripId}`, created.organizerAccess.organizerToken)
       setPlanningDraft(collaborationPlanningDraft(created.revision))
       setCollaboration(await getOrganizerCollaboration(created.revision.tripId, created.organizerAccess.organizerToken))
     } catch (caught) {
@@ -445,6 +458,7 @@ export function ConversationPlannerPage() {
             <button className="button button--primary" type="button" disabled={loading} onClick={() => void retryAfterFallbackReview()}>{loading ? '正在重新整理…' : fallbackReviewComplete ? fallbackReviewNotice ? '再次尝试智能整理' : '六项已核对，重新智能整理' : `先勾选剩余 ${questions.length - reviewedFallbackCount} 项`} <ArrowRight size={18} /></button>
           </div>
         </section>}
+        {parentTripId && <button className="parent-trip-return" type="button" onClick={() => navigate(`/parent-trips/${parentTripId}`)}>← 返回多日父行程</button>}
         {result && revision && <section className="confirmation-card"><div className="confirmation-card__head"><span><Check size={20} /></span><div><strong>Agent 解析确认卡</strong><p>请先确认组织者资料；多人行程随后按成员逐个生成可重复打开的邀请链接。</p></div></div>
           <ul className="confirmation-grid">{[['城市', preview?.cityName], ['日期', preview?.travelDate], ['时间', `${preview?.startTime ?? '未识别'} 至 ${preview?.endTime ?? '未识别'}`], ['起终点', `${preview?.startLocationText ?? '未识别'} → ${preview?.endLocationText ?? '未识别'}`], ['预算', preview?.budgetCents === null || preview?.budgetCents === undefined ? '未识别' : `¥${preview.budgetCents / 100}`], ['兴趣', previewParticipant?.interests.join('、') || '未识别']].map(([label, value]) => <li key={label}><strong>{label}</strong><span>{value}</span></li>)}</ul>
           <div><strong>需要更正？</strong><p>{questions.map(([, question], index) => <button className="button button--soft" type="button" key={question} onClick={() => editAnswer(index)}>修改第 {index + 1} 问</button>)}</p></div>

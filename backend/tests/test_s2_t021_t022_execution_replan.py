@@ -31,6 +31,7 @@ from app.services.replanning import (
     DeterministicRetainedSuffixPlanner,
     SuffixPlanningInput,
 )
+from app.services.replanning.suffix_planner import DeterministicEventAwareSuffixPlanner
 from backend.tests.plan_support import UnusedLocationService
 
 
@@ -123,7 +124,7 @@ def _revision_for_planning_request() -> SimpleNamespace:
     )
 
 
-class RestAwareSuffixPlanner:
+class CounterOnlySuffixPlanner:
     def plan_suffix(
         self,
         planning_input: SuffixPlanningInput,
@@ -140,6 +141,10 @@ class RestAwareSuffixPlanner:
             )
             for fact in planning_input.task_facts
         )
+
+
+class RestAwareSuffixPlanner(DeterministicEventAwareSuffixPlanner):
+    pass
 
 
 class PassThroughSuffixPlanner:
@@ -602,7 +607,7 @@ async def test_route_fact_break_is_rejected_before_any_v2_write(
 async def test_explanation_failure_keeps_candidate_and_diff_complete(
     tmp_path: Path,
 ) -> None:
-    app, _ = _app_and_db(tmp_path, explanation_gateway=FailingExplainer())
+    app, _ = _app_and_db(tmp_path, suffix_planner=ReturnShiftSuffixPlanner(), explanation_gateway=FailingExplainer())
     trip_id = _planning_request()["trip"]["tripId"]
     command = deepcopy(_cases()["lateFeasible"])
     command["lockedTaskIds"] = []
@@ -631,7 +636,7 @@ async def test_decision_reuses_atomic_plan_version_state_machine(
     tmp_path: Path,
     decision: str,
 ) -> None:
-    app, database_path = _app_and_db(tmp_path)
+    app, database_path = _app_and_db(tmp_path, suffix_planner=ReturnShiftSuffixPlanner())
     trip_id = _planning_request()["trip"]["tripId"]
     command = deepcopy(_cases()["lateFeasible"])
     command["lockedTaskIds"] = []
@@ -666,7 +671,7 @@ async def test_adjustment_v2_cannot_bypass_dedicated_decision_endpoint(
     tmp_path: Path,
     action: str,
 ) -> None:
-    app, _ = _app_and_db(tmp_path)
+    app, _ = _app_and_db(tmp_path, suffix_planner=ReturnShiftSuffixPlanner())
     trip_id = _planning_request()["trip"]["tripId"]
     command = deepcopy(_cases()["lateFeasible"])
     command["lockedTaskIds"] = []
@@ -697,7 +702,7 @@ async def test_readiness_change_after_preview_rejects_decision_without_state_cha
     tmp_path: Path,
 ) -> None:
     readiness = MutableReadinessGuard()
-    app, database_path = _app_and_db(tmp_path, readiness_guard=readiness)
+    app, database_path = _app_and_db(tmp_path, readiness_guard=readiness, suffix_planner=ReturnShiftSuffixPlanner())
     trip_id = _planning_request()["trip"]["tripId"]
     command = deepcopy(_cases()["lateFeasible"])
     command["lockedTaskIds"] = []
@@ -872,6 +877,11 @@ async def test_production_default_event_planner_reuses_trusted_provider_facts(
     candidate = response.json()["data"]["candidatePlan"]
     assert candidate["status"] == "PROPOSED"
     assert candidate["reason"] == "FATIGUE"
+    assert candidate["days"][0]["tasks"][0] == current["days"][0]["tasks"][0]
+    assert candidate["days"][0]["tasks"][1:] != current["days"][0]["tasks"][1:]
+    assert all("出发前在上一地点休息" in task["note"] for task in candidate["days"][0]["tasks"][1:])
+    assert any(item["key"].endswith(":note") and item["changeType"] == "CHANGED" for item in response.json()["data"]["diff"]["items"])
+    assert response.json()["data"]["assessments"][0]["modifiedTaskCount"] > 0
     with sqlite3.connect(database_path) as connection:
         trusted = {
             plan_id: json.loads(payload)
@@ -904,6 +914,36 @@ async def test_production_default_event_planner_reuses_trusted_provider_facts(
         "flowKind": "LEGACY_SINGLE",
     }
     assert evidence["confirmedAdjustmentEventId"] == adjustment_event_id
+    assert all("restBefore" in item for item in after_facts["taskFacts"][1:])
+
+
+@pytest.mark.asyncio
+async def test_counter_only_fatigue_fix_is_rejected_without_v2_write(tmp_path: Path) -> None:
+    app, database_path = _app_and_db(tmp_path, suffix_planner=CounterOnlySuffixPlanner())
+    trip_id = _planning_request()["trip"]["tripId"]
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        await _generate_current(client)
+        response = await _preview(client, trip_id, _cases()["fatigueFeasible"])
+    assert response.status_code == 422
+    assert "S2-T020.remaining.restIntervalMinutes" in response.text
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM plan_versions WHERE version=2").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_adjustment_with_no_task_changes_does_not_issue_v2(tmp_path: Path) -> None:
+    app, database_path = _app_and_db(tmp_path, suffix_planner=PassThroughSuffixPlanner())
+    trip_id = _planning_request()["trip"]["tripId"]
+    command = deepcopy(_cases()["lateFeasible"])
+    command["lockedTaskIds"] = []
+    command["adjustment"]["taskId"] = "task-museum"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        await _generate_current(client)
+        response = await _preview(client, trip_id, command)
+    assert response.status_code == 422
+    assert response.json()["code"] == "REPLAN_ADJUSTMENT_NO_CHANGE"
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM plan_versions WHERE version=2").fetchone()[0] == 0
 
 
 @pytest.mark.asyncio

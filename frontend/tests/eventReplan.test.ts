@@ -55,7 +55,7 @@ test('Workspace uses server event replanning and disables free-text S1 feedback'
   )
 
   assert.match(source, /tripApi\.replanFromEvents\(tripId\)/)
-  assert.match(source, /Sprint1仅支持实际消费变化触发V2/)
+  assert.match(source, /实际消费变化在完成当前任务时记录/)
   assert.doesNotMatch(source, /buildAmapReplanCandidate/)
   assert.doesNotMatch(source, /tripApi\.selectReplan/)
   assert.doesNotMatch(source, /USER_FEEDBACK/)

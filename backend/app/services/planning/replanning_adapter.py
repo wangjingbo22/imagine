@@ -182,7 +182,11 @@ def _replan_report(
 
     for result in results:
         domain = _result_domain(result)
-        present_domains.add(domain)
+        # T018 requires HARD coverage in every domain. Optional facility
+        # observations stay SOFT and cannot suppress the explicit
+        # no-applicable-hard-rule result for an ordinary traveller.
+        if result.hardness == "HARD":
+            present_domains.add(domain)
         checks.append(
             ReplanRuleCheck(
                 rule_id=result.rule_id,
