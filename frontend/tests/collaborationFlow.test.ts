@@ -210,8 +210,8 @@ test('READY collaboration always exposes the authoritative recommendation action
   const page = await readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8')
   assert.match(page, /collaboration && canEnterRecommendation\(collaboration\) && <button/)
   assert.doesNotMatch(page, /canEnterRecommendation\(collaboration\) && planningDraft/)
-  assert.match(page, /if \(planningDraft\) setStoredPlanContext/)
-  assert.match(page, /navigate\(`\/recommendation\/\$\{collaboration\.tripId\}\$\{parentQuery\}`\)/)
+  assert.match(page, /if \(draft && canEnterRecommendation\(current\)\) \{\s*setStoredPlanContext/)
+  assert.match(page, /enterRecommendation\(current, draft\)/)
 })
 
 test('home group card opens the planner directly in multiplayer creation mode', async () => {
@@ -316,10 +316,10 @@ test('a new invitation never falls through to another participant last session',
 
 test('member conversation keeps shared questions read-only and edits only personal answers', async () => {
   const page = await readFile(new URL('../src/pages/MemberConversationPage.tsx', import.meta.url), 'utf8')
-  assert.match(page, /step < 3 \? <div className="shared-trip-card__grid"/)
-  assert.match(page, /组织者已确认的共享行程，只读/)
-  assert.match(page, /成员会话只能核对，不能改写共享事实/)
-  assert.match(page, /step === 1 && <article><UsersRound/)
+  assert.match(page, /className="shared-trip-card shared-trip-card--overview"/)
+  assert.match(page, /本次行程信息/)
+  assert.match(page, /向组织者提出修改建议/)
+  assert.match(page, /createMemberChangeProposal/)
   assert.doesNotMatch(page, /setTripFields|setRouteFields|updateTripField|updateRouteField/)
 })
 
