@@ -115,18 +115,19 @@ const providerProvenance = {
 }
 
 const providerPlaces = Array.from({ length: 8 }, (_, index) => {
+  const candidate = recommendationBundle.candidates[index]
   const location = {
     longitude: 116.407387 + (index + 1) * 0.00015,
     latitude: 39.904179 + (index + 1) * 0.0001,
   }
   return {
     placeId: `place-${index + 1}`,
-    name: `高德核验地点 ${index + 1}`,
+    name: candidate.name,
     address: `北京市测试路 ${index + 1} 号`,
     cityCode: '110000',
     adCode: '110101',
     location,
-    category: '历史文化',
+    category: candidate.category,
     telephone: null,
     rating: 4.6,
     priceReference: {
@@ -139,7 +140,7 @@ const providerPlaces = Array.from({ length: 8 }, (_, index) => {
   }
 })
 
-async function mockRecommendationRouteBuild(page: Page) {
+async function mockRecommendationRouteBuild(page: Page, routeDurationSeconds = 600) {
   let generatedCandidate: unknown = null
   let placeSearchCalls = 0
   await page.route(`**/api/v2/trips/${T024_TRIP_ID}/planning-trip`, async (route) => {
@@ -208,7 +209,7 @@ async function mockRecommendationRouteBuild(page: Page) {
           origin: request.origin,
           destination: request.destination,
           distanceMeters: 120,
-          durationSeconds: 600,
+          durationSeconds: routeDurationSeconds,
           walkingDistanceMeters: request.mode === 'TRANSIT' ? 120 : null,
           transferCount: request.mode === 'TRANSIT' ? 0 : null,
           steps: [],
@@ -329,10 +330,13 @@ test('mocked single-person UI integration confirms the recommendation and enters
   await recommendation.click()
   await expect(page).toHaveURL(new RegExp(`/recommendation/${T024_TRIP_ID}$`))
   await expect(page.getByRole('heading', { name: '推荐方案' })).toBeVisible()
-  await page.getByRole('combobox', { name: '第 1 个地点', exact: true }).selectOption('place-fact-4')
+  await page.getByRole('combobox', { name: '第 1 个地点', exact: true }).selectOption('place-fact-6')
   await page.getByRole('button', { name: '将第 2 个地点上移' }).click()
   await expect(page.getByRole('combobox', { name: '第 1 个地点', exact: true })).toHaveValue('place-fact-1')
-  await expect(page.getByRole('combobox', { name: '第 2 个地点', exact: true })).toHaveValue('place-fact-4')
+  await expect(page.getByRole('combobox', { name: '第 2 个地点', exact: true })).toHaveValue('place-fact-6')
+  await expect(page.getByRole('combobox', { name: '第 3 个地点', exact: true })).toHaveValue('place-fact-2')
+  await expect(page.getByRole('combobox', { name: '第 4 个地点', exact: true })).toHaveValue('place-fact-4')
+  await expect(page.getByRole('combobox', { name: '第 5 个地点', exact: true })).toHaveValue('place-fact-5')
   await page.getByRole('button', { name: /确认此方案/ }).click()
   const buildRoute = page.getByRole('button', { name: /生成完整路线/ })
   await expect(buildRoute).toBeVisible()
@@ -345,10 +349,41 @@ test('mocked single-person UI integration confirms the recommendation and enters
   await expect(page.getByRole('navigation', { name: '行程视图' })).toBeVisible()
   await expect(page.getByRole('button', { name: '执行旅程' })).toBeVisible()
   await expect(page.getByText('关怀校验', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('LIVE EXECUTION · CONTINUOUS PLAN', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '计划工作台' }).click()
+  await expect(page.getByRole('heading', { name: '今天的路线' })).toBeVisible()
+  const timelineTasks = page.locator('.timeline-item')
+  const routePickers = page.locator('.route-mode-picker')
+  const visibleTaskCount = await timelineTasks.count()
+  expect(visibleTaskCount).toBeGreaterThan(0)
+  await expect(routePickers).toHaveCount(visibleTaskCount)
+  for (const picker of await routePickers.all()) {
+    await expect(picker.getByRole('button', { name: '自驾', exact: true })).toBeVisible()
+    await expect(picker.getByRole('button', { name: '骑行', exact: true })).toBeVisible()
+    await expect(picker.getByRole('button', { name: '打车', exact: true })).toBeVisible()
+  }
+  await expect(page.locator('.route-price-summary')).toContainText('共享单车每 15 分钟 ¥1.50 估算')
+  await expect(page.locator('.route-price-summary')).toContainText('采用高德出租车估价')
+  await expect(page.locator('.route-price-summary')).toContainText('只计高速/道路收费')
   expect(routeAudit.placeSearchCalls()).toBe(0)
   expect(
     routeAudit.generatedCandidate()?.taskFacts?.map((item) => item.place?.placeId),
-  ).toEqual(['place-1', 'place-4', 'place-2', expect.stringMatching(/^return-/)])
+  ).toEqual([
+    'place-1',
+    'place-6',
+    'place-2',
+    'place-4',
+    'place-5',
+    expect.stringMatching(/^return-/),
+  ])
+  expect(routeAudit.generatedCandidate()?.taskFacts).toMatchObject([
+    { category: '历史文化' },
+    { category: '历史文化' },
+    { category: 'MEAL_LUNCH', startAt: '12:00', endAt: '13:00' },
+    { category: '历史文化' },
+    { category: 'MEAL_DINNER', startAt: '18:00', endAt: '19:00' },
+    { category: 'RETURN' },
+  ])
   const trace = await page.evaluate(
     (tripId) => JSON.parse(window.sessionStorage.getItem(`s2-recommendation-trace:${tripId}`) || 'null'),
     T024_TRIP_ID,
@@ -358,8 +393,10 @@ test('mocked single-person UI integration confirms the recommendation and enters
     providerFactDigest: recommendationBundle.providerFactDigest,
     selectedPlaces: [
       { factRefId: 'place-fact-1', placeId: 'place-1' },
-      { factRefId: 'place-fact-4', placeId: 'place-4' },
+      { factRefId: 'place-fact-6', placeId: 'place-6' },
       { factRefId: 'place-fact-2', placeId: 'place-2' },
+      { factRefId: 'place-fact-4', placeId: 'place-4' },
+      { factRefId: 'place-fact-5', placeId: 'place-5' },
     ],
   })
   await assertResponsiveContract(page)
@@ -402,7 +439,7 @@ test('editable recommendation remains readable and survives account navigation',
   await expect(page.locator('.recommendation-location option').first()).not.toContainText('（历史文化）')
   await expect(page.getByRole('button', { name: '返回上一个页面' })).toHaveCount(0)
   await expect(page.getByText(/FactRef|最低成员分|扣分规则|未知事实/)).toHaveCount(0)
-  await page.getByRole('combobox', { name: '第 1 个地点', exact: true }).selectOption('place-fact-5')
+  await page.getByRole('combobox', { name: '第 1 个地点', exact: true }).selectOption('place-fact-6')
 
   const account = page.getByRole('link', { name: '验收用户的账户' })
   await expect(account).toHaveAttribute(
@@ -411,9 +448,36 @@ test('editable recommendation remains readable and survives account navigation',
   )
   await account.click()
   await expect(page).toHaveURL(new RegExp(`/recommendation/${T024_TRIP_ID}$`))
-  await expect(page.getByRole('combobox', { name: '第 1 个地点', exact: true })).toHaveValue('place-fact-5')
+  await expect(page.getByRole('combobox', { name: '第 1 个地点', exact: true })).toHaveValue('place-fact-6')
   expect(recommendationCalls).toBe(1)
   await assertResponsiveContract(page)
+})
+
+test('an itinerary that cannot fit opens a clear route-distance dialog and remains editable', async ({ page }) => {
+  await installSession(page)
+  const routeAudit = await mockRecommendationRouteBuild(page, 10 * 60 * 60)
+  await page.route(`**/api/v2/trips/${T024_TRIP_ID}/recommendations`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: api(recommendationBundle),
+    })
+  })
+
+  await page.goto(`/recommendation/${T024_TRIP_ID}`, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: /确认此方案/ }).click()
+  await page.getByRole('button', { name: /生成完整路线/ }).click()
+
+  const dialog = page.getByRole('alertdialog', { name: '方案暂时无法生成' })
+  await expect(dialog).toBeVisible({ timeout: 20_000 })
+  await expect(dialog).toContainText(
+    '地点之间路程较远，无法在 09:00–20:00 的规定时间内完成。',
+  )
+  expect(routeAudit.generatedCandidate()).toBeNull()
+  await assertResponsiveContract(page)
+  await dialog.getByRole('button', { name: '返回调整地点' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByRole('combobox', { name: '第 1 个地点', exact: true })).toBeEnabled()
 })
 
 for (const fixture of [
@@ -426,6 +490,17 @@ for (const fixture of [
     await mockWorkspace(page, fixture.kind)
     await page.goto(`/workspace?tripId=${T024_TRIP_ID}`, { waitUntil: 'domcontentloaded' })
     await expect(page.getByText(fixture.expected, { exact: false }).first()).toBeVisible()
+    if (fixture.kind === 'execute') {
+      await page.getByRole('button', { name: '计划工作台' }).click()
+      const timeSortLabel = page.getByText('按时间', { exact: true })
+      await expect(timeSortLabel).toBeVisible()
+      expect(await timeSortLabel.evaluate((element) => element.tagName)).toBe('SPAN')
+      await expect(timeSortLabel.locator('svg')).toHaveCount(0)
+      await expect(page.getByText('问问 Agent', { exact: true })).toHaveCount(0)
+      const displayedTimes = await page.locator('.timeline-item__time').allTextContents()
+      expect(displayedTimes.length).toBeGreaterThan(0)
+      expect(displayedTimes.every((value) => !/\d{2}:\d{2}:\d{2}/.test(value))).toBe(true)
+    }
     await assertResponsiveContract(page)
   })
 }

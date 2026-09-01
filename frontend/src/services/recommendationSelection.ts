@@ -1,5 +1,6 @@
 import type { Place, SourceStatus } from '../domain/trip'
 import type { ParentTripPlaceMemoryItem } from '../domain/parentTrip'
+import { isDiningPlaceLike, isLodgingPlaceLike } from './itineraryPlaces.ts'
 
 export interface RecommendationCandidate {
   factRefId: string
@@ -93,7 +94,7 @@ const digestPattern = /^[0-9a-f]{64}$/
 const trustedSourceStatuses = new Set<SourceStatus>(['ONLINE', 'VERIFIED_CACHE'])
 
 interface StoredRecommendationBundle {
-  schemaVersion: '1.1'
+  schemaVersion: '1.7'
   tripId: string
   bundle: RecommendationBundle
 }
@@ -118,7 +119,7 @@ export function storeRecommendationBundle(
 ) {
   confirmRecommendationSelection(tripId, bundle)
   const stored: StoredRecommendationBundle = {
-    schemaVersion: '1.1',
+    schemaVersion: '1.7',
     tripId,
     bundle,
   }
@@ -136,7 +137,7 @@ export function restoreRecommendationBundle(
   try {
     const stored = JSON.parse(raw) as Partial<StoredRecommendationBundle>
     if (
-      stored.schemaVersion !== '1.1' ||
+      stored.schemaVersion !== '1.7' ||
       stored.tripId !== tripId ||
       !stored.bundle
     ) {
@@ -196,9 +197,9 @@ function requireDigest(value: string | null | undefined) {
 /**
  * Freeze the exact server recommendation that the organizer confirmed.
  *
- * The two-to-three intermediate-place limit is intentional: T011 requires a
- * three-to-four-task candidate and the final task is the separately verified
- * return to the confirmed Trip endpoint.
+ * The two-to-five intermediate-place limit is intentional: meal-aware days
+ * may contain three activities plus lunch and dinner; the final task is the
+ * separately verified return to the confirmed Trip endpoint.
  */
 export function confirmRecommendationSelection(
   tripId: string,
@@ -211,8 +212,8 @@ export function confirmRecommendationSelection(
   const plan = bundle.trustedPlan
   if (!plan) throw new Error('服务端尚未生成推荐方案，不能进入路线规划。')
   const tasks = selectedTasks ?? plan.tasks
-  if (tasks.length < 2 || tasks.length > 3) {
-    throw new Error('推荐方案必须包含 2—3 个中间地点，另保留一个独立返程任务。')
+  if (tasks.length < 2 || tasks.length > 5) {
+    throw new Error('推荐方案必须包含 2—5 个中间地点，另保留一个独立返程任务。')
   }
 
   const candidateByFactRef = new Map(
@@ -250,6 +251,28 @@ export function confirmRecommendationSelection(
       category: candidate.category,
     })
   })
+  const canonicalPlanTasks = plan.tasks.map((task) => {
+    const candidate = candidateByFactRef.get(task.factRefId)
+    if (!candidate || candidate.placeId !== task.placeId) {
+      throw new Error('服务端推荐方案与候选地点不一致，请刷新推荐。')
+    }
+    return candidate
+  })
+  const lodgingTask = selectedPlaces.find((task) =>
+    isLodgingPlaceLike(task.name, task.category),
+  )
+  if (lodgingTask) {
+    throw new Error(`一日行程不能把酒店或住宿地点“${lodgingTask.name}”作为游览任务。`)
+  }
+  const requiredDiningCount = canonicalPlanTasks.filter((task) =>
+    isDiningPlaceLike(task.name, task.category),
+  ).length
+  const selectedDiningCount = selectedPlaces.filter((task) =>
+    isDiningPlaceLike(task.name, task.category),
+  ).length
+  if (requiredDiningCount > 0 && selectedDiningCount !== requiredDiningCount) {
+    throw new Error(`当前方案必须保留 ${requiredDiningCount} 个真实餐饮地点用于午餐或晚餐。`)
+  }
 
   return Object.freeze({
     schemaVersion: '1.0',
@@ -325,8 +348,14 @@ export function appendConfirmedReturnPlace(
   selectedPlaces: readonly Place[],
   returnPlace: Place,
 ) {
-  if (selectedPlaces.length < 2 || selectedPlaces.length > 3) {
-    throw new Error('路线规划必须使用 2—3 个已确认中间地点。')
+  if (selectedPlaces.length < 2 || selectedPlaces.length > 5) {
+    throw new Error('路线规划必须使用 2—5 个已确认中间地点。')
+  }
+  const lodgingTask = selectedPlaces.find((place) =>
+    isLodgingPlaceLike(place.name, place.category),
+  )
+  if (lodgingTask) {
+    throw new Error(`一日行程不能把酒店或住宿地点“${lodgingTask.name}”作为游览任务。`)
   }
   const placeIds = selectedPlaces.map((place) => place.placeId)
   if (new Set(placeIds).size !== placeIds.length || placeIds.includes(returnPlace.placeId)) {

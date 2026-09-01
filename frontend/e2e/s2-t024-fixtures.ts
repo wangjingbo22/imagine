@@ -128,12 +128,31 @@ export const tripSummary = {
   events: tripState('summary').events,
 }
 
+const recommendationCandidates = [
+  { name: '中国国家博物馆', category: '历史文化' },
+  { name: '京味午餐餐厅', category: '餐饮服务;中餐厅' },
+  { name: '故宫博物院', category: '历史文化' },
+  { name: '天坛公园', category: '历史文化' },
+  { name: '北京晚餐餐厅', category: '餐饮服务;中餐厅' },
+  { name: '首都博物馆', category: '历史文化' },
+  { name: '胡同家常菜', category: '餐饮服务;中餐厅' },
+  { name: '老北京饭店', category: '餐饮服务;中餐厅' },
+].map((candidate, index) => ({
+  factRefId: `place-fact-${index + 1}`,
+  placeId: `place-${index + 1}`,
+  ...candidate,
+}))
+
 export const recommendationBundle = {
-  candidates: Array.from({ length: 6 }, (_, index) => ({ factRefId: `place-fact-${index + 1}`, placeId: `place-${index + 1}`, name: ['中国国家博物馆', '故宫博物院', '景山公园', '天坛公园', '北海公园', '首都博物馆'][index], category: '历史文化' })),
-  recommendations: [{ placeId: 'place-3', reason: '提供休息缓冲' }, { placeId: 'place-1', reason: '符合历史文化兴趣' }, { placeId: 'place-2', reason: '与起终点顺路' }],
+  candidates: recommendationCandidates,
+  recommendations: [
+    { placeId: 'place-3', reason: '提供休息缓冲' },
+    { placeId: 'place-1', reason: '符合历史文化兴趣' },
+    { placeId: 'place-2', reason: '安排真实午餐地点' },
+  ],
   usedDeterministicFallback: false,
   trustedPlan: {
-    tasks: [2, 0, 1].map((index) => ({ factRefId: `place-fact-${index + 1}`, placeId: `place-${index + 1}`, name: ['中国国家博物馆', '故宫博物院', '景山公园'][index], category: '历史文化' })),
+    tasks: [2, 0, 1, 3, 4].map((index) => recommendationCandidates[index]),
     memberScores: [{ participantId: '40000000-0000-4000-8000-000000000024', score: 92, penaltyRuleIds: [], reasons: ['关怀约束与预算均满足'] }],
     lowestMemberScore: 92,
     carePoints: ['单段步行不超过500米', '每90分钟安排休息'],
@@ -144,7 +163,7 @@ export const recommendationBundle = {
   factSetId: 'fact-set-t024-browser-fixture',
   providerFactDigest: 'c'.repeat(64),
   parentPlaceMemory: [],
-  provenance: Array.from({ length: 6 }, (_, index) => ({
+  provenance: Array.from({ length: 8 }, (_, index) => ({
     factRefId: `place-fact-${index + 1}`,
     providerObjectId: `place-${index + 1}`,
     sourceStatus: 'ONLINE',

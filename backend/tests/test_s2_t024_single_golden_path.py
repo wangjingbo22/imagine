@@ -99,7 +99,16 @@ class SingleTripProvider:
         assert city.city_code == self.city_code
         assert page == 1
         assert page_size in {1, 20, 25}
-        if page_size == 25 or keywords == "museum":
+        if types == ["050000"]:
+            places = [
+                self._place(
+                    index,
+                    name=f"本地餐厅 {index}",
+                    category="餐饮服务;中餐厅",
+                )
+                for index in (21, 22)
+            ]
+        elif page_size == 25 or keywords == "museum":
             places = [
                 self._place(index, name=f"历史文化候选 {index}")
                 for index in range(1, 7)
@@ -113,7 +122,15 @@ class SingleTripProvider:
             if selected is None and keywords == self.end_location:
                 selected = (13, self.end_location)
             assert selected is not None
-            places = [self._place(selected[0], name=selected[1])]
+            places = [self._place(
+                selected[0],
+                name=selected[1],
+                category=(
+                    "餐饮服务;中餐厅"
+                    if "午餐" in selected[1]
+                    else "museum"
+                ),
+            )]
         return PlaceCollection(
             cityCode=self.city_code,
             total=len(places),
@@ -121,7 +138,7 @@ class SingleTripProvider:
             provenance=self._provenance,
         )
 
-    def _place(self, index: int, *, name: str) -> Place:
+    def _place(self, index: int, *, name: str, category: str = "museum") -> Place:
         location = (
             self._center
             if name == self.end_location
@@ -136,12 +153,18 @@ class SingleTripProvider:
             address=f"{self._city.city_name} test address {index}",
             cityCode=self.city_code,
             location=location,
-            category="museum",
+            category=category,
             priceReference=PriceFact(
-                amountCents=(index % 10 + 1) * 1000,
+                amountCents=None if index == 11 else (index % 10 + 1) * 1000,
                 currency="CNY",
                 kind="admission",
-                provenance=self._provenance,
+                provenance=(
+                    self._provenance.model_copy(
+                        update={"sourceStatus": SourceStatus.UNKNOWN},
+                    )
+                    if index == 11
+                    else self._provenance
+                ),
             ),
             provenance=self._provenance,
         )
@@ -469,10 +492,18 @@ async def test_single_ready_collaboration_reuses_canonical_trip_through_v1_start
         )
         assert recommendation.status_code == 200, recommendation.text
         recommendation_data = recommendation.json()["data"]
-        assert len(recommendation_data["candidates"]) == 6
-        assert len(recommendation_data["trustedPlan"]["tasks"]) in {3, 4}
+        assert len(recommendation_data["candidates"]) == 8
+        assert sum(
+            "餐饮" in candidate["category"]
+            for candidate in recommendation_data["candidates"]
+        ) == 2
+        assert len(recommendation_data["trustedPlan"]["tasks"]) == 4
+        assert sum(
+            "餐饮" in task["category"]
+            for task in recommendation_data["trustedPlan"]["tasks"]
+        ) == 1
         assert provider.resolve_calls == 2
-        assert provider.search_calls == 2
+        assert provider.search_calls == 3
 
         expected_trip = _canonical_trip(
             trip_id=trip_id,

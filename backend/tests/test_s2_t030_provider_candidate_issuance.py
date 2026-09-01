@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 import json
 import sqlite3
 from pathlib import Path
@@ -11,7 +11,12 @@ import httpx
 import pytest
 
 from app.application.llm_gateway import StrictCandidateSelectionGateway
-from app.application.recommendation_service import _strict_candidate_request
+from app.application.recommendation_service import (
+    TrustedRecommendationService,
+    _required_match_sort_key,
+    _strict_candidate_request,
+    required_meal_kinds,
+)
 from app.core.config import Settings
 from app.domain.collaboration_digest import member_digest, shared_digest
 from app.domain.models import (
@@ -29,9 +34,11 @@ from app.infrastructure.trusted_planning_store import proposal_digest
 from app.main import create_app
 from app.services.planning import CandidatePlanRequest, generate_candidate_plan
 from app.services.recommendation import BuiltRouteCandidate, ProviderFactBundle
+from app.schemas.trip import Trip
 from backend.tests.s2_t003_support import (
     FakeTripDraftRevisionPort,
     revision_with_places,
+    revision_with_times,
     revision_with_trip_budget,
 )
 from backend.tests.test_s2_t003_collaboration_service import (
@@ -77,6 +84,8 @@ def _place(
     status: SourceStatus = SourceStatus.ONLINE,
     price_cents: int | None = 2_000,
     stale: bool = False,
+    longitude: float = 121.47,
+    latitude: float = 31.23,
 ) -> Place:
     price_status = status if price_cents is not None else SourceStatus.UNKNOWN
     return Place(
@@ -85,7 +94,7 @@ def _place(
         address=f"上海市 {name}",
         cityCode=city_code,
         adCode="310101",
-        location={"longitude": 121.47, "latitude": 31.23},
+        location={"longitude": longitude, "latitude": latitude},
         category=category,
         telephone=None,
         rating=4.5,
@@ -108,7 +117,17 @@ def _provider_pool() -> list[Place]:
             category="购物服务;家居建材市场;家具城",
         ),
         _place("poi-architecture", "Shanghai Architecture Museum", category="architecture"),
-        _place("poi-food", "Shanghai Food Market", category="food"),
+        _place(
+            "poi-lunch",
+            "Shanghai Local Cuisine",
+            category="餐饮服务;中餐厅",
+        ),
+        _place(
+            "poi-dinner",
+            "Riverside Restaurant",
+            category="餐饮服务;中餐厅",
+            status=SourceStatus.VERIFIED_CACHE,
+        ),
         _place("poi-garden", "Yu Garden"),
         _place("poi-temple", "City God Temple"),
         _place(
@@ -119,6 +138,7 @@ def _provider_pool() -> list[Place]:
         ),
         _place("poi-science", "Shanghai Science Center"),
         _place("poi-park", "People's Park"),
+        _place("poi-hotel", "Shanghai Business Hotel", category="住宿服务;宾馆酒店"),
         _place("poi-avoid", "crowded malls"),
         _place("poi-over-budget", "Luxury Theme Park", price_cents=35_000),
         _place("poi-cross-city", "Hangzhou Museum", city_code="330100"),
@@ -130,12 +150,72 @@ def _provider_pool() -> list[Place]:
     ]
 
 
+def test_meals_follow_complete_confirmed_meal_windows() -> None:
+    fixture_path = Path(__file__).parent / "fixtures" / "trips" / "beijing.json"
+    trip = Trip.model_validate_json(fixture_path.read_text(encoding="utf-8"))
+    trip = trip.model_copy(
+        update={
+            "city_context": trip.city_context.model_copy(
+                update={"city_code": "310000"}
+            )
+        }
+    )
+
+    def with_window(start: time, end: time) -> Trip:
+        day = trip.days[0]
+        window = day.time_window.model_copy(update={"start": start, "end": end})
+        return trip.model_copy(
+            update={"days": [day.model_copy(update={"time_window": window})]}
+        )
+
+    morning = with_window(time(6, 0), time(11, 0))
+    until_dinner = with_window(time(9, 0), time(18, 0))
+    full_day = with_window(time(9, 0), time(20, 0))
+
+    assert required_meal_kinds(morning) == ()
+    assert required_meal_kinds(until_dinner) == ("LUNCH",)
+    assert required_meal_kinds(full_day) == ("LUNCH", "DINNER")
+
+    filtered = TrustedRecommendationService.pre_filter_provider_places(
+        _provider_pool(),
+        trip=morning,
+    )
+    assert all("餐饮服务" not in (place.category or "") for place in filtered)
+
+
+def test_landmark_name_suffix_beats_a_prefix_lookalike() -> None:
+    actual_landmark = _required_match_sort_key(
+        name="八达岭长城",
+        provider_id="poi-badaling",
+        label="长城",
+    )
+    prefix_lookalike = _required_match_sort_key(
+        name="长城公园",
+        provider_id="poi-great-wall-park",
+        label="长城",
+    )
+    nested_attraction = _required_match_sort_key(
+        name="天坛公园花海",
+        provider_id="poi-tianta-flowers",
+        label="天坛",
+    )
+    canonical_attraction = _required_match_sort_key(
+        name="天坛公园",
+        provider_id="poi-tianta-park",
+        label="天坛",
+    )
+
+    assert actual_landmark < prefix_lookalike
+    assert canonical_attraction < nested_attraction
+
+
 class StubLocationService:
     def __init__(self, places: list[Place]) -> None:
         self.places = places
         self.resolve_calls = 0
         self.geocode_calls = 0
         self.search_calls = 0
+        self.search_requests: list[tuple[str, tuple[str, ...]]] = []
 
     async def resolve_city(self, city_name: str) -> CityResolution:
         self.resolve_calls += 1
@@ -170,10 +250,18 @@ class StubLocationService:
         page_size: int,
     ) -> PlaceCollection:
         self.search_calls += 1
+        self.search_requests.append((keywords, tuple(types)))
+        dining = [
+            place for place in self.places
+            if "餐饮服务" in (place.category or "")
+        ]
+        result_places = dining if types == ["050000"] else [
+            place for place in self.places if place not in dining
+        ]
         return PlaceCollection(
             cityCode="310000",
-            total=len(self.places),
-            places=self.places,
+            total=len(result_places),
+            places=result_places,
             provenance=_provenance(SourceStatus.ONLINE),
         )
 
@@ -425,7 +513,11 @@ async def test_ready_group_signs_six_to_eight_filtered_provider_fact_refs(
     payload = response.json()["data"]
     assert 6 <= len(payload["candidates"]) <= 8
     assert payload["usedDeterministicFallback"] is True
-    assert len(payload["trustedPlan"]["tasks"]) == 3
+    assert len(payload["trustedPlan"]["tasks"]) == 5
+    assert [
+        "餐饮服务" in (item["category"] or "")
+        for item in payload["trustedPlan"]["tasks"]
+    ] == [False, False, True, False, True]
     assert len(payload["factSetId"]) > 0
     assert len(payload["providerFactDigest"]) == 64
     assert len(payload["provenance"]) == len(payload["candidates"])
@@ -442,6 +534,7 @@ async def test_ready_group_signs_six_to_eight_filtered_provider_fact_refs(
     assert selected_ids.isdisjoint(
         {
             "poi-furniture",
+            "poi-hotel",
             "poi-avoid",
             "poi-over-budget",
             "poi-cross-city",
@@ -459,6 +552,8 @@ async def test_ready_group_signs_six_to_eight_filtered_provider_fact_refs(
     assert location.resolve_calls == 1
     assert location.geocode_calls == 2
     assert location.search_calls >= 1
+    assert ("美食街", ()) in location.search_requests
+    assert ("餐厅", ("050000",)) in location.search_requests
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -578,6 +673,158 @@ async def test_ready_group_signs_six_to_eight_filtered_provider_fact_refs(
 
 
 @pytest.mark.asyncio
+async def test_attraction_labels_ignore_similarly_named_restaurants_and_use_nearby_food_street(
+    tmp_path: Path,
+) -> None:
+    places = [
+        _place(
+            "poi-palace",
+            "故宫博物院",
+            category="风景名胜;博物馆",
+            longitude=121.4700,
+        ),
+        _place(
+            "poi-temple",
+            "天坛公园",
+            category="风景名胜;公园",
+            longitude=121.4900,
+        ),
+        _place(
+            "poi-museum",
+            "城市历史博物馆",
+            category="科教文化服务;博物馆",
+            longitude=121.4750,
+        ),
+        _place(
+            "poi-food-street",
+            "老城美食街",
+            category="购物服务;特色商业街",
+            longitude=121.4705,
+        ),
+        _place(
+            "poi-palace-restaurant",
+            "景运门故宫餐厅",
+            category="餐饮服务;中餐厅",
+            longitude=121.6000,
+        ),
+        _place(
+            "poi-temple-restaurant",
+            "天坛福宴",
+            category="餐饮服务;中餐厅",
+            longitude=121.6100,
+        ),
+        _place("poi-park", "城市公园", longitude=121.4800),
+        _place("poi-science", "城市科技馆", longitude=121.5000),
+    ]
+    app, harness, _registry, location, _route_builder, _database_path = _app(
+        tmp_path,
+        places,
+    )
+    changed = revision_with_places(
+        harness.revision,
+        must_visit=["故宫", "天坛"],
+        avoid_places=[],
+    )
+    changed = revision_with_times(changed, "09:00", "18:00")
+    _advance_harness_revision(harness, changed)
+    _reconfirm_members(harness, ("member-1", "member-2"))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            f"/api/v2/trips/{harness.revision.trip_id}/recommendations",
+            headers={
+                "X-Organizer-Token": harness.organizer_token,
+                "Idempotency-Key": "t030-attractions-plus-nearby-food-street",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    tasks = response.json()["data"]["trustedPlan"]["tasks"]
+    assert [item["name"] for item in tasks] == [
+        "城市历史博物馆",
+        "故宫博物院",
+        "老城美食街",
+        "天坛公园",
+    ]
+    assert "景运门故宫餐厅" not in {item["name"] for item in tasks}
+    assert ("美食街", ()) in location.search_requests
+
+
+@pytest.mark.asyncio
+async def test_three_hard_must_visit_attractions_coexist_with_two_meals(
+    tmp_path: Path,
+) -> None:
+    places = [
+        _place("poi-bund", "The Bund", longitude=121.4700),
+        _place(
+            "poi-architecture",
+            "Shanghai Architecture Museum",
+            category="architecture",
+            longitude=121.4900,
+        ),
+        _place("poi-garden", "Yu Garden", longitude=121.5100),
+        _place(
+            "poi-lunch-street",
+            "博物馆美食街",
+            category="购物服务;特色商业街",
+            longitude=121.4901,
+        ),
+        _place(
+            "poi-dinner-market",
+            "豫园夜市",
+            category="购物服务;特色商业街",
+            status=SourceStatus.VERIFIED_CACHE,
+            longitude=121.5101,
+        ),
+        _place("poi-temple", "City God Temple", longitude=121.5200),
+        _place("poi-science", "Shanghai Science Center", longitude=121.5300),
+    ]
+    app, harness, _registry, _location, _route_builder, _database_path = _app(
+        tmp_path,
+        places,
+    )
+    required_names = {
+        "The Bund",
+        "Shanghai Architecture Museum",
+        "Yu Garden",
+    }
+    changed = revision_with_places(
+        harness.revision,
+        must_visit=sorted(required_names),
+        avoid_places=["crowded malls"],
+    )
+    _advance_harness_revision(harness, changed)
+    _reconfirm_members(harness, ("member-1", "member-2"))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            f"/api/v2/trips/{harness.revision.trip_id}/recommendations",
+            headers={
+                "X-Organizer-Token": harness.organizer_token,
+                "Idempotency-Key": "t030-three-required-plus-two-meals",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    tasks = response.json()["data"]["trustedPlan"]["tasks"]
+    assert len(tasks) == 5
+    assert required_names <= {item["name"] for item in tasks}
+    assert [item["name"] for item in tasks] == [
+        "The Bund",
+        "Shanghai Architecture Museum",
+        "博物馆美食街",
+        "Yu Garden",
+        "豫园夜市",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_short_must_visit_label_does_not_exempt_a_furniture_store(
     tmp_path: Path,
 ) -> None:
@@ -622,10 +869,52 @@ async def test_short_must_visit_label_does_not_exempt_a_furniture_store(
 
 
 @pytest.mark.asyncio
+async def test_exact_must_visit_hotel_is_rejected_as_a_day_activity(
+    tmp_path: Path,
+) -> None:
+    app, harness, _registry, _location, _route_builder, database_path = _app(
+        tmp_path,
+        _provider_pool(),
+    )
+    changed = revision_with_places(
+        harness.revision,
+        must_visit=["Shanghai Business Hotel"],
+        avoid_places=[],
+    )
+    _advance_harness_revision(harness, changed)
+    _reconfirm_members(harness, ("member-1", "member-2"))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            f"/api/v2/trips/{harness.revision.trip_id}/recommendations",
+            headers={
+                "X-Organizer-Token": harness.organizer_token,
+                "Idempotency-Key": "t030-reject-hotel-day-activity",
+            },
+        )
+
+    assert (response.status_code, response.json()["code"]) == (
+        422,
+        "LODGING_NOT_ALLOWED_IN_DAY_PLAN",
+    )
+    assert _count(database_path, "provider_fact_sets") == 0
+    assert _count(database_path, "plan_versions") == 0
+
+
+@pytest.mark.asyncio
 async def test_fewer_than_six_after_hard_filter_issues_no_fact_set(
     tmp_path: Path,
 ) -> None:
-    sparse = _provider_pool()[:5] + _provider_pool()[8:]
+    sparse = [
+        _place("poi-bund", "The Bund"),
+        _place("poi-garden", "Yu Garden"),
+        _place("sparse-lunch", "Sparse Lunch", category="餐饮服务;中餐厅"),
+        _place("sparse-dinner", "Sparse Dinner", category="餐饮服务;中餐厅"),
+        _place("sparse-hotel", "Sparse Hotel", category="住宿服务;宾馆酒店"),
+    ]
     app, harness, _registry, _location, _builder, database_path = _app(
         tmp_path,
         sparse,
@@ -770,6 +1059,38 @@ async def test_signed_factref_order_is_the_issued_v1_plan_order(
     """T024 closes T030 -> T009 -> T011 without trusting client place facts."""
 
     planning_request = _state_machine_request("GROUP", 2)
+    # This test exercises the legacy formal 2-3 selection contract. Keep its
+    # fixture outside meal windows; meal-aware full-day issuance is covered by
+    # the dedicated test above.
+    source_day = planning_request.trip.days[0]
+    day = source_day.model_copy(
+        update={
+            "time_window": source_day.time_window.model_copy(
+                update={"start": time(6, 0), "end": time(11, 0)}
+            )
+        }
+    )
+    trip = planning_request.trip.model_copy(update={"days": [day]})
+    task_ranges = (
+        (time(6, 30), time(7, 10)),
+        (time(7, 20), time(8, 0)),
+        (time(8, 20), time(9, 0)),
+        (time(9, 30), time(10, 10)),
+    )
+    task_facts = tuple(
+        task.model_copy(update={"start_at": start, "end_at": end})
+        for task, (start, end) in zip(
+            planning_request.task_facts,
+            task_ranges,
+            strict=True,
+        )
+    )
+    planning_request = CandidatePlanRequest.model_validate_json(
+        planning_request.model_copy(
+            update={"trip": trip, "task_facts": task_facts}
+        ).model_dump_json(by_alias=True),
+        strict=True,
+    )
     revision = _authoritative_revision_for_request(planning_request)
     database_path = tmp_path / "t030-to-v1.sqlite3"
     repository = SqliteCollaborationRepository(database_path)
@@ -812,6 +1133,24 @@ async def test_signed_factref_order_is_the_issued_v1_plan_order(
                     ),
                 }
             ),
+            places[2].model_copy(
+                update={
+                    "placeId": "poi-trace-extra-three",
+                    "name": "Trace Extra Three",
+                    "location": places[2].location.model_copy(
+                        update={"longitude": places[2].location.longitude - 0.001}
+                    ),
+                }
+            ),
+            places[0].model_copy(
+                update={
+                    "placeId": "poi-trace-extra-four",
+                    "name": "Trace Extra Four",
+                    "location": places[0].location.model_copy(
+                        update={"latitude": places[0].location.latitude - 0.001}
+                    ),
+                }
+            ),
         ]
     )
     registry = SqliteProviderFactRegistry(database_path)
@@ -820,7 +1159,7 @@ async def test_signed_factref_order_is_the_issued_v1_plan_order(
         (
             planning_request.task_facts[2].place.name,
             planning_request.task_facts[0].place.name,
-            planning_request.task_facts[1].place.name,
+            "Trace Extra One",
         )
     )
     app = create_app(

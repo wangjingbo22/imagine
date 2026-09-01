@@ -156,7 +156,11 @@ async def reverse_geocoding(
     return ApiResponse(data=result)
 
 
-@router.post("/routes/plan", summary="规划城市路线", description="规划步行、公交、驾车或骑行路线。")
+@router.post(
+    "/routes/plan",
+    summary="规划城市路线",
+    description="规划步行、公交、自驾、骑行或打车路线。",
+)
 async def plan_route(
     command: RoutePlanRequest,
     http_request: Request,

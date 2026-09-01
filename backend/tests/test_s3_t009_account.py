@@ -107,7 +107,7 @@ async def test_register_creates_current_user_and_opaque_account_cookie(tmp_path:
     assert "account_session=" in set_cookie
     assert "HttpOnly" in set_cookie
     assert "SameSite=lax" in set_cookie
-    assert "Path=/api/v1/account" in set_cookie
+    assert "Path=/api" in set_cookie
     assert "Max-Age=1209600" in set_cookie
     assert "Cache-Control" in response.headers
 

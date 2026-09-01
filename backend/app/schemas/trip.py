@@ -27,24 +27,24 @@ from .validation_error import (
 )
 
 
-_SECOND_PRECISION_TIME = re.compile(r"^\d{2}:\d{2}:\d{2}$")
+_MINUTE_OR_SECOND_PRECISION_TIME = re.compile(r"^\d{2}:\d{2}(?::\d{2})?$")
 
 
 def _validate_second_precision_time(value: object) -> object:
     """Reject fractional-second and timezone-bearing time values."""
 
     if isinstance(value, str):
-        if not _SECOND_PRECISION_TIME.fullmatch(value):
+        if not _MINUTE_OR_SECOND_PRECISION_TIME.fullmatch(value):
             raise PydanticCustomError(
                 "time_format",
-                "Time must use HH:mm:ss without fractional seconds or timezone offsets",
+                "Time must use HH:mm or HH:mm:ss without fractions or timezone offsets",
             )
         try:
             return time.fromisoformat(value)
         except ValueError as exc:
             raise PydanticCustomError(
                 "time_parsing",
-                "Input should be a valid time in HH:mm:ss format",
+                "Input should be a valid time in HH:mm or HH:mm:ss format",
             ) from exc
 
     if isinstance(value, time):

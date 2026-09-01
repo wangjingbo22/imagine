@@ -342,10 +342,7 @@ async def test_beijing_single_accept_path_uses_real_sqlite_asgi_and_server_summa
         assert generated_v1.status_code == 422, generated_v1.text
         assert generated_v1.json()["code"] == "CANDIDATE_CONFIRMATION_REQUIRED"
         review = generated_v1.json()["errors"][0]["review"]
-        assert {item["valueType"] for item in review["items"]} == {
-            "PRICE_CENTS",
-            "FACILITY_STATUS",
-        }
+        assert {item["valueType"] for item in review["items"]} == {"PRICE_CENTS"}
         confirmed_v1 = await client.post(
             f"/api/v1/trips/{trip_id}/plan-reviews/{review['reviewId']}/confirm",
             json={

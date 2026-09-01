@@ -99,7 +99,7 @@ async def _candidate_request_from_trusted_plan(
     trusted_tasks = recommendation["trustedPlan"]["tasks"]
     selected_refs = [item["factRefId"] for item in trusted_tasks]
     selected_place_ids = [item["placeId"] for item in trusted_tasks]
-    assert len(selected_refs) in {2, 3}
+    assert len(selected_refs) in {2, 3, 4, 5}
     assert len(selected_refs) == len(set(selected_refs))
 
     selected_places = []
@@ -131,12 +131,43 @@ async def _candidate_request_from_trusted_plan(
     assert return_place["placeId"] not in selected_place_ids
 
     ordered_places = [*selected_places, return_place]
-    time_ranges = (
-        ("09:30:00", "10:15:00"),
-        ("10:45:00", "11:30:00"),
-        ("12:00:00", "13:00:00"),
-        ("13:30:00", "15:00:00"),
+    dining_count = sum(
+        "餐饮" in (place.get("category") or "")
+        or "餐厅" in (place.get("category") or "")
+        for place in selected_places
     )
+    if len(selected_places) == 5 and dining_count == 2:
+        time_ranges = (
+            ("09:30:00", "10:15:00"),
+            ("12:00:00", "13:00:00"),
+            ("13:30:00", "14:15:00"),
+            ("15:00:00", "16:00:00"),
+            ("18:00:00", "19:00:00"),
+            ("19:30:00", "19:45:00"),
+        )
+    elif len(selected_places) == 4 and dining_count == 2:
+        time_ranges = (
+            ("09:30:00", "10:15:00"),
+            ("12:00:00", "13:00:00"),
+            ("14:00:00", "15:00:00"),
+            ("18:00:00", "19:00:00"),
+            ("19:30:00", "19:45:00"),
+        )
+    elif len(selected_places) == 4 and dining_count == 1:
+        time_ranges = (
+            ("09:30:00", "10:15:00"),
+            ("12:00:00", "13:00:00"),
+            ("13:30:00", "14:15:00"),
+            ("14:45:00", "15:30:00"),
+            ("16:00:00", "16:15:00"),
+        )
+    else:
+        time_ranges = (
+            ("09:30:00", "10:15:00"),
+            ("10:45:00", "11:30:00"),
+            ("12:00:00", "13:00:00"),
+            ("13:30:00", "15:00:00"),
+        )
     task_facts: list[dict[str, object]] = []
     origin = trip["cityContext"]["center"]
     for index, place in enumerate(ordered_places, start=1):

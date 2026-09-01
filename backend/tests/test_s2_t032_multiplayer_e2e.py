@@ -576,7 +576,11 @@ async def test_s2_t032_three_member_conversation_to_memory_local_e2e(
             assert len(recommendation["providerFactDigest"]) == 64
             trusted_plan = recommendation["trustedPlan"]
             assert trusted_plan is not None
-            assert 2 <= len(trusted_plan["tasks"]) <= 3
+            assert len(trusted_plan["tasks"]) == 4
+            assert sum(
+                "餐饮" in (item["category"] or "")
+                for item in trusted_plan["tasks"]
+            ) == 1
             assert {
                 item["participantId"] for item in trusted_plan["memberScores"]
             } == set(bindings.values())

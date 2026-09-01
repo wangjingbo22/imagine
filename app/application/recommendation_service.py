@@ -4,8 +4,10 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import time
 from hashlib import sha256
-from itertools import combinations
+from itertools import combinations, permutations
+from math import cos, hypot, radians
 from typing import Literal, Protocol
 from unicodedata import normalize
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -87,6 +89,7 @@ class ProviderFactRestoreError(ValueError):
 
 
 GatewayFailureCode = Literal["LLM_UNAVAILABLE", "LLM_TIMEOUT"]
+MealKind = Literal["LUNCH", "DINNER"]
 
 
 class CandidateProposalGatewayError(RuntimeError):
@@ -390,7 +393,7 @@ class RecommendationOrchestrationService:
                 ranking = None
 
         bundle = trusted.rank(candidates, ranking)
-        return trusted.choose_single_plan(bundle, facts, members)
+        return trusted.choose_single_plan(bundle, facts, members, trip)
 
     def issue_provider_candidate_facts(
         self,
@@ -782,22 +785,211 @@ def _explicit_place_label_matches(
     }
 
 
-_NON_VISIT_PLACE_TERMS = (
+_LODGING_PLACE_TERMS = (
     "住宿服务", "宾馆酒店", "经济型连锁酒店", "酒店", "宾馆", "旅馆",
-    "民宿", "客栈", "公寓酒店", "招待所", "停车场", "加油站",
+    "民宿", "客栈", "公寓酒店", "招待所",
+)
+
+_OTHER_NON_VISIT_PLACE_TERMS = (
+    "停车场", "加油站",
     "家居建材市场", "家具城", "家具卖场", "建材市场", "五金建材",
     "装饰材料市场", "工业园", "产业园", "物流园", "仓储服务", "仓库",
+    "商务住宅", "住宅区", "住宅小区", "交通设施服务", "地铁站",
+    "公交车站", "医疗保健服务", "医院", "政府机构及社会团体",
+    "公安警察", "派出所", "售票处", "生活服务场所",
 )
+
+_DINING_PLACE_TERMS = (
+    "餐饮服务", "中餐厅", "外国餐厅", "餐厅", "饭店", "快餐",
+    "小吃", "火锅", "咖啡厅", "茶艺馆", "甜品店", "美食街",
+    "美食城", "美食广场", "小吃街", "餐饮街", "食街", "夜市",
+)
+
+_MEAL_WINDOWS: dict[MealKind, tuple[time, time]] = {
+    "LUNCH": (time(12, 0), time(13, 0)),
+    "DINNER": (time(18, 0), time(19, 0)),
+}
+
+
+def required_meal_kinds(trip: Trip) -> tuple[MealKind, ...]:
+    """Return meal slots wholly contained in the confirmed day window."""
+
+    day_window = trip.days[0].time_window
+    return tuple(
+        kind
+        for kind, (meal_start, meal_end) in _MEAL_WINDOWS.items()
+        if day_window.start <= meal_start and meal_end <= day_window.end
+    )
+
+
+def _is_lodging_place(name: str, category: str | None) -> bool:
+    haystack = _normalized_text(f"{name} {category or ''}")
+    return any(term in haystack for term in _LODGING_PLACE_TERMS)
+
+
+def _is_dining_place(name: str, category: str | None) -> bool:
+    if _is_lodging_place(name, category):
+        return False
+    haystack = _normalized_text(f"{name} {category or ''}")
+    return any(term in haystack for term in _DINING_PLACE_TERMS)
+
+
+def _required_place_matches(place: Place, label: str) -> bool:
+    """Do not let a restaurant satisfy a similarly named attraction."""
+
+    if not _place_matches_label(place, label):
+        return False
+    if not _is_dining_place(place.name, place.category):
+        return True
+    if _explicit_place_label_matches(
+        name=place.name,
+        provider_id=place.placeId,
+        label=label,
+    ):
+        return True
+    return _is_dining_place(label, None)
+
+
+def _required_match_sort_key(
+    *,
+    name: str,
+    provider_id: str,
+    label: str,
+) -> tuple[int, int, str, str]:
+    expected = _normalized_text(label)
+    normalized_name = _normalized_text(name)
+    normalized_id = _normalized_text(provider_id)
+    exact = expected in {normalized_name, normalized_id}
+    ends_with = normalized_name.endswith(expected)
+    starts_with = normalized_name.startswith(expected)
+    return (
+        0 if exact else 1 if ends_with else 2 if starts_with else 3,
+        abs(len(normalized_name) - len(expected)),
+        normalized_name,
+        normalized_id,
+    )
+
+
+def _place_distance_meters(left: Place, right: Place) -> int:
+    average_latitude = radians(
+        (left.location.latitude + right.location.latitude) / 2
+    )
+    latitude_meters = (
+        right.location.latitude - left.location.latitude
+    ) * 111_320
+    longitude_meters = (
+        right.location.longitude - left.location.longitude
+    ) * 111_320 * cos(average_latitude)
+    return round(hypot(latitude_meters, longitude_meters))
+
+
+def _nearest_place_distance(place: Place, anchors: Sequence[Place]) -> int:
+    if not anchors:
+        return 10**9
+    return min(_place_distance_meters(place, anchor) for anchor in anchors)
 
 
 def _is_non_visit_place(name: str, category: str | None) -> bool:
     """识别高德候选中明显不应成为游览任务的生活服务地点。
 
-    判断同时读取名称和高德分类，覆盖酒店品牌名和“住宿服务”这类分类标签。
-    明确被用户设为必去的地点会在调用处豁免，尊重特殊的集合点或住宿需求。
+    判断同时读取名称和高德分类。住宿类由调用处绝对排除，其他明显不适合
+    游览的地点仅在用户精确指定时允许保留。
     """
     haystack = _normalized_text(f"{name} {category or ''}")
-    return any(term in haystack for term in _NON_VISIT_PLACE_TERMS)
+    return _is_lodging_place(name, category) or any(
+        term in haystack for term in _OTHER_NON_VISIT_PLACE_TERMS
+    )
+
+
+def _order_tasks_for_meals(
+    tasks: Sequence[CandidatePlace],
+    meal_kinds: Sequence[MealKind],
+    facts_by_id: dict[str, FactRef] | None = None,
+) -> list[CandidatePlace]:
+    if not meal_kinds:
+        return list(tasks)
+    dining = [task for task in tasks if _is_dining_place(task.name, task.category)]
+    activities = [task for task in tasks if task not in dining]
+    if not dining or facts_by_id is None:
+        return [*activities, *dining]
+
+    def sequence_distance(sequence: Sequence[CandidatePlace]) -> int:
+        places = [
+            fact.place
+            for task in sequence
+            if (fact := facts_by_id.get(task.place_id)) is not None
+        ]
+        if len(places) != len(sequence):
+            return 10**12
+        return sum(
+            _place_distance_meters(left, right)
+            for left, right in zip(places, places[1:])
+        )
+
+    def meal_anchor_distance(sequence: Sequence[CandidatePlace]) -> int:
+        return _meal_anchor_distance(sequence, meal_kinds, facts_by_id)
+
+    sequences: list[list[CandidatePlace]] = []
+    for activity_order in permutations(activities):
+        for dining_order in permutations(dining):
+            if tuple(meal_kinds) == ("LUNCH", "DINNER"):
+                sequence = [
+                    activity_order[0],
+                    activity_order[1],
+                    dining_order[0],
+                    activity_order[2],
+                    dining_order[1],
+                ]
+            elif tuple(meal_kinds) == ("LUNCH",):
+                sequence = [
+                    activity_order[0],
+                    activity_order[1],
+                    dining_order[0],
+                    activity_order[2],
+                ]
+            elif tuple(meal_kinds) == ("DINNER",):
+                sequence = [*activity_order, dining_order[0]]
+            else:
+                sequence = [*activity_order, *dining_order]
+            sequences.append(sequence)
+    return min(
+        sequences,
+        key=lambda sequence: (
+            meal_anchor_distance(sequence),
+            sequence_distance(sequence),
+            tuple(task.place_id for task in sequence),
+        ),
+    )
+
+
+def _meal_anchor_distance(
+    sequence: Sequence[CandidatePlace],
+    meal_kinds: Sequence[MealKind],
+    facts_by_id: dict[str, FactRef],
+) -> int:
+    meal_positions: tuple[tuple[int, int], ...]
+    if tuple(meal_kinds) == ("LUNCH", "DINNER") and len(sequence) >= 5:
+        # 景点 1 -> 景点 2 -> 午餐 -> 景点 3 -> 晚餐
+        meal_positions = ((2, 1), (4, 3))
+    elif tuple(meal_kinds) == ("LUNCH",) and len(sequence) >= 4:
+        # 景点 1 -> 景点 2 -> 午餐 -> 景点 3
+        meal_positions = ((2, 1),)
+    elif tuple(meal_kinds) == ("DINNER",) and len(sequence) >= 4:
+        meal_positions = ((3, 2),)
+    else:
+        return 0
+
+    distance = 0
+    for meal_index, attraction_index in meal_positions:
+        meal_fact = facts_by_id.get(sequence[meal_index].place_id)
+        attraction_fact = facts_by_id.get(sequence[attraction_index].place_id)
+        if meal_fact is None or attraction_fact is None:
+            return 10**12
+        distance += _place_distance_meters(
+            meal_fact.place,
+            attraction_fact.place,
+        )
+    return distance
 
 
 def _candidate_matches_label(place: CandidatePlace, label: str) -> bool:
@@ -807,7 +999,14 @@ def _candidate_matches_label(place: CandidatePlace, label: str) -> bool:
         return False
     name = _normalized_text(place.name)
     place_id = _normalized_text(place.place_id)
-    return expected == place_id or expected in name or name in expected
+    matches = expected == place_id or expected in name or name in expected
+    if not matches:
+        return False
+    if not _is_dining_place(place.name, place.category):
+        return True
+    if expected in {name, place_id}:
+        return True
+    return _is_dining_place(label, None)
 
 
 def project_collaboration_recommendation_trip(
@@ -1018,6 +1217,7 @@ class TrustedRecommendationService:
                 target.append(preference.value)
 
         required = _stable_unique_text(must_visit, limit=9)
+        meal_kinds = required_meal_kinds(trip)
         if len(required) > 3:
             raise RecommendationOrchestrationError(
                 "TOO_MANY_HARD_MUST_VISIT_PLACES",
@@ -1040,6 +1240,10 @@ class TrustedRecommendationService:
                 continue
             if any(_place_matches_label(place, label) for label in avoided):
                 continue
+            # A lodging POI can be the confirmed start/end endpoint, but it is
+            # never a visit task in a one-day itinerary.
+            if _is_lodging_place(place.name, place.category):
+                continue
             # 非游览地点只有在名称或 Provider ID 被完整指定时才允许豁免。
             # 例如“天坛”不能通过子串匹配把“天坛家具”误判成必去地点。
             is_explicitly_required = any(
@@ -1050,9 +1254,17 @@ class TrustedRecommendationService:
                 )
                 for label in required
             )
+            # Meal places are requested only when the confirmed window contains
+            # a complete meal slot. Preserve an explicitly named restaurant,
+            # but never let an incidental dining POI replace a daytime visit.
             if (
-                not is_explicitly_required
-                and _is_non_visit_place(place.name, place.category)
+                not meal_kinds
+                and _is_dining_place(place.name, place.category)
+                and not is_explicitly_required
+            ):
+                continue
+            if not is_explicitly_required and _is_non_visit_place(
+                place.name, place.category
             ):
                 continue
             amount = place.priceReference.amountCents
@@ -1064,31 +1276,123 @@ class TrustedRecommendationService:
         missing_required = [
             label
             for label in required
-            if not any(_place_matches_label(place, label) for place in filtered)
+            if not any(_required_place_matches(place, label) for place in filtered)
         ]
         if missing_required:
+            lodging_labels = [
+                label
+                for label in missing_required
+                if any(
+                    _place_matches_label(place, label)
+                    and _is_lodging_place(place.name, place.category)
+                    for place in places
+                )
+            ]
+            if lodging_labels:
+                raise RecommendationOrchestrationError(
+                    "LODGING_NOT_ALLOWED_IN_DAY_PLAN",
+                    "一日行程不把酒店或住宿地点作为游览任务："
+                    + "、".join(lodging_labels),
+                )
             raise RecommendationOrchestrationError(
                 "HARD_MUST_VISIT_FACT_MISSING",
                 "高德/缓存事实未覆盖全部硬性必去地点："
                 + "、".join(missing_required),
             )
 
-        def sort_key(place: Place) -> tuple[int, int, int, int, str]:
-            is_required = any(
-                _place_matches_label(place, label) for label in required
+        def sort_key(place: Place) -> tuple[int, int, int, int, int, str]:
+            matching_labels = [
+                label for label in required
+                if _required_place_matches(place, label)
+            ]
+            required_rank = min(
+                (
+                    _required_match_sort_key(
+                        name=place.name,
+                        provider_id=place.placeId,
+                        label=label,
+                    )[:2]
+                    for label in matching_labels
+                ),
+                default=(3, 10**6),
             )
             haystack = _normalized_text(f"{place.name} {place.category or ''}")
             interest_matches = sum(word in haystack for word in interest_words)
             amount = place.priceReference.amountCents
             return (
-                0 if is_required else 1,
+                0 if matching_labels else 1,
+                required_rank[0] * 1_000 + required_rank[1],
                 -interest_matches,
                 0 if place.provenance.sourceStatus is SourceStatus.ONLINE else 1,
                 amount if amount is not None else 10**12,
                 place.placeId,
             )
 
-        selected = sorted(filtered, key=sort_key)[:8]
+        ordered = sorted(filtered, key=sort_key)
+        non_dining = [
+            place
+            for place in ordered
+            if not _is_dining_place(place.name, place.category)
+        ]
+        required_anchors = [
+            place for place in non_dining
+            if any(_required_place_matches(place, label) for label in required)
+        ] or non_dining[:3]
+        dining = sorted(
+            (
+                place for place in ordered
+                if _is_dining_place(place.name, place.category)
+            ),
+            key=lambda place: (
+                _nearest_place_distance(place, required_anchors),
+                sort_key(place),
+            ),
+        )
+        required_dining_count = len(meal_kinds)
+        if len(dining) < required_dining_count:
+            meal_labels = "、".join(
+                "午餐" if kind == "LUNCH" else "晚餐" for kind in meal_kinds
+            )
+            raise RecommendationOrchestrationError(
+                "INSUFFICIENT_TRUSTED_DINING_CANDIDATES",
+                f"高德未返回足够的真实餐饮地点，无法安排{meal_labels}。",
+            )
+        target_task_count = 3 + required_dining_count
+        if len(non_dining) < target_task_count - required_dining_count:
+            raise RecommendationOrchestrationError(
+                "INSUFFICIENT_TRUSTED_PROVIDER_CANDIDATES",
+                "高德返回的真实游览地点不足，无法在餐食之外组成单日方案。",
+            )
+
+        selected: list[Place] = []
+        selected_ids: set[str] = set()
+
+        def reserve(place: Place) -> None:
+            if place.placeId not in selected_ids and len(selected) < 8:
+                selected.append(place)
+                selected_ids.add(place.placeId)
+
+        for label in required:
+            match = min(
+                (
+                    place for place in ordered
+                    if _required_place_matches(place, label)
+                ),
+                key=lambda place: _required_match_sort_key(
+                    name=place.name,
+                    provider_id=place.placeId,
+                    label=label,
+                ),
+                default=None,
+            )
+            if match is not None:
+                reserve(match)
+        for place in dining[:required_dining_count]:
+            reserve(place)
+        for place in non_dining[:target_task_count - required_dining_count]:
+            reserve(place)
+        for place in ordered:
+            reserve(place)
         if len(selected) < 6:
             raise RecommendationOrchestrationError(
                 "INSUFFICIENT_TRUSTED_PROVIDER_CANDIDATES",
@@ -1105,16 +1409,36 @@ class TrustedRecommendationService:
         avoid_places: Sequence[str],
     ) -> list[CandidatePlace]:
         avoided = {_normalized_text(item) for item in avoid_places}
-        required = {item.casefold() for item in must_visit}
         interest_words = tuple(item.casefold() for item in interests)
 
-        def sort_key(fact: FactRef) -> tuple[int, int, str]:
+        def sort_key(fact: FactRef) -> tuple[int, int, int, int, int, str]:
             place = fact.place
             haystack = f"{place.name} {place.category or ''}".casefold()
-            is_required = place.name.casefold() in required
+            matching_labels = [
+                label for label in must_visit
+                if _required_place_matches(place, label)
+            ]
+            required_rank = min(
+                (
+                    _required_match_sort_key(
+                        name=place.name,
+                        provider_id=place.placeId,
+                        label=label,
+                    )[:2]
+                    for label in matching_labels
+                ),
+                default=(4, 10**6),
+            )
             interest_matches = sum(word in haystack for word in interest_words)
             price = place.priceReference.amountCents
-            return (0 if is_required else 1, -interest_matches, price if price is not None else 10**12, place.placeId)
+            return (
+                0 if matching_labels else 1,
+                required_rank[0],
+                required_rank[1],
+                -interest_matches,
+                price if price is not None else 10**12,
+                place.placeId,
+            )
 
         selected: list[CandidatePlace] = []
         seen: set[str] = set()
@@ -1125,6 +1449,8 @@ class TrustedRecommendationService:
                 or _normalized_text(place.placeId) in avoided
                 or _normalized_text(place.name) in avoided
             ):
+                continue
+            if _is_lodging_place(place.name, place.category):
                 continue
             is_explicitly_required = any(
                 _explicit_place_label_matches(
@@ -1192,8 +1518,9 @@ class TrustedRecommendationService:
         bundle: RecommendationBundle,
         facts: Sequence[FactRef],
         members: Sequence[MemberPreference],
+        trip: Trip | None = None,
     ) -> RecommendationBundle:
-        """Turn a bounded ranking into exactly one explainable 1–4 task plan.
+        """Turn a bounded ranking into one explainable meal-aware task plan.
 
         The choice is deliberately deterministic.  It favours required places,
         then the existing stable ranking, and scores the *resulting* task set
@@ -1201,7 +1528,14 @@ class TrustedRecommendationService:
         """
         candidates_by_id = {item.place_id: item for item in bundle.candidates}
         facts_by_id = {item.place.placeId: item for item in facts}
+        meal_kinds = required_meal_kinds(trip) if trip is not None else ()
         ordered = [candidates_by_id[item.place_id] for item in bundle.recommendations if item.place_id in candidates_by_id]
+        if meal_kinds:
+            ordered.extend(
+                candidate
+                for candidate in bundle.candidates
+                if all(item.place_id != candidate.place_id for item in ordered)
+            )
         if not ordered:
             return bundle
 
@@ -1237,21 +1571,34 @@ class TrustedRecommendationService:
             if all(item.place_id != required_candidate.place_id for item in ordered):
                 ordered.append(required_candidate)
 
-        # The recommendation contains only intermediate places.  Keep the
-        # proposal contract at two-to-three items so T011 can append the one
-        # independently verified return task and still produce three-to-four
-        # total plan tasks.  A model proposal already contains two or three
-        # items; deterministic fallback selects exactly three when available.
+        # The recommendation contains only intermediate places. The model's
+        # bounded proposal is a ranking hint; deterministic selection adds the
+        # trusted dining candidates required by the confirmed day window.
         # The comparison implements the published fairness key exactly:
         # minimum member score desc, average score desc, known price asc, then
         # a stable candidate-id tie break.
-        target_size = min(3, len(ordered))
+        required_dining_count = len(meal_kinds)
+        if sum(
+            _is_dining_place(candidate.name, candidate.category)
+            for candidate in ordered
+        ) < required_dining_count:
+            raise RecommendationOrchestrationError(
+                "INSUFFICIENT_TRUSTED_DINING_CANDIDATES",
+                "可信候选中缺少午餐或晚餐所需的真实餐饮地点。",
+            )
+        target_size = min(3 + required_dining_count, len(ordered))
         required_ids = {item.place_id for item in required_candidates}
         # 只枚举包含全部必去候选的组合，公平评分只能在这些可行组合之间选择。
         possible_sets = (
             tasks
             for tasks in combinations(ordered, target_size)
             if required_ids <= {task.place_id for task in tasks}
+            and (
+                not meal_kinds
+                or sum(
+                    _is_dining_place(task.name, task.category) for task in tasks
+                ) == required_dining_count
+            )
         )
         scored_sets = [(list(tasks), TrustedRecommendationService._score_members(tasks, members), facts_by_id) for tasks in possible_sets]
         if not scored_sets:
@@ -1261,12 +1608,15 @@ class TrustedRecommendationService:
             )
         tasks, scores, _ = min(
             scored_sets,
-            key=lambda entry: TrustedRecommendationService._fairness_sort_key(entry[0], entry[1], facts_by_id),
+            key=lambda entry: TrustedRecommendationService._fairness_sort_key(
+                entry[0], entry[1], facts_by_id, meal_kinds
+            ),
         )
         # Restore the approved bounded ranking order as the task sequence.  The
         # order is display-only; the task membership came from fairness ranking.
         selected_ids = {task.place_id for task in tasks}
         tasks = [task for task in ordered if task.place_id in selected_ids]
+        tasks = _order_tasks_for_meals(tasks, meal_kinds, facts_by_id)
 
         unknown_facts = [
             f"{task.name} 的价格尚未由高德提供，需要在生成路线时核验"
@@ -1278,6 +1628,14 @@ class TrustedRecommendationService:
         care_points = ["已在进入推荐前完成成员确认与硬冲突筛除"]
         if interest_groups > 1:
             care_points.append("已将不同成员的已确认兴趣共同纳入评分")
+        if meal_kinds:
+            care_points.append(
+                "已使用高德餐饮地点安排"
+                + "和".join(
+                    "午餐" if kind == "LUNCH" else "晚餐"
+                    for kind in meal_kinds
+                )
+            )
         plan = TrustedPlan(
             tasks=tasks,
             member_scores=scores,
@@ -1299,14 +1657,19 @@ class TrustedRecommendationService:
         scores: list[MemberScore] = []
         for member in members:
             interests = tuple(item.strip() for item in member.interests if item.strip())
-            must_visit = tuple(_normalized_text(item) for item in member.must_visit if item.strip())
+            must_visit = tuple(item.strip() for item in member.must_visit if item.strip())
             matched_interests = [
                 item for item in interests if _interest_matches(selected_text, item)
             ]
             missing_interests = [
                 item for item in interests if item not in matched_interests
             ]
-            missing_must = [place for place in must_visit if place not in selected_text]
+            missing_must = [
+                label for label in must_visit
+                if not any(
+                    _candidate_matches_label(task, label) for task in tasks
+                )
+            ]
             # Keep this compatibility view aligned with the canonical T007
             # fairness rule: start at 100 and deduct 20 points for each
             # confirmed interest not covered by the selected task set.  The
@@ -1342,8 +1705,35 @@ class TrustedRecommendationService:
 
     @staticmethod
     def _fairness_sort_key(
-        tasks: Sequence[CandidatePlace], scores: Sequence[MemberScore], facts_by_id: dict[str, FactRef],
-    ) -> tuple[float, float, int, str]:
+        tasks: Sequence[CandidatePlace],
+        scores: Sequence[MemberScore],
+        facts_by_id: dict[str, FactRef],
+        meal_kinds: Sequence[MealKind] = (),
+    ) -> tuple[float, float, int, int, str]:
+        dining_places = [
+            fact.place
+            for task in tasks
+            if _is_dining_place(task.name, task.category)
+            and (fact := facts_by_id.get(task.place_id)) is not None
+        ]
+        activity_places = [
+            fact.place
+            for task in tasks
+            if not _is_dining_place(task.name, task.category)
+            and (fact := facts_by_id.get(task.place_id)) is not None
+        ]
+        if meal_kinds:
+            arranged = _order_tasks_for_meals(tasks, meal_kinds, facts_by_id)
+            meal_proximity = _meal_anchor_distance(
+                arranged,
+                meal_kinds,
+                facts_by_id,
+            )
+        else:
+            meal_proximity = sum(
+                _nearest_place_distance(place, activity_places)
+                for place in dining_places
+            )
         known_cost = sum(
             fact.place.priceReference.amountCents or 0
             for task in tasks if (fact := facts_by_id.get(task.place_id)) is not None
@@ -1351,6 +1741,7 @@ class TrustedRecommendationService:
         return (
             -min(item.score for item in scores),
             -(sum(item.score for item in scores) / len(scores)),
+            meal_proximity,
             known_cost,
             ",".join(sorted(item.place_id for item in tasks)),
         )

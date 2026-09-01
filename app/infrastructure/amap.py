@@ -228,7 +228,7 @@ class AmapClient:
             return await self._get("/v3/direction/transit/integrated", parameters)
         if mode is TravelMode.WALKING:
             return await self._get("/v3/direction/walking", parameters)
-        if mode is TravelMode.DRIVING:
+        if mode in {TravelMode.DRIVING, TravelMode.TAXI}:
             return await self._get("/v3/direction/driving", parameters)
         if mode is TravelMode.BICYCLING:
             return await self._get("/v4/direction/bicycling", parameters)

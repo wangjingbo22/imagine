@@ -28,6 +28,10 @@ from app.infrastructure.amap import AmapClient
 from app.infrastructure.cache import SqliteProviderCache
 
 
+SHARED_BICYCLE_BLOCK_SECONDS = 15 * 60
+SHARED_BICYCLE_BLOCK_CENTS = 150
+
+
 @dataclass(frozen=True, slots=True)
 class FetchResult:
     payload: dict[str, Any]
@@ -596,17 +600,41 @@ def _route_price(
     mode: TravelMode,
     provenance: Provenance,
 ) -> PriceFact:
-    if mode in {TravelMode.WALKING, TravelMode.BICYCLING}:
+    if mode is TravelMode.WALKING:
         return PriceFact(amountCents=0, kind="FREE", provenance=provenance)
+    if mode is TravelMode.BICYCLING:
+        duration_seconds = _optional_integer(item.get("duration"))
+        estimated = Provenance(
+            provider="APP_ESTIMATE",
+            sourceStatus=SourceStatus.ESTIMATED,
+            fetchedAt=provenance.fetchedAt,
+            isStale=provenance.isStale,
+        )
+        if duration_seconds is None or duration_seconds <= 0:
+            return PriceFact(
+                amountCents=None,
+                kind="SHARED_BICYCLE_ESTIMATE",
+                provenance=estimated.model_copy(
+                    update={"sourceStatus": SourceStatus.UNKNOWN}
+                ),
+            )
+        billing_blocks = (
+            (duration_seconds + SHARED_BICYCLE_BLOCK_SECONDS - 1)
+            // SHARED_BICYCLE_BLOCK_SECONDS
+        )
+        return PriceFact(
+            amountCents=billing_blocks * SHARED_BICYCLE_BLOCK_CENTS,
+            kind="SHARED_BICYCLE_ESTIMATE",
+            provenance=estimated,
+        )
     if mode is TravelMode.TRANSIT:
         return _price_fact(item.get("cost"), "TRANSIT_FARE", provenance)
     route = payload.get("route") or {}
-    taxi_cost = route.get("taxi_cost")
-    if _text(taxi_cost):
+    if mode is TravelMode.TAXI:
         estimated = provenance.model_copy(
             update={"sourceStatus": SourceStatus.ESTIMATED}
         )
-        return _price_fact(taxi_cost, "TAXI_ESTIMATE", estimated)
+        return _price_fact(route.get("taxi_cost"), "TAXI_ESTIMATE", estimated)
     return _price_fact(item.get("tolls"), "ROAD_TOLLS", provenance)
 
 

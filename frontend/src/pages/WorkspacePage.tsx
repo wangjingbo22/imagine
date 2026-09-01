@@ -1,15 +1,17 @@
 import {
   ArrowRight,
   BadgeCheck,
+  Bike,
   BusFront,
+  CarFront,
+  CarTaxiFront,
   Check,
   CheckCircle2,
-  ChevronDown,
+  CircleAlert,
   CircleDollarSign,
   Clock3,
   Footprints,
   LoaderCircle,
-  Layers3,
   MapPin,
   MessageSquareText,
   Navigation,
@@ -19,11 +21,10 @@ import {
   ShieldCheck,
   Send,
   Sparkles,
-  Telescope,
   Wallet,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { tripApi, USE_PLAN_VERSION_API } from '../api/tripApi'
@@ -41,12 +42,12 @@ import type {
   PlanSnapshot,
   PlanningConstraint,
   PlanVersionDiff,
-  Provenance,
-  SourceStatus,
+  ProviderRoute,
   StoredPlanVersion,
   TripDraftInput,
   TripPlanState,
   TripSummary,
+  TravelMode,
 } from '../domain/trip'
 import type {
   ConfirmedExecutionAdjustmentEventInput,
@@ -56,9 +57,11 @@ import type {
   FatigueLevel,
 } from '../domain/executionAdjustment'
 import {
+  changeAmapPlanRoute,
   loadAmapPlan,
   type AmapPlanResult,
   type LocationEvidence,
+  type PlanningIssue,
 } from '../services/amapPlan'
 import {
   compileGroupAssistanceConstraints,
@@ -77,7 +80,6 @@ import {
   buildConfirmedAdjustment,
   createAdjustmentIdempotencyKey,
 } from '../services/executionAdjustment'
-import { facilityEvidenceNeedsConfirmation } from '../services/routeRiskFacts'
 import { restoreDraftFromPlanningFacts } from '../services/planningFacts'
 import { getStoredOrganizerToken } from '../services/organizerStorage'
 import {
@@ -112,20 +114,26 @@ const diffChangeLabels = {
   CHANGED: '变更',
 } as const
 
-const sourceStatusLabels: Record<SourceStatus, string> = {
-  ONLINE: '在线获取',
-  VERIFIED_CACHE: '已核验缓存',
-  USER_CONFIRMED: '用户确认',
-  ESTIMATED: '估算',
-  UNKNOWN: '未知待确认',
-}
-
 const routeModeLabels = {
   WALKING: '步行',
   TRANSIT: '公共交通',
-  DRIVING: '驾车',
+  DRIVING: '自驾',
   BICYCLING: '骑行',
+  TAXI: '打车',
 } as const
+
+type EditableRouteMode = Extract<TravelMode, 'DRIVING' | 'BICYCLING' | 'TAXI'>
+
+const routeSwitchOptions = [
+  { value: 'DRIVING', label: '自驾', icon: CarFront, title: '自驾，仅计算高德返回的高速或道路收费' },
+  { value: 'BICYCLING', label: '骑行', icon: Bike, title: '共享单车，按每 15 分钟 1.5 元估算' },
+  { value: 'TAXI', label: '打车', icon: CarTaxiFront, title: '打车，使用高德返回的出租车估价' },
+] satisfies Array<{
+  value: EditableRouteMode
+  label: string
+  icon: typeof CarFront
+  title: string
+}>
 
 const recommendationFeedbackOptions = [
   '想少走路',
@@ -180,24 +188,54 @@ function describePlanV2Error(error: unknown) {
 }
 
 function formatMoney(cents: number) {
-  return `¥${Math.round(cents / 100)}`
+  const yuan = cents / 100
+  return `¥${Number.isInteger(yuan) ? yuan : yuan.toFixed(2)}`
 }
 
-function formatSourceTime(provenance: Provenance) {
-  const fetchedAt = new Date(provenance.fetchedAt)
-  if (Number.isNaN(fetchedAt.getTime())) {
-    return '时间未知'
+function describeRoutePrice(route: ProviderRoute | undefined) {
+  if (!route) return '费用尚未加载'
+  const amount = route.priceReference.amountCents
+  if (amount === null) return '本段费用待确认'
+  switch (route.priceReference.kind) {
+    case 'SHARED_BICYCLE_ESTIMATE':
+      return `共享单车估算 ${formatMoney(amount)}`
+    case 'TAXI_ESTIMATE':
+      return `高德打车估价 ${formatMoney(amount)}`
+    case 'ROAD_TOLLS':
+      return amount === 0 ? '本段无道路收费' : `高速/道路收费 ${formatMoney(amount)}`
+    case 'TRANSIT_FARE':
+      return `公共交通参考 ${formatMoney(amount)}`
+    case 'FREE':
+      return '本段免费'
+    default:
+      return `本段参考 ${formatMoney(amount)}`
   }
-  return fetchedAt.toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
 }
 
-function formatSource(provenance: Provenance) {
-  const staleSuffix = provenance.isStale ? ' · 已过期' : ''
-  return `${sourceStatusLabels[provenance.sourceStatus]} · ${formatSourceTime(provenance)}${staleSuffix}`
+function planningFailureDetails(issue: PlanningIssue) {
+  return issue.details.flatMap((detail) => {
+    if (detail.status !== 'FAIL' && detail.status !== 'NEEDS_CONFIRMATION') return []
+    const ruleId = String(detail.ruleId ?? '')
+    const observed = detail.observed && typeof detail.observed === 'object'
+      ? detail.observed as Record<string, unknown>
+      : {}
+    const limit = Number(observed.limitMeters)
+    if (ruleId === 'CARE.ROUTE.WALK_SEGMENT_LIMIT') {
+      const actual = Number(observed.walkingDistanceMeters)
+      return [`某段实际步行 ${actual} 米，超过已确认上限 ${limit} 米。`]
+    }
+    if (ruleId === 'CARE.ROUTE.WALK_DAILY_LIMIT') {
+      const actual = Number(observed.dailyWalkingMeters)
+      return [`全天实际步行 ${actual} 米，超过已确认上限 ${limit} 米。`]
+    }
+    if (ruleId === 'CARE.ROUTE.TRANSFER_LIMIT') {
+      return ['某段公共交通的换乘次数超过已确认上限。']
+    }
+    if (ruleId === 'T011.BUDGET.LIMIT') {
+      return ['当前已知费用超过已确认预算。']
+    }
+    return ruleId ? [`未通过规则：${ruleId}`] : []
+  })
 }
 
 function formatDiffValue(value: string | number | null, category: keyof typeof diffCategoryLabels) {
@@ -240,6 +278,10 @@ function describePlanningConstraint(constraint: PlanningConstraint) {
   }
 }
 
+function minutePrecisionTimeRange(value: string) {
+  return value.replace(/(\d{2}:\d{2}):\d{2}/g, '$1')
+}
+
 function toDisplayPlan(plan: StoredPlanVersion): PlanSnapshot {
   const coordinates: Array<[number, number]> = [
     [22, 71],
@@ -261,7 +303,7 @@ function toDisplayPlan(plan: StoredPlanVersion): PlanSnapshot {
       order: task.order,
       title: task.title,
       category: task.category,
-      timeRange: task.timeRange,
+      timeRange: minutePrecisionTimeRange(task.timeRange),
       durationMinutes: task.durationMinutes,
       transport: task.transport,
       costCents: task.costCents,
@@ -297,6 +339,8 @@ function planningFactsRecoveryMessage(error: unknown) {
 
 export function WorkspacePage() {
   const location = useLocation()
+  const evidenceReviewRef = useRef<HTMLElement>(null)
+  const planningIssueRef = useRef<HTMLElement>(null)
   const navigationState = location.state as {
     draft?: TripDraftInput
     tripId?: string
@@ -325,6 +369,8 @@ export function WorkspacePage() {
   const [isDecidingV2, setIsDecidingV2] = useState(false)
   const [isWritingEvent, setIsWritingEvent] = useState(false)
   const [planLifecycleError, setPlanLifecycleError] = useState('')
+  const [routeChangeNotice, setRouteChangeNotice] = useState('')
+  const [changingRouteIndex, setChangingRouteIndex] = useState<number | null>(null)
   const [actualCost, setActualCost] = useState('0')
   const [arrivalMessage, setArrivalMessage] = useState('')
   const [isLocating, setIsLocating] = useState(false)
@@ -595,15 +641,10 @@ export function WorkspacePage() {
   const serverPlanReady = Boolean(persistedPlanId) &&
     activePlan.validationStatus === 'PASS' &&
     !planningIssue
-  const hasIssuedPassPlan = serverPlanReady
   const remainingBudgetCents = Math.max(0, budgetCents - activePlan.totalCostCents)
   const budgetUsagePercent = budgetCents > 0
     ? Math.min(100, Math.round(activePlan.totalCostCents / budgetCents * 100))
     : 0
-  const unknownPriceCount = hasIssuedPassPlan ? 0 : locationEvidence
-    ? locationEvidence.places.filter((place) => place.priceReference.amountCents === null).length +
-      locationEvidence.routes.filter((route) => route.priceReference.amountCents === null).length
-    : activePlan.tasks.filter((task) => task.priceKnown === false).length
   const currentTask = activePlan.tasks[currentTaskIndex]
   const nextTask = activePlan.tasks.find(
     (task) => task.order > (currentTask?.order ?? 0),
@@ -624,50 +665,6 @@ export function WorkspacePage() {
     .reduce((total, task) => total + task.walkMeters, 0)
   const isJourneyComplete =
     completedTaskIds.length + skippedTaskIds.length >= activePlan.tasks.length
-  const storedProviderSources = storedCurrentPlan?.sourcesSnapshot.filter(
-    (source) => source.provider === 'AMAP',
-  ) ?? []
-  const storedLocationSource = storedProviderSources.find(
-    (source) => !source.referenceId?.endsWith(':price'),
-  )
-  const storedPriceSource = storedProviderSources.find(
-    (source) => source.referenceId?.endsWith(':price'),
-  )
-  const locationProvenance =
-    locationEvidence?.routes[0]?.provenance ??
-    locationEvidence?.places[0]?.provenance ??
-    locationEvidence?.city.provenance ??
-    (storedLocationSource ? {
-      provider: 'AMAP' as const,
-      sourceStatus: storedLocationSource.sourceStatus,
-      fetchedAt: storedLocationSource.fetchedAt,
-      isStale: storedLocationSource.isStale,
-    } : null) ??
-    null
-  const knownPrice = locationEvidence?.places.find(
-    (place) => place.priceReference.amountCents !== null,
-  )?.priceReference
-  const priceProvenance =
-    knownPrice?.provenance ??
-    locationEvidence?.places[0]?.priceReference.provenance ??
-    (storedPriceSource ? {
-      provider: 'AMAP' as const,
-      sourceStatus: storedPriceSource.sourceStatus,
-      fetchedAt: storedPriceSource.fetchedAt,
-      isStale: storedPriceSource.isStale,
-    } : null)
-  const displayedCityCode =
-    locationEvidence?.city.cityContext.cityCode ??
-    storedCurrentPlan?.tripSnapshot.cityContext.cityCode ??
-    null
-  const routeFacilityEvidence = locationEvidence?.routes.flatMap(
-    (route) => route.facilityEvidence,
-  ) ?? []
-  const facilityEvidence = routeFacilityEvidence
-  const facilityNeedsConfirmation = !hasIssuedPassPlan && Boolean(locationEvidence) && (
-    facilityEvidence.length === 0 ||
-    facilityEvidence.some(facilityEvidenceNeedsConfirmation)
-  )
   const reviewItems = candidateReview?.items ?? []
   const priceReviewItems = reviewItems.filter((item) => item.valueType === 'PRICE_CENTS')
   const sourceReviewItems = reviewItems.filter((item) => item.valueType === 'SOURCE_CONFIRMATION')
@@ -692,6 +689,23 @@ export function WorkspacePage() {
   const reviewProgress = reviewItems.length > 0
     ? Math.round(completedReviewCount / reviewItems.length * 100)
     : 0
+  const hardFailureDetails = planningIssue
+    ? [...new Set(planningFailureDetails(planningIssue))]
+    : []
+  const remainingReviewCount = Math.max(0, reviewItems.length - completedReviewCount)
+  const primaryActionLabel = isConfirmingPlan
+    ? '正在确认…'
+    : isConfirmingEvidence
+      ? '正在提交证据…'
+      : serverPlanReady
+        ? '接受推荐并确认 Plan V1'
+        : candidateReview
+          ? remainingReviewCount > 0
+            ? `去确认 ${remainingReviewCount} 项证据`
+            : '提交已确认的证据'
+          : planningIssue?.code === 'CANDIDATE_PLAN_REJECTED'
+            ? '查看未通过的硬约束'
+            : '查看计划未就绪原因'
   const canCreatePlanV2 = canRequestS1PlanV2(
     storedCurrentPlan?.version ?? null,
     executionAdjustmentCount,
@@ -726,6 +740,85 @@ export function WorkspacePage() {
     }))
     setPlanLifecycleError('')
   }
+
+  function focusPanel(ref: { current: HTMLElement | null }) {
+    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    window.setTimeout(() => ref.current?.focus({ preventScroll: true }), 350)
+  }
+
+  async function handleRouteModeChange(routeIndex: number, mode: EditableRouteMode) {
+    if (!tripId || !candidateRequest || !locationEvidence) {
+      setPlanLifecycleError('当前页面缺少可调整的高德路线事实，请刷新后重试。')
+      return
+    }
+    if (candidateRequest.taskFacts[routeIndex]?.route.mode === mode) {
+      return
+    }
+    if (persistedPlanId) {
+      setPlanLifecycleError('当前 Plan V1 已由服务端签发，不能覆盖不可变快照。请在确认前调整路线。')
+      return
+    }
+    setChangingRouteIndex(routeIndex)
+    setPlanLifecycleError('')
+    setRouteChangeNotice(`正在重新获取第 ${routeIndex + 1} 段${routeModeLabels[mode]}路线并重排时间…`)
+    try {
+      const result = await changeAmapPlanRoute(
+        tripId,
+        candidateRequest,
+        locationEvidence,
+        routeIndex,
+        mode,
+        organizerToken,
+      )
+      setRestoredPlan(null)
+      setProviderPlan(result.plan)
+      setLocationEvidence(result.evidence)
+      setCandidateRequest(result.candidateRequest)
+      setPlanningTripSnapshot(result.candidateRequest.trip)
+      setPlanningIssue(result.planningIssue)
+      setCandidateReview(result.planningIssue?.review ?? null)
+      setReviewValues({})
+      setPersistedPlanId(result.registeredPlan?.planId ?? null)
+      setRecommendationRound((current) => current + 1)
+      setAppliedFeedback([`第 ${routeIndex + 1} 段改为${routeModeLabels[mode]}`])
+      setRouteChangeNotice(
+        result.planningIssue?.code === 'CANDIDATE_CONFIRMATION_REQUIRED'
+          ? `第 ${routeIndex + 1} 段已切换为${routeModeLabels[mode]}；请完成更新后的证据确认。`
+          : result.planningIssue
+            ? `第 ${routeIndex + 1} 段已切换，但新方案仍有硬约束未通过。`
+            : `第 ${routeIndex + 1} 段已切换为${routeModeLabels[mode]}，时间与费用已重新校验。`,
+      )
+      if (result.planningIssue?.code === 'CANDIDATE_PLAN_REJECTED') {
+        setPlanLifecycleError(result.planningIssue.message)
+      }
+    } catch (error) {
+      setRouteChangeNotice('')
+      setPlanLifecycleError(error instanceof Error ? error.message : '切换本段交通方式失败')
+    } finally {
+      setChangingRouteIndex(null)
+    }
+  }
+
+  function handlePlanPrimaryAction() {
+    if (serverPlanReady) {
+      void handleAcceptPlan()
+      return
+    }
+    if (candidateReview) {
+      if (completedReviewCount === reviewItems.length && reviewItems.length > 0) {
+        void handleConfirmEvidence()
+      } else {
+        focusPanel(evidenceReviewRef)
+      }
+      return
+    }
+    if (planningIssue) {
+      focusPanel(planningIssueRef)
+      return
+    }
+    setPlanLifecycleError('服务端尚未签发计划，请等待路线与候选事实加载完成。')
+  }
+
   function toggleRecommendationFeedback(option: string) {
     setSelectedFeedbackOptions((current) =>
       current.includes(option)
@@ -1353,7 +1446,6 @@ export function WorkspacePage() {
                 ? `${validationRules.length} 项约束已由服务端复算`
                 : '候选事实等待服务端确认'}
             </span>
-            <button className="button button--soft" type="button"><Sparkles size={17} /> 问问 Agent</button>
           </div>
         </header>
 
@@ -1379,8 +1471,21 @@ export function WorkspacePage() {
             <section className="timeline-panel">
               <div className="panel-heading">
                 <div><span className="section-kicker">RECOMMENDATION #{recommendationRound}</span><h2>今天的路线</h2></div>
-                <button className="mini-action" type="button">按时间 <ChevronDown size={15} /></button>
+                <span className="mini-action">按时间</span>
               </div>
+              <div className="route-price-summary" aria-label="交通费用计算口径">
+                <span><CarFront size={16} /><b>自驾</b><small>只计高速/道路收费</small></span>
+                <span><Bike size={16} /><b>骑行</b><small>共享单车每 15 分钟 ¥1.50 估算</small></span>
+                <span><CarTaxiFront size={16} /><b>打车</b><small>采用高德出租车估价</small></span>
+              </div>
+              {routeChangeNotice && (
+                <div className="route-change-notice" aria-live="polite" role="status">
+                  {changingRouteIndex !== null
+                    ? <LoaderCircle className="spin-icon" size={16} />
+                    : <CheckCircle2 size={16} />}
+                  <span>{routeChangeNotice}</span>
+                </div>
+              )}
               {recommendationRound > 1 && (
                 <div className="recommendation-updated">
                   <CheckCircle2 size={17} />
@@ -1388,31 +1493,76 @@ export function WorkspacePage() {
                 </div>
               )}
               <div className="timeline">
-                {activePlan.tasks.map((task) => (
-                  <article className={`timeline-item timeline-item--${task.status}`} key={task.id}>
-                    <div className="timeline-item__rail"><span>{task.order}</span></div>
-                    <div className="timeline-item__time">{task.timeRange}</div>
-                    <div className="timeline-item__card">
-                      <div className="timeline-item__top">
-                        <div>
-                          <span className="category-chip">{task.category}</span>
-                          <h3>{task.title}</h3>
+                {activePlan.tasks.map((task, index) => {
+                  const route = locationEvidence?.routes[index] ?? candidateRequest?.taskFacts[index]?.route
+                  const routeIsLocked = Boolean(persistedPlanId)
+                  const routeIsChanging = changingRouteIndex === index
+                  return (
+                    <article className={`timeline-item timeline-item--${task.status}`} key={task.id}>
+                      <div className="timeline-item__rail"><span>{task.order}</span></div>
+                      <div className="timeline-item__time">{task.timeRange}</div>
+                      <div className="timeline-item__card">
+                        <div className="timeline-item__top">
+                          <div>
+                            <span className="category-chip">{task.category}</span>
+                            <h3>{task.title}</h3>
+                          </div>
+                          <strong className={task.priceKnown === false ? 'needs-confirmation' : ''}>
+                            {task.priceKnown === false
+                              ? `${formatMoney(task.costCents)} 已知 · 另有待确认`
+                              : formatMoney(task.costCents)}
+                          </strong>
                         </div>
-                        <strong className={task.priceKnown === false ? 'needs-confirmation' : ''}>
-                          {task.priceKnown === false
-                            ? `${formatMoney(task.costCents)} 已知 · 另有待确认`
-                            : formatMoney(task.costCents)}
-                        </strong>
+                        <div className="task-meta">
+                          <span><Clock3 size={15} /> {task.durationMinutes} 分钟</span>
+                          <span><Navigation size={15} /> {task.transport}</span>
+                          <span><Footprints size={15} /> {task.walkMeters} 米</span>
+                        </div>
+                        {route && (
+                          <div className="route-mode-picker">
+                            <div className="route-mode-picker__head">
+                              <span><Route size={15} /> 第 {index + 1} 段交通</span>
+                              <strong>{describeRoutePrice(route)}</strong>
+                            </div>
+                            <div
+                              className="route-mode-picker__options"
+                              role="group"
+                              aria-label={`第 ${index + 1} 段交通方式`}
+                            >
+                              {routeSwitchOptions.map((option) => {
+                                const Icon = option.icon
+                                const selected = route.mode === option.value
+                                return (
+                                  <button
+                                    aria-pressed={selected}
+                                    className={selected ? 'is-selected' : ''}
+                                    disabled={routeIsLocked || changingRouteIndex !== null}
+                                    key={option.value}
+                                    onClick={() => void handleRouteModeChange(index, option.value)}
+                                    title={routeIsLocked
+                                      ? '该 Plan V1 已由服务端签发，路线快照不可原地修改'
+                                      : option.title}
+                                    type="button"
+                                  >
+                                    {routeIsChanging && selected
+                                      ? <LoaderCircle className="spin-icon" size={15} />
+                                      : <Icon size={15} />}
+                                    <span>{option.label}</span>
+                                  </button>
+                                )
+                              })}
+                            </div>
+                            <small className="route-mode-picker__status">
+                              当前为{routeModeLabels[route.mode]}，约 {Math.max(1, Math.round(route.durationSeconds / 60))} 分钟
+                              {routeIsLocked ? '；该签发版本已锁定' : '；切换后将重新校验全天安排'}
+                            </small>
+                          </div>
+                        )}
+                        <div className="task-note"><BadgeCheck size={15} /> {task.note}</div>
                       </div>
-                      <div className="task-meta">
-                        <span><Clock3 size={15} /> {task.durationMinutes} 分钟</span>
-                        <span><Navigation size={15} /> {task.transport}</span>
-                        <span><Footprints size={15} /> {task.walkMeters} 米</span>
-                      </div>
-                      <div className="task-note"><BadgeCheck size={15} /> {task.note}</div>
-                    </div>
-                  </article>
-                ))}
+                    </article>
+                  )
+                })}
               </div>
             </section>
 
@@ -1432,8 +1582,42 @@ export function WorkspacePage() {
                   <div><Clock3 size={18} /><span>弹性时间<strong>45 分钟</strong></span></div>
                 </div>
               </section>
+              {planningIssue && (
+                <section
+                  className={`planning-issue-card ${planningIssue.code === 'CANDIDATE_PLAN_REJECTED' ? 'is-rejected' : 'needs-review'}`}
+                  ref={planningIssueRef}
+                  tabIndex={-1}
+                >
+                  <div className="planning-issue-card__head">
+                    <CircleAlert size={18} />
+                    <span>
+                      <strong>
+                        {planningIssue.code === 'CANDIDATE_PLAN_REJECTED'
+                          ? '计划未通过硬约束'
+                          : '计划需要补充事实'}
+                      </strong>
+                      <small>{planningIssue.code}</small>
+                    </span>
+                  </div>
+                  <p>{planningIssue.message}</p>
+                  {hardFailureDetails.length > 0 && (
+                    <ul>{hardFailureDetails.map((detail) => <li key={detail}>{detail}</li>)}</ul>
+                  )}
+                  {candidateReview && (
+                    <button onClick={() => focusPanel(evidenceReviewRef)} type="button">
+                      前往行前事实核对 <ArrowRight size={15} />
+                    </button>
+                  )}
+                </section>
+              )}
               {candidateReview && (
-                <section className="evidence-review-card" aria-live="polite">
+                <section
+                  aria-live="polite"
+                  className="evidence-review-card"
+                  id="evidence-review"
+                  ref={evidenceReviewRef}
+                  tabIndex={-1}
+                >
                   <div className="source-card__head">
                     <span><ShieldCheck size={18} /> 行前事实核对</span>
                     <strong>{completedReviewCount}/{reviewItems.length} 已完成</strong>
@@ -1557,134 +1741,6 @@ export function WorkspacePage() {
                   </button>
                 </section>
               )}
-              <section className="explanation-card">
-                <div className="explanation-card__head">
-                  <span><Sparkles size={18} /> Agent 推荐理由</span>
-                  <small>可解释</small>
-                </div>
-                <p>优先满足{planningDraft?.interests.slice(0, 2).join('和') || '历史文化和特色餐饮'}偏好，在满足{planningDraft?.assistanceMode === 'standard' ? '时间与预算' : '关怀'}约束的前提下，减少无效折返并保留返程缓冲。</p>
-                <div className="reason-tags">
-                  <span>高德地点 {locationEvidence?.places.length ?? activePlan.tasks.length} 个</span>
-                  <span>真实路线 {locationEvidence?.routes.length ?? activePlan.tasks.length} 段</span>
-                  <span>未知价格 {unknownPriceCount} 项</span>
-                </div>
-              </section>
-              <section className="source-card">
-                <div className="source-card__head">
-                  <span><Layers3 size={18} /> 数据可信状态</span>
-                  <strong className="city-code-chip">
-                    {displayedCityCode ? `cityCode ${displayedCityCode}` : '正在核验城市'}
-                  </strong>
-                </div>
-                <div>
-                  <Telescope size={15} />
-                  <span>地点与路线</span>
-                  <strong>{locationProvenance ? formatSource(locationProvenance) : '加载中'}</strong>
-                </div>
-                <div>
-                  <CircleDollarSign size={15} />
-                  <span>Provider 价格</span>
-                  <strong className={priceProvenance?.sourceStatus === 'UNKNOWN' ? 'needs-confirmation' : ''}>
-                    {serverPlanReady
-                      ? 'Provider 原值 + 用户确认 · 已完整'
-                      : knownPrice?.amountCents !== null && knownPrice?.amountCents !== undefined
-                      ? `${formatMoney(knownPrice.amountCents)} · ${sourceStatusLabels[knownPrice.provenance.sourceStatus]}`
-                      : priceProvenance
-                        ? '未知待确认'
-                        : '加载中'}
-                  </strong>
-                </div>
-                <div>
-                  <Wallet size={15} />
-                  <span>计划费用</span>
-                  <strong className={unknownPriceCount > 0 ? 'needs-confirmation' : ''}>
-                    高德已知 {formatMoney(activePlan.totalCostCents)} · {unknownPriceCount} 项未知
-                  </strong>
-                </div>
-                <div>
-                  <MapPin size={15} />
-                  <span>路线设施证据</span>
-                  <strong className={facilityNeedsConfirmation ? 'needs-confirmation' : ''}>
-                    {serverPlanReady
-                      ? '用户确认后服务端已复算'
-                      : facilityNeedsConfirmation
-                      ? `${Math.max(1, facilityEvidence.filter(facilityEvidenceNeedsConfirmation).length)} 项待确认`
-                      : '已核验'}
-                  </strong>
-                </div>
-              </section>
-              <section className="provider-evidence-card">
-                <div className="source-card__head">
-                  <span><BadgeCheck size={18} /> 同城 Provider 证据</span>
-                  {isLoadingLocationEvidence && <LoaderCircle className="spin-icon" size={15} />}
-                </div>
-                {locationEvidence ? (
-                  <>
-                    <p>
-                      “{locationEvidence.queries.join(' / ')}”候选仅来自
-                      {locationEvidence.city.cityContext.cityName}（{locationEvidence.city.cityContext.cityCode}），
-                      不会读取其他城市缓存。
-                    </p>
-                    <div className="provider-place-list">
-                      {locationEvidence.places.length > 0 ? locationEvidence.places.slice(0, 3).map((place) => (
-                        <article key={place.placeId}>
-                          <div>
-                            <strong>{place.name}</strong>
-                            <small>{place.address || '地址待 Provider 补充'}</small>
-                          </div>
-                          <div>
-                            <span>{formatSource(place.provenance)}</span>
-                            <b className={place.priceReference.amountCents === null ? 'needs-confirmation' : ''}>
-                              {place.priceReference.amountCents === null
-                                ? serverPlanReady
-                                  ? '用户已确认并复算'
-                                  : '价格未知待确认'
-                                : `参考 ${formatMoney(place.priceReference.amountCents)}`}
-                            </b>
-                          </div>
-                        </article>
-                      )) : <p className="provider-evidence-empty">该关键词暂无同城候选。</p>}
-                    </div>
-                    {locationEvidence.routes.map((route, index) => (
-                      <div className="provider-route-evidence" key={route.routeId}>
-                        <Route size={17} />
-                        <span>
-                          <strong>
-                            {index === 0
-                              ? candidateRequest?.trip.days[0].startLocationText ?? '行程起点'
-                              : locationEvidence.places[index - 1]?.name}
-                            {' → '}{locationEvidence.places[index]?.name}
-                          </strong>
-                          <small>
-                            {routeModeLabels[route.mode]} {route.distanceMeters} 米 · 约
-                            {Math.max(1, Math.round(route.durationSeconds / 60))} 分钟 ·
-                            {formatSource(route.provenance)}
-                          </small>
-                        </span>
-                      </div>
-                    ))}
-                  </>
-                ) : storedCurrentPlan ? (
-                  <>
-                    <p>
-                      已从不可变 PlanVersion 恢复 {storedProviderSources.length} 条 AMAP 来源快照；
-                      cityCode 为 {storedCurrentPlan.tripSnapshot.cityContext.cityCode}。
-                    </p>
-                    <div className="provider-route-evidence">
-                      <Layers3 size={17} />
-                      <span>
-                        <strong>来源快照已恢复</strong>
-                        <small>页面刷新不会把 Provider 来源改写为 Mock；重新搜索需要从新建行程页进入。</small>
-                      </span>
-                    </div>
-                  </>
-                ) : isLoadingLocationEvidence ? (
-                  <p>正在向高德 Web 服务核验城市、地点候选和路线……</p>
-                ) : (
-                  <p>当前页面没有可恢复的城市输入，请从“新建行程”重新进入。</p>
-                )}
-                {locationEvidenceError && <p className="media-error">{locationEvidenceError}</p>}
-              </section>
               {isFeedbackOpen ? (
                 <section className="recommendation-feedback motion-enter">
                   <div className="recommendation-feedback__head">
@@ -1733,17 +1789,15 @@ export function WorkspacePage() {
                   </button>
                   <button
                     className="button button--primary"
-                    disabled={isConfirmingPlan || !serverPlanReady}
-                    onClick={handleAcceptPlan}
+                    disabled={isConfirmingPlan || isConfirmingEvidence || changingRouteIndex !== null}
+                    onClick={handlePlanPrimaryAction}
                     type="button"
                   >
-                    {isConfirmingPlan ? <LoaderCircle className="spin-icon" size={17} /> : null}
-                    {isConfirmingPlan
-                      ? '正在确认…'
-                      : serverPlanReady
-                        ? '接受推荐并确认 Plan V1'
-                        : '证据待确认，暂不可接受'}
-                    {!isConfirmingPlan && <ArrowRight size={18} />}
+                    {(isConfirmingPlan || isConfirmingEvidence)
+                      ? <LoaderCircle className="spin-icon" size={17} />
+                      : null}
+                    {primaryActionLabel}
+                    {!isConfirmingPlan && !isConfirmingEvidence && <ArrowRight size={18} />}
                   </button>
                   {planLifecycleError && <p className="media-error">{planLifecycleError}</p>}
                 </div>
