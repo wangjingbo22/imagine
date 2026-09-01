@@ -40,7 +40,7 @@ Render 的临时文件系统会在重新部署或实例替换时丢失 SQLite �
 `/app/data/account.sqlite3`，行程库与高德缓存也使用同一持久目录。创建 Blueprint 时无需
 再手动补挂载，但应确认 Render 服务仍保留该磁盘配置。
 
-S2-T032 当前仍为 `LOCAL_AUTOMATION_PASS / PUBLIC_UAT_NOT_RUN`。真实高德/百炼、三浏览器成员会话、GPS/相机权限和 375px/768px 公网连续链路，必须按仓库中的专项验收文档单独留证。
+S2-T032 当前仍为 `LOCAL_AUTOMATION_PASS / PUBLIC_UAT_NOT_RUN`；S3-T004 仍是“代码和发布材料就绪，真实 Render/设备验收未完成”。真实高德/百炼、账户重启留存、三浏览器成员会话、GPS/相机权限和 375px/768px 公网连续链路，必须按仓库中的专项验收文档单独留证。
 
 首次部署后检查：
 
