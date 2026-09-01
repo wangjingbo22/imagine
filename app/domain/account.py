@@ -57,12 +57,14 @@ class LogoutResult(AccountModel):
 class ModelSettingsUpdateRequest(AccountModel):
     model: Annotated[str, Field(pattern=r"^qwen-(turbo|plus|max)$")]
     api_key: Annotated[str, Field(min_length=16, max_length=512)]
+    base_url: Annotated[str, Field(min_length=12, max_length=300)]
 
 
 class ModelSettingsView(AccountModel):
     configured: bool
     model: str | None = None
     key_hint: str | None = None
+    base_url: str | None = None
 
 
 def normalized_email(email: str | EmailStr) -> str:

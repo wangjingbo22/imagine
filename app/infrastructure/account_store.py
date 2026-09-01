@@ -87,6 +87,9 @@ class SqliteAccountRepository:
                 user_id TEXT PRIMARY KEY, model TEXT NOT NULL, encrypted_api_key TEXT NOT NULL,
                 updated_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users (user_id))"""
             )
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(account_model_settings)")}
+            if "base_url" not in columns:
+                connection.execute("ALTER TABLE account_model_settings ADD COLUMN base_url TEXT NOT NULL DEFAULT 'https://dashscope.aliyuncs.com/compatible-mode/v1'")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS account_sessions (
@@ -258,15 +261,15 @@ class SqliteAccountRepository:
                 (now, hash_session_token(token)),
             )
 
-    def save_model_settings(self, user_id: UUID, *, model: str, encrypted_api_key: str) -> None:
+    def save_model_settings(self, user_id: UUID, *, model: str, encrypted_api_key: str, base_url: str) -> None:
         with closing(self._connect()) as connection:
-            connection.execute("""INSERT INTO account_model_settings(user_id,model,encrypted_api_key,updated_at)
-            VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET model=excluded.model, encrypted_api_key=excluded.encrypted_api_key, updated_at=excluded.updated_at""", (str(user_id), model, encrypted_api_key, self._utc(self._clock()).isoformat()))
+            connection.execute("""INSERT INTO account_model_settings(user_id,model,encrypted_api_key,base_url,updated_at)
+            VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET model=excluded.model, encrypted_api_key=excluded.encrypted_api_key, base_url=excluded.base_url, updated_at=excluded.updated_at""", (str(user_id), model, encrypted_api_key, base_url, self._utc(self._clock()).isoformat()))
 
-    def get_model_settings(self, user_id: UUID) -> tuple[str, str] | None:
+    def get_model_settings(self, user_id: UUID) -> tuple[str, str, str] | None:
         with closing(self._connect()) as connection:
-            row = connection.execute("SELECT model, encrypted_api_key FROM account_model_settings WHERE user_id = ?", (str(user_id),)).fetchone()
-        return (row["model"], row["encrypted_api_key"]) if row else None
+            row = connection.execute("SELECT model, encrypted_api_key, base_url FROM account_model_settings WHERE user_id = ?", (str(user_id),)).fetchone()
+        return (row["model"], row["encrypted_api_key"], row["base_url"]) if row else None
 
     def delete_model_settings(self, user_id: UUID) -> None:
         with closing(self._connect()) as connection:

@@ -13,6 +13,8 @@ services:
         sync: false
       - key: BAILIAN_API_KEY
         sync: false
+      - key: ACCOUNT_API_KEY_ENCRYPTION_KEY
+        sync: false
       - key: BAILIAN_BASE_URL
         value: https://dashscope.aliyuncs.com/compatible-mode/v1
       - key: BAILIAN_MODEL

@@ -10,7 +10,9 @@
 Render 会为两个服务自动签发 HTTPS 证书，并为每个服务提供 `onrender.com`
 二级域名。创建 Blueprint 后，需要在 API 服务中填写
 `AMAP_WEB_SERVICE_KEY`。要启用百炼自然语言识别，还必须填写
-`BAILIAN_API_KEY`；两项都应使用 Render Secret，不能提交真实值。
+`BAILIAN_API_KEY`；两项都应使用 Render Secret，不能提交真实值。若启用“用户自带
+API Key / 模型设置”，还必须设置 `ACCOUNT_API_KEY_ENCRYPTION_KEY` 为 Fernet 密钥。
+该值用来加密账户库中的用户 Key，丢失或更换后将无法读取旧的已绑定 Key。
 
 当前公网地址是独立部署快照。部署后应通过 API 健康检查中的 `buildSha` 确认实际版本；公网可访问不等于最新 `main` 已部署，也不等于 S2-T032 多人公网验收通过。
 
@@ -23,8 +25,14 @@ Render 会为两个服务自动签发 HTTPS 证书，并为每个服务提供 `o
 2. 在 Render 选择 **New > Blueprint** 并连接仓库。若名称已被占用，将
    `render.yaml` 中两个 `name` 改成你自己的唯一名称，并同步修改前端的
    `API_UPSTREAM` 与后端的 `CORS_ALLOWED_ORIGINS`。
-3. 在 API 服务的 Environment 中填入 `AMAP_WEB_SERVICE_KEY` 和新建的
-   `BAILIAN_API_KEY`，保存并手动重新部署 API。
+3. 在 API 服务的 Environment 中填入 `AMAP_WEB_SERVICE_KEY`、`BAILIAN_API_KEY`，并以
+   Render Secret 新建 `ACCOUNT_API_KEY_ENCRYPTION_KEY`。可在安全环境生成：
+
+   ```bash
+   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   ```
+
+   保存后手动重新部署 API；此主密钥必须长期稳定，不能在每次部署时重新生成。
 4. 打开 Web 服务的 `https://<web-service-name>.onrender.com` 地址。
 
 Render 的临时文件系统会在重新部署或实例替换时丢失 SQLite 数据。仓库的 Render Blueprint
@@ -53,6 +61,7 @@ curl -I https://<web-service-name>.onrender.com/workspace
 
 ```bash
 cp .env.example .env
+# 填入 ACCOUNT_API_KEY_ENCRYPTION_KEY（Fernet 密钥）及需要的 Provider Key
 docker compose -f docker-compose.prod.yml up --build
 ```
 
@@ -76,3 +85,5 @@ curl -I http://localhost:8080/workspace
 - 后端通过 `CORS_ALLOWED_ORIGINS` 配置允许的前端 HTTPS 域名，多个域名用逗号分隔。
 - SQLite 数据路径为 `/app/data`；在 Render 控制台加 Persistent Disk 后才会跨部署保留。
 - 不得在镜像、日志或仓库中写入高德或百炼 Key。
+- `ACCOUNT_API_KEY_ENCRYPTION_KEY` 是服务器端主密钥，仅保存为部署平台 Secret；它与
+  `/app/data/account.sqlite3` Persistent Disk 必须一起长期保留，才能继续读取用户已绑定的 API Key。

@@ -52,18 +52,18 @@ async def _parse_with_user_model(
     service: TripDraftParserService,
     payload: TripDraftParseRequest,
 ):
-    """Use an optional browser-session key for this request only; never persist it."""
+    """Only a configured account may invoke an LLM; no server-key fallback exists."""
     token = request.cookies.get("account_session")
     if not token:
-        return await service.parse(payload)
+        return await _parse_without_llm(service, payload)
     credentials = request.app.state.account_service.user_model_credentials(token)
     if credentials is None:
-        return await service.parse(payload)
-    model, api_key = credentials
+        return await _parse_without_llm(service, payload)
+    model, api_key, base_url = credentials
     settings = request.app.state.settings
     extractor = BailianTripDraftExtractor(
         api_key=api_key,
-        base_url=settings.bailian_base_url,
+        base_url=base_url,
         model=model,
         timeout_seconds=settings.bailian_request_timeout_seconds,
     )
@@ -75,3 +75,14 @@ async def _parse_with_user_model(
         return await ephemeral_service.parse(payload)
     finally:
         await extractor.close()
+
+
+async def _parse_without_llm(
+    service: TripDraftParserService,
+    payload: TripDraftParseRequest,
+):
+    """Keep explicit-form parsing available while guaranteeing no model request."""
+    return await TripDraftParserService(
+        city_resolver=service._city_resolver,
+        llm_extractor=None,
+    ).parse(payload)

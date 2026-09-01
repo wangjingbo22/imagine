@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+from urllib.parse import urlparse
 from cryptography.fernet import Fernet, InvalidToken
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -129,22 +130,26 @@ class AccountService:
     def model_settings(self, token: str | None) -> ModelSettingsView:
         user = self.current_user(token)
         stored = self.repository.get_model_settings(user.user_id)
-        return ModelSettingsView(configured=stored is not None, model=stored[0] if stored else None, key_hint=("••••" + self._decrypt(stored[1])[-4:]) if stored else None)
+        return ModelSettingsView(configured=stored is not None, model=stored[0] if stored else None, key_hint=("••••" + self._decrypt(stored[1])[-4:]) if stored else None, base_url=stored[2] if stored else None)
 
     def update_model_settings(self, token: str | None, payload: ModelSettingsUpdateRequest) -> ModelSettingsView:
         user = self.current_user(token)
         if self._cipher is None:
             raise AppError("ACCOUNT_KEY_STORAGE_UNAVAILABLE", "服务端未配置 API Key 加密密钥", 503, False)
-        self.repository.save_model_settings(user.user_id, model=payload.model, encrypted_api_key=self._cipher.encrypt(payload.api_key.encode()).decode())
-        return ModelSettingsView(configured=True, model=payload.model, key_hint="••••" + payload.api_key[-4:])
+        parsed = urlparse(payload.base_url)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise AppError("ACCOUNT_MODEL_BASE_URL_INVALID", "模型 API 地址必须是 HTTPS URL", 422, False)
+        base_url = payload.base_url.rstrip("/")
+        self.repository.save_model_settings(user.user_id, model=payload.model, encrypted_api_key=self._cipher.encrypt(payload.api_key.encode()).decode(), base_url=base_url)
+        return ModelSettingsView(configured=True, model=payload.model, key_hint="••••" + payload.api_key[-4:], base_url=base_url)
 
     def delete_model_settings(self, token: str | None) -> None:
         self.repository.delete_model_settings(self.current_user(token).user_id)
 
-    def user_model_credentials(self, token: str | None) -> tuple[str, str] | None:
+    def user_model_credentials(self, token: str | None) -> tuple[str, str, str] | None:
         user = self.current_user(token)
         stored = self.repository.get_model_settings(user.user_id)
-        return (stored[0], self._decrypt(stored[1])) if stored else None
+        return (stored[0], self._decrypt(stored[1]), stored[2]) if stored else None
 
     def _decrypt(self, value: str) -> str:
         if self._cipher is None:

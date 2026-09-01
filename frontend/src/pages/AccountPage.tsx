@@ -16,7 +16,7 @@ type AccountMode = 'login' | 'register'
 
 function safeReturnPath(search: string): string | null {
   const returnTo = new URLSearchParams(search).get('returnTo')
-  return returnTo === '/parent-join' ? returnTo : null
+  return returnTo === '/parent-join' || returnTo === '/model-settings' ? returnTo : null
 }
 
 function errorMessage(error: unknown, fallback: string): string {

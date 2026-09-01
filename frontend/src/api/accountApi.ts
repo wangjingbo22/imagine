@@ -40,5 +40,5 @@ export function updateAccountProfile(input: ProfileUpdateInput) {
 }
 
 export function getModelSettings() { return request<ModelSettingsView>('/api/v1/account/me/model-settings') }
-export function saveModelSettings(input: { model: string; apiKey: string }) { return request<ModelSettingsView>('/api/v1/account/me/model-settings', { method: 'PUT', body: JSON.stringify(input) }) }
+export function saveModelSettings(input: { model: string; apiKey: string; baseUrl: string }) { return request<ModelSettingsView>('/api/v1/account/me/model-settings', { method: 'PUT', body: JSON.stringify(input) }) }
 export function deleteModelSettings() { return request<ModelSettingsView>('/api/v1/account/me/model-settings', { method: 'DELETE' }) }
