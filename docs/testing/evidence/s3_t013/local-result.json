@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "1.0",
+  "taskId": "S3-T013",
+  "traceability": {
+    "pbi": "PBI-20-A",
+    "ac": "AC-20-A"
+  },
+  "baseline": "1d27faf735b0e1b2553344293af2ba8767f426bb",
+  "executedOn": "2026-09-01",
+  "status": "LOCAL_AUTOMATION_PASS",
+  "publicUat": "NOT_RUN",
+  "scenarios": [
+    {
+      "dayCount": 2,
+      "result": "PASS"
+    },
+    {
+      "dayCount": 3,
+      "result": "PASS"
+    }
+  ],
+  "viewports": [
+    "375x812",
+    "768x1024",
+    "1366x900",
+    "1440x900"
+  ],
+  "results": {
+    "t013Playwright": "8 passed",
+    "focusedBackend": "23 passed",
+    "s3QualityGate": "816 passed, 2 skipped; PASS",
+    "frontendContracts": "107 passed",
+    "frontendBuild": "PASS",
+    "frontendLint": "PASS with 2 pre-existing warnings"
+  },
+  "excluded": [
+    "public physical-device UAT",
+    "real GPS/photo capture",
+    "real AMAP/Bailian generation",
+    "acceptance signatures",
+    "email verification/password recovery",
+    "payments",
+    "chat/WebSocket/voting"
+  ]
+}
