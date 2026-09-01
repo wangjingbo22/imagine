@@ -350,6 +350,44 @@ export interface CandidatePlanRequest {
   confirmedConstraints: PlanningConstraint[]
 }
 
+export interface CandidatePlanPreviewMetrics {
+  totalCostCents: number | null
+  knownTotalCostCents: number
+  unknownAmountCount: number
+  budgetLimitCents: number
+  knownBudgetBufferCents: number
+  totalWalkMeters: number
+  transferCount: number
+  validationStatus: 'PASS' | 'NEEDS_CONFIRMATION'
+}
+
+export interface CandidatePlanPreviewConstraintResult {
+  ruleId: string
+  scope: string
+  hardness: 'HARD' | 'SOFT'
+  status: 'PASS' | 'NEEDS_CONFIRMATION' | 'FAIL'
+  referenceId: string | null
+  observed: Record<string, unknown>
+  suggestion: string | null
+}
+
+export interface CandidatePlanPreviewWarning {
+  code: 'UNKNOWN_PRICE' | 'UNKNOWN_SOURCE' | 'UNKNOWN_FACILITY'
+  severity: 'WARNING'
+  resolution: 'NEEDS_CONFIRMATION'
+  referenceId: string
+  field: string
+  message: string
+}
+
+export interface CandidatePlanPreview {
+  schemaVersion: '1.0'
+  validationStatus: 'PASS' | 'NEEDS_CONFIRMATION' | 'FAIL'
+  metrics: CandidatePlanPreviewMetrics | null
+  constraintResults: CandidatePlanPreviewConstraintResult[]
+  warnings: CandidatePlanPreviewWarning[]
+}
+
 export interface PlanTripSnapshot extends Omit<CreateDayTrip, 'status'> {
   status: 'PLAN_REVIEW'
 }

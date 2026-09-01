@@ -9,7 +9,10 @@ import type {
   ProviderRoute,
 } from '../src/domain/trip.ts'
 import { compileAssistanceConstraints } from '../src/services/assistanceConstraints.ts'
-import { buildCandidateRequestFromConfirmedTrip } from '../src/services/candidateRequestBuilder.ts'
+import {
+  buildCandidateRequestFromConfirmedTrip,
+  replaceCandidateSegmentRoute,
+} from '../src/services/candidateRequestBuilder.ts'
 
 const provenance = {
   provider: 'AMAP' as const,
@@ -200,4 +203,67 @@ test('candidate builder rejects a fake final place or a route that misses the en
     ),
     /第 4 段路线终点与对应地点不一致/,
   )
+})
+
+test('segment replacement preserves the prefix and places while rebuilding suffix clocks', () => {
+  const input = fixture()
+  input.confirmedTrip.participants[0].assistanceProfile!.restInterval = null
+  const base = buildCandidateRequestFromConfirmedTrip(
+    input.confirmedTrip,
+    input.startLocation,
+    input.endLocation,
+    input.places,
+    input.routes,
+  )
+  const before = structuredClone(base)
+  const replacement = {
+    ...route('route-2-driving', input.places[0].location, input.places[1].location),
+    mode: 'DRIVING' as const,
+    durationSeconds: 2_400,
+    distanceMeters: 4_500,
+    priceReference: {
+      ...input.routes[1].priceReference,
+      amountCents: 2_500,
+      kind: 'TAXI_ESTIMATE',
+    },
+  }
+
+  const rebuilt = replaceCandidateSegmentRoute(base, 1, replacement)
+
+  assert.deepEqual(base, before)
+  assert.deepEqual(
+    rebuilt.taskFacts.map((fact) => fact.place.placeId),
+    base.taskFacts.map((fact) => fact.place.placeId),
+  )
+  assert.deepEqual(rebuilt.taskFacts[0], base.taskFacts[0])
+  assert.equal(rebuilt.taskFacts[1].route.routeId, 'route-2-driving')
+  assert.deepEqual(rebuilt.taskFacts[2].route, base.taskFacts[2].route)
+  assert.notEqual(rebuilt.taskFacts[2].startAt, base.taskFacts[2].startAt)
+  assert.notEqual(
+    rebuilt.taskFacts[2].elapsedSinceRestMinutes,
+    base.taskFacts[2].elapsedSinceRestMinutes,
+  )
+})
+
+test('segment replacement rejects an endpoint mismatch without changing the base request', () => {
+  const input = fixture()
+  const base = buildCandidateRequestFromConfirmedTrip(
+    input.confirmedTrip,
+    input.startLocation,
+    input.endLocation,
+    input.places,
+    input.routes,
+  )
+  const before = structuredClone(base)
+  const mismatch = route(
+    'route-mismatch',
+    { longitude: 1, latitude: 2 },
+    input.places[1].location,
+  )
+
+  assert.throws(
+    () => replaceCandidateSegmentRoute(base, 1, mismatch),
+    /origin|起点/i,
+  )
+  assert.deepEqual(base, before)
 })

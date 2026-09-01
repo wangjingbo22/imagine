@@ -3,6 +3,7 @@ import type {
   AddressResolution,
   AssistanceProfile,
   CandidatePlanRequest,
+  CandidatePlanPreview,
   CandidatePlanReview,
   CandidateReviewConfirmationInput,
   CityResolution,
@@ -208,6 +209,21 @@ export const tripApi = {
       {
         method: 'POST',
         headers: organizerToken ? { 'X-Organizer-Token': organizerToken } : undefined,
+        body: JSON.stringify(candidate),
+      },
+    )
+  },
+
+  previewCandidatePlan(
+    tripId: string,
+    candidate: CandidatePlanRequest,
+    organizerToken?: string | null,
+  ) {
+    return request<CandidatePlanPreview>(
+      `/api/v1/trips/${encodeURIComponent(tripId)}/plan-previews/validate`,
+      {
+        method: 'POST',
+        headers: organizerHeaders(organizerToken),
         body: JSON.stringify(candidate),
       },
     )

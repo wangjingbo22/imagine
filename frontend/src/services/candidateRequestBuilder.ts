@@ -65,6 +65,13 @@ function samePoint(left: GeoPoint, right: GeoPoint) {
   return left.longitude === right.longitude && left.latitude === right.latitude
 }
 
+export class CandidateScheduleError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'CandidateScheduleError'
+  }
+}
+
 function normalizedText(value: string) {
   return value.trim().replaceAll(/\s+/g, '').toLowerCase()
 }
@@ -175,4 +182,63 @@ export function buildCandidateRequestFromConfirmedTrip(
     taskFacts,
     confirmedConstraints,
   }
+}
+
+export function replaceCandidateSegmentRoute(
+  baseRequest: CandidatePlanRequest,
+  segmentIndex: number,
+  replacementRoute: ProviderRoute,
+): CandidatePlanRequest {
+  if (!Number.isInteger(segmentIndex) || segmentIndex < 0 || segmentIndex >= baseRequest.taskFacts.length) {
+    throw new RangeError('segment index is outside the candidate route facts')
+  }
+  const replacedFact = baseRequest.taskFacts[segmentIndex]
+  if (!samePoint(replacementRoute.origin, replacedFact.route.origin)) {
+    throw new Error('replacement route origin does not match the selected segment origin')
+  }
+  if (!samePoint(replacementRoute.destination, replacedFact.route.destination)) {
+    throw new Error('replacement route destination does not match the selected segment destination')
+  }
+
+  const day = baseRequest.trip.days[0]
+  const care = planningCareFromConstraints(baseRequest.confirmedConstraints)
+  const suffixRoutes = baseRequest.taskFacts
+    .slice(segmentIndex)
+    .map((fact, index) => index === 0 ? replacementRoute : fact.route)
+  let suffixRanges: Array<{ startAt: string; endAt: string }>
+  try {
+    suffixRanges = scheduleTaskRanges(
+      suffixRoutes,
+      segmentIndex === 0 ? day.timeWindow.start : baseRequest.taskFacts[segmentIndex - 1].endAt,
+      day.timeWindow.end,
+      care.napWindow,
+      care.restInterval,
+    )
+  } catch (error) {
+    throw new CandidateScheduleError(
+      error instanceof Error ? error.message : 'replacement route cannot fit the confirmed day window',
+    )
+  }
+
+  const provisionalFacts = baseRequest.taskFacts.map((fact, index) => {
+    if (index < segmentIndex) return fact
+    const suffixIndex = index - segmentIndex
+    return {
+      ...fact,
+      route: suffixRoutes[suffixIndex],
+      startAt: suffixRanges[suffixIndex].startAt,
+      endAt: suffixRanges[suffixIndex].endAt,
+    }
+  })
+  const elapsedSinceRestMinutes = calculateElapsedSinceRestMinutes(
+    provisionalFacts.map((fact) => fact.route),
+    provisionalFacts.map((fact) => ({ startAt: fact.startAt, endAt: fact.endAt })),
+    day.timeWindow.start,
+    care.napWindow,
+  )
+  const taskFacts = provisionalFacts.map((fact, index) => index < segmentIndex
+    ? fact
+    : { ...fact, elapsedSinceRestMinutes: elapsedSinceRestMinutes[index] })
+
+  return { ...baseRequest, taskFacts }
 }

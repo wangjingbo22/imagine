@@ -3,6 +3,7 @@ import { ApiError } from '../api/client'
 import type {
   AddressResolution,
   CandidateEndpointFact,
+  CandidatePlanPreview,
   CandidatePlanReview,
   CandidatePlanRequest,
   CandidatePlanningTrip,
@@ -21,6 +22,8 @@ import type {
 import {
   buildCandidateRequestFromConfirmedTrip,
   buildCandidateTaskFacts,
+  CandidateScheduleError,
+  replaceCandidateSegmentRoute,
 } from './candidateRequestBuilder'
 import {
   compileGroupAssistanceConstraints,
@@ -76,6 +79,15 @@ export interface AmapReplanCandidateResult {
   unknownPriceCount: number
 }
 
+export interface AmapSegmentReplacementResult {
+  evidence: {
+    segmentIndex: number
+    route: ProviderRoute
+  }
+  candidateRequest: CandidatePlanRequest | null
+  preview: CandidatePlanPreview
+}
+
 export interface AmapPlanOptions {
   extraQueries?: string[]
   excludePlaceIds?: string[]
@@ -119,7 +131,7 @@ let providerQueue: Promise<void> = Promise.resolve()
 let lastProviderRequestAt = 0
 
 function delay(milliseconds: number) {
-  return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds))
+  return new Promise<void>((resolve) => globalThis.setTimeout(resolve, milliseconds))
 }
 
 function scheduleProviderOperation<T>(operation: () => Promise<T>) {
@@ -408,40 +420,27 @@ function directDistanceMeters(origin: GeoPoint, destination: GeoPoint) {
   return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
-const comfortableWalkDistanceMeters = 1_800
-const practicalBicycleDistanceMeters = 8_000
+export const DEFAULT_WALK_LIMIT_METERS = 1_000
 
-export function routeModeCandidates(
-  directDistance: number,
-  maxWalkMeters: number,
-  cyclingAllowed = false,
-): TravelMode[] {
-  const walkThreshold = Math.min(maxWalkMeters, comfortableWalkDistanceMeters)
-  if (directDistance <= walkThreshold) {
-    return unique([
-      'WALKING',
-      cyclingAllowed ? 'BICYCLING' : 'TRANSIT',
-      'TRANSIT',
-      'DRIVING',
-    ]) as TravelMode[]
-  }
-  if (cyclingAllowed && directDistance <= practicalBicycleDistanceMeters) {
-    return ['BICYCLING', 'TRANSIT', 'DRIVING', 'WALKING']
-  }
-  return unique([
-    'TRANSIT',
-    cyclingAllowed ? 'BICYCLING' : 'DRIVING',
-    'DRIVING',
-    'WALKING',
-  ]) as TravelMode[]
+export function defaultModeForWalkingRoute(
+  route: ProviderRoute,
+  maxWalkMeters: number | null,
+): 'WALKING' | 'DRIVING' {
+  const careLimit = maxWalkMeters === null
+    ? Number.POSITIVE_INFINITY
+    : maxWalkMeters
+  return route.mode === 'WALKING' &&
+    route.distanceMeters <= DEFAULT_WALK_LIMIT_METERS &&
+    route.distanceMeters <= careLimit
+    ? 'WALKING'
+    : 'DRIVING'
 }
 
-function orderByShortestNextSegment(places: Place[]) {
-  if (places.length <= 2) return places
-  const ordered = [places[0]]
-  const remaining = places.slice(1)
+export function orderByShortestNextSegment(places: Place[], seed: GeoPoint) {
+  const ordered: Place[] = []
+  const remaining = [...places]
+  let origin = seed
   while (remaining.length > 0) {
-    const origin = ordered[ordered.length - 1].location
     let nearestIndex = 0
     let nearestDistance = Number.POSITIVE_INFINITY
     remaining.forEach((place, index) => {
@@ -451,7 +450,9 @@ function orderByShortestNextSegment(places: Place[]) {
         nearestIndex = index
       }
     })
-    ordered.push(remaining.splice(nearestIndex, 1)[0])
+    const nearest = remaining.splice(nearestIndex, 1)[0]
+    ordered.push(nearest)
+    origin = nearest.location
   }
   return ordered
 }
@@ -478,6 +479,44 @@ async function requestFirstRoute(
   return route
 }
 
+export async function requestDefaultAmapRoute(
+  tripId: string,
+  city: CityResolution,
+  origin: GeoPoint,
+  destination: GeoPoint,
+  maxWalkMeters: number | null,
+  organizerToken?: string | null,
+) {
+  let walking: ProviderRoute | null = null
+  try {
+    walking = await providerCall(() => requestFirstRoute(
+      tripId,
+      city,
+      origin,
+      destination,
+      'WALKING',
+      organizerToken,
+    ))
+  } catch {
+    // A walking failure still permits the single explicit driving default request.
+  }
+  if (
+    walking &&
+    hasCompleteRouteRiskFacts(walking) &&
+    defaultModeForWalkingRoute(walking, maxWalkMeters) === 'WALKING'
+  ) {
+    return walking
+  }
+  return providerCall(() => requestFirstRoute(
+    tripId,
+    city,
+    origin,
+    destination,
+    'DRIVING',
+    organizerToken,
+  ))
+}
+
 async function selectRoute(
   tripId: string,
   draft: TripDraftInput,
@@ -493,55 +532,21 @@ async function selectRoute(
     : confirmedCare !== undefined
       ? confirmedCare.maxContinuousMeters
       : draft.assistanceProfile.maxSegmentWalkMeters
-  const maxTransfers = confirmedCare !== undefined
-    ? confirmedCare.maxTransfers
-    : draft.assistanceProfile.maxTransfers
-  const maxWalk = maxWalkLimit === null
-    ? Number.POSITIVE_INFINITY
-    : Math.max(100, maxWalkLimit)
-  const directDistance = directDistanceMeters(origin, destination)
-  const cyclingAllowed = draft.assistanceMode !== 'low-mobility' &&
-    draft.assistanceMode !== 'assisted'
-  const attempts = routeModeCandidates(directDistance, maxWalk, cyclingAllowed)
-  let lastError: unknown
-  for (const mode of attempts) {
-    try {
-      const route = await providerCall(
-        () => requestFirstRoute(
-          tripId,
-          city,
-          origin,
-          destination,
-          mode,
-          organizerToken,
-        ),
-      )
-      if (!hasCompleteRouteRiskFacts(route)) {
-        continue
-      }
-      const walkMeters = routeWalkingMeters(route)
-      const transfers = route.transferCount ?? 0
-      if (
-        mode !== 'DRIVING' &&
-        (walkMeters > maxWalk || (
-          maxTransfers !== null && transfers > maxTransfers
-        ))
-      ) {
-        continue
-      }
-      return route
-    } catch (error) {
-      lastError = error
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error('高德没有返回满足关怀约束的路线')
+  return requestDefaultAmapRoute(
+    tripId,
+    city,
+    origin,
+    destination,
+    maxWalkLimit,
+    organizerToken,
+  )
 }
 
 function routeLabel(route: ProviderRoute) {
   const labels: Record<TravelMode, string> = {
     WALKING: '步行',
     TRANSIT: '公共交通',
-    DRIVING: '驾车',
+    DRIVING: '打车路线',
     BICYCLING: '骑行',
   }
   return `${labels[route.mode]} ${route.distanceMeters} 米 · ${Math.max(1, Math.round(route.durationSeconds / 60))} 分钟`
@@ -743,9 +748,10 @@ async function createAmapPlan(
         endpoints.startLocation.location,
         options,
       )
-  const intermediatePlaces = selection
-    ? collected.places
-    : orderByShortestNextSegment(collected.places).slice(0, 3)
+  const intermediatePlaces = orderByShortestNextSegment(
+    collected.places,
+    endpoints.startLocation.location,
+  ).slice(0, 3)
   const places = appendConfirmedReturnPlace(
     intermediatePlaces,
     endpoints.returnPlace,
@@ -903,7 +909,10 @@ export async function buildAmapReplanCandidate(
       ],
     },
   )
-  const replacementPlaces = orderByShortestNextSegment(collected.places)
+  const replacementPlaces = orderByShortestNextSegment(
+    collected.places,
+    previousFact?.place.location ?? baseRequest.startLocation.location,
+  )
     .slice(0, replaceableCount)
   if (replacementPlaces.length < replaceableCount) {
     throw new Error('高德没有返回足够的新地点，未生成 Plan V2。')
@@ -980,6 +989,84 @@ export async function buildAmapReplanCandidate(
     knownCostCents: plan.totalCostCents,
     unknownPriceCount: countUnknownPrices(candidateRequest),
   }
+}
+
+function localScheduleFailurePreview(
+  segmentIndex: number,
+  route: ProviderRoute,
+  message: string,
+): CandidatePlanPreview {
+  return {
+    schemaVersion: '1.0',
+    validationStatus: 'FAIL',
+    metrics: null,
+    constraintResults: [{
+      ruleId: 'local.day-window',
+      scope: 'DAY:0',
+      hardness: 'HARD',
+      status: 'FAIL',
+      referenceId: route.routeId,
+      observed: {
+        segmentIndex,
+        routeId: route.routeId,
+        mode: route.mode,
+        durationSeconds: route.durationSeconds,
+      },
+      suggestion: message,
+    }],
+    warnings: [],
+  }
+}
+
+export async function replaceAmapPlanSegment(
+  tripId: string,
+  baseRequest: CandidatePlanRequest,
+  segmentIndex: number,
+  mode: TravelMode,
+  organizerToken?: string | null,
+): Promise<AmapSegmentReplacementResult> {
+  if (baseRequest.trip.tripId !== tripId) {
+    throw new Error('candidate facts do not belong to the requested trip')
+  }
+  if (!Number.isInteger(segmentIndex) || segmentIndex < 0 || segmentIndex >= baseRequest.taskFacts.length) {
+    throw new RangeError('segment index is outside the candidate route facts')
+  }
+  const selectedFact = baseRequest.taskFacts[segmentIndex]
+  const response = await providerCall(() => tripApi.planRoute(
+    tripId,
+    baseRequest.trip.cityContext,
+    selectedFact.route.origin,
+    selectedFact.route.destination,
+    mode,
+    null,
+    organizerToken,
+  ))
+  const route = response.data.routes[0]
+  if (!route) {
+    throw new Error(`高德未返回 ${mode} 路线`)
+  }
+  if (route.mode !== mode) {
+    throw new Error(`高德返回的路线方式不是所选的 ${mode}`)
+  }
+
+  const evidence = { segmentIndex, route }
+  let candidateRequest: CandidatePlanRequest
+  try {
+    candidateRequest = replaceCandidateSegmentRoute(baseRequest, segmentIndex, route)
+  } catch (error) {
+    if (!(error instanceof CandidateScheduleError)) throw error
+    return {
+      evidence,
+      candidateRequest: null,
+      preview: localScheduleFailurePreview(segmentIndex, route, error.message),
+    }
+  }
+  const preview = (await tripApi.previewCandidatePlan(
+    tripId,
+    candidateRequest,
+    organizerToken,
+  )).data
+  return { evidence, candidateRequest, preview }
 }
 
 function planRequestKey(
