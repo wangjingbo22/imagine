@@ -77,6 +77,33 @@ async def generate_plan_v1(
     )
 
 
+@router.post(
+    "/trips/{trip_id}/plan-previews/validate",
+    summary="验证候选计划但不持久化",
+    description=(
+        "严格解析 CandidatePlanRequest 并重算 T011 约束；不会创建 "
+        "PlanVersion、可信候选事实或确认记录。"
+    ),
+)
+async def preview_plan_v1(
+    trip_id: UUID,
+    request: Request,
+    service: PlanningBoundaryService = Depends(get_planning_boundary),
+    _: tuple[str, str, str] = Depends(require_account_model_credentials),
+) -> ApiResponse:
+    access = build_planning_access(request, trip_id, PlanningOperation.GENERATE_V1)
+    try:
+        candidate_request = CandidatePlanRequest.model_validate_json(
+            await request.body(),
+            strict=True,
+        )
+    except ValidationError as error:
+        raise TripSchemaError(issues_from_pydantic(error.errors())) from error
+    return ApiResponse(
+        data=service.preview_v1(trip_id, candidate_request, access=access)
+    )
+
+
 @router.get(
     "/trips/{trip_id}/plan-reviews/{review_id}",
     summary="恢复待确认的候选事实",

@@ -264,6 +264,25 @@ class CandidatePlan(ContractModel):
         return self
 
 
+class CandidatePlanPreview(ContractModel):
+    """Non-persistent T011 validation result for a complete candidate."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    validation_status: Literal["PASS", "NEEDS_CONFIRMATION", "FAIL"]
+    metrics: CandidatePlanMetrics | None = None
+    constraint_results: tuple[CandidateConstraintResult, ...] = Field(min_length=1)
+    warnings: tuple[CandidatePlanWarning, ...] = ()
+
+    @classmethod
+    def from_candidate(cls, candidate: CandidatePlan) -> "CandidatePlanPreview":
+        return cls(
+            validation_status=candidate.metrics.validation_status,
+            metrics=candidate.metrics,
+            constraint_results=candidate.constraint_results,
+            warnings=candidate.warnings,
+        )
+
+
 class CandidateReviewItem(ContractModel):
     """One server-derived fact that must be explicitly confirmed by the user."""
 

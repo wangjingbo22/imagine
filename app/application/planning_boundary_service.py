@@ -56,6 +56,7 @@ from app.schemas.planning import (
 )
 from app.services.planning.models import (
     CandidatePlan,
+    CandidatePlanPreview,
     CandidatePlanRequest,
     CandidatePlanReview,
     CandidateReviewConfirmationRequest,
@@ -616,6 +617,30 @@ class PlanningBoundaryService:
                 readiness_permit=permit,
             )
 
+    def preview_v1(
+        self,
+        trip_id: UUID,
+        request: CandidatePlanRequest,
+        *,
+        access: PlanningAccess,
+    ) -> CandidatePlanPreview:
+        with self._planning_operation(
+            trip_id=trip_id,
+            access=access,
+            expected=PlanningOperation.GENERATE_V1,
+        ) as permit:
+            self._prepare_v1_request(trip_id, request, permit)
+            try:
+                candidate = generate_candidate_plan(request)
+            except CandidatePlanInputError as error:
+                raise self._planner_error(error) from error
+            except CandidatePlanRejected as error:
+                return CandidatePlanPreview(
+                    validation_status="FAIL",
+                    constraint_results=error.all_results,
+                )
+            return CandidatePlanPreview.from_candidate(candidate)
+
     def _generate_v1_ready(
         self,
         trip_id: UUID,
@@ -623,19 +648,7 @@ class PlanningBoundaryService:
         *,
         readiness_permit: ReadinessPermit,
     ) -> PlanVersion:
-        self._require_trip_id(trip_id, request)
-        if readiness_permit.flow_kind.value == "COLLABORATION_V2":
-            self._require_collaboration_request_matches_revision(
-                request,
-                readiness_permit,
-            )
-        else:
-            self.workflow_service.require_constraint_confirmed(
-                trip_id,
-                request.trip.participants[0].assistance_profile,
-            )
-            self.workflow_service.require_confirmed_trip(trip_id, request.trip)
-        self._require_parent_trip_places_unique(trip_id, request.task_facts)
+        self._prepare_v1_request(trip_id, request, readiness_permit)
         try:
             candidate = generate_candidate_plan(request)
         except CandidatePlanInputError as error:
@@ -690,6 +703,26 @@ class PlanningBoundaryService:
         except TrustedPlanningStoreError as error:
             raise self._trust_error(error) from error
         return stored
+
+    def _prepare_v1_request(
+        self,
+        trip_id: UUID,
+        request: CandidatePlanRequest,
+        readiness_permit: ReadinessPermit,
+    ) -> None:
+        self._require_trip_id(trip_id, request)
+        if readiness_permit.flow_kind.value == "COLLABORATION_V2":
+            self._require_collaboration_request_matches_revision(
+                request,
+                readiness_permit,
+            )
+        else:
+            self.workflow_service.require_constraint_confirmed(
+                trip_id,
+                request.trip.participants[0].assistance_profile,
+            )
+            self.workflow_service.require_confirmed_trip(trip_id, request.trip)
+        self._require_parent_trip_places_unique(trip_id, request.task_facts)
 
     def get_review(
         self,
