@@ -5,6 +5,8 @@ import test from 'node:test'
 
 test('T010 registers organizer invitation and resumable member routes', async () => {
   const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  assert.match(app, /<Route path="\/join\/:token" element=\{<MemberPageErrorBoundary><MemberConversationPage \/><\/MemberPageErrorBoundary>\} \/>/)
+  assert.doesNotMatch(app, /<RequireAccount><MemberPageErrorBoundary><MemberConversationPage/)
   assert.match(app, /\/parent-join\/:token/)
   assert.match(app, /\/parent-join"/)
   assert.match(app, /\/parent-trips\/:parentTripId\/member/)

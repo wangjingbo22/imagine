@@ -84,8 +84,8 @@ function App() {
       <Routes>
         <Route path="/" element={<RequireAccount><HomePage /></RequireAccount>} />
         <Route path="/plan" element={<RequireAccount><ConversationPlannerPage /></RequireAccount>} />
-        <Route path="/join" element={<RequireAccount><MemberPageErrorBoundary><MemberConversationPage /></MemberPageErrorBoundary></RequireAccount>} />
-        <Route path="/join/:token" element={<RequireAccount><MemberPageErrorBoundary><MemberConversationPage /></MemberPageErrorBoundary></RequireAccount>} />
+        <Route path="/join" element={<MemberPageErrorBoundary><MemberConversationPage /></MemberPageErrorBoundary>} />
+        <Route path="/join/:token" element={<MemberPageErrorBoundary><MemberConversationPage /></MemberPageErrorBoundary>} />
         <Route path="/recommendation/:tripId" element={<RequireAccount><RecommendationPage /></RequireAccount>} />
         <Route path="/generating" element={<RequireAccount><AgentProcessPage /></RequireAccount>} />
         <Route path="/workspace" element={<RequireAccount><WorkspacePage /></RequireAccount>} />
