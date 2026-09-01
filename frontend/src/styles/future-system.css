@@ -270,6 +270,31 @@ body,
 .proposal-status--pending,
 .evidence-review-row > button.is-confirmed { color: #155ebc; border-color: #c5dcfb; background: #edf5ff; }
 
+/* Deterministic fallback review keeps the same blue action semantics as the rest of the product. */
+.fallback-review-card,
+.member-fallback-review,
+.fallback-review-list li,
+.fallback-review-list li.is-reviewed {
+  border-color: #cbdff8;
+  background: #f7fbff;
+}
+.fallback-review-item__content > span { color: #1769e0; }
+.fallback-review-item__content strong { color: #163b67; }
+.fallback-review-item__content p { color: #59718e; }
+.fallback-review-item__actions label {
+  color: #155ebc;
+  border-color: #bfd9fb;
+  border-radius: 6px;
+  background: #ffffff;
+}
+.fallback-review-item__actions label:has(input:checked) {
+  color: #ffffff;
+  border-color: #1769e0;
+  background: #1769e0;
+}
+.fallback-review-item__actions input { accent-color: #1769e0; }
+.fallback-review-footer { border-top-color: #d5e4f6; }
+
 .parent-budget-summary strong,
 .parent-member-budget strong,
 .parent-day-date,
