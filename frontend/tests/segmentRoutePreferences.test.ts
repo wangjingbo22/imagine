@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
+import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 
 import { ApiError } from '../src/api/client.ts'
 import type {
@@ -19,6 +21,15 @@ import {
   requestDefaultAmapRoute,
 } from '../src/services/amapPlan.ts'
 import { buildCandidateRequestFromConfirmedTrip } from '../src/services/candidateRequestBuilder.ts'
+
+const workspaceSource = readFileSync(
+  fileURLToPath(new URL('../src/pages/WorkspacePage.tsx', import.meta.url)),
+  'utf8',
+)
+const pickerPath = fileURLToPath(
+  new URL('../src/components/SegmentRouteModePicker.tsx', import.meta.url),
+)
+const pickerSource = existsSync(pickerPath) ? readFileSync(pickerPath, 'utf8') : ''
 
 const provenance = {
   provider: 'AMAP' as const,
@@ -183,6 +194,23 @@ const passingPreview: CandidatePlanPreview = {
   }],
   warnings: [],
 }
+
+test('workspace exposes safe per-segment mode controls with retry and V1 lockout', () => {
+  assert.match(workspaceSource, /SegmentRouteModePicker/)
+  assert.match(pickerSource, /DRIVING/)
+  assert.match(pickerSource, /TRANSIT/)
+  assert.match(pickerSource, /WALKING/)
+  assert.match(pickerSource, /BICYCLING/)
+  assert.match(pickerSource, /onRetry/)
+  assert.match(workspaceSource, /replaceAmapPlanSegment/)
+  assert.match(workspaceSource, /setCandidateRequest/)
+  assert.match(workspaceSource, /setProviderPlan/)
+  assert.match(workspaceSource, /setLocationEvidence/)
+  assert.match(workspaceSource, /setRestoredPlan\(null\)/)
+  assert.match(workspaceSource, /segmentErrors/)
+  assert.match(workspaceSource, /retrySegment/)
+  assert.match(workspaceSource, /storedCurrentPlan\?\.version === 1/)
+})
 
 test('nearest-neighbor ordering starts from the confirmed coordinate and does not mutate input', () => {
   const seed = { longitude: 0, latitude: 0 }

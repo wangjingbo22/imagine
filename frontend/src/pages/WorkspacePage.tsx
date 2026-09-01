@@ -30,8 +30,10 @@ import { tripApi, USE_PLAN_VERSION_API } from '../api/tripApi'
 import { AppShell } from '../components/AppShell'
 import { MemoryTimelinePanel } from '../components/MemoryTimelinePanel'
 import { RouteOverview } from '../components/RouteOverview'
+import { SegmentRouteModePicker } from '../components/SegmentRouteModePicker'
 import { TaskPhotoCard } from '../components/TaskPhotoCard'
 import type {
+  CandidatePlanPreview,
   CandidatePlanRequest,
   CandidatePlanReview,
   CandidateReviewItem,
@@ -41,9 +43,11 @@ import type {
   PlanSnapshot,
   PlanningConstraint,
   PlanVersionDiff,
+  ProviderRoute,
   Provenance,
   SourceStatus,
   StoredPlanVersion,
+  TravelMode,
   TripDraftInput,
   TripPlanState,
   TripSummary,
@@ -57,6 +61,7 @@ import type {
 } from '../domain/executionAdjustment'
 import {
   loadAmapPlan,
+  replaceAmapPlanSegment,
   type AmapPlanResult,
   type LocationEvidence,
 } from '../services/amapPlan'
@@ -277,6 +282,54 @@ function toDisplayPlan(plan: StoredPlanVersion): PlanSnapshot {
   }
 }
 
+function routeWalkingMeters(route: ProviderRoute) {
+  if (route.mode === 'WALKING') return route.distanceMeters
+  return route.walkingDistanceMeters ?? 0
+}
+
+function minutesBetween(startAt: string, endAt: string) {
+  const toMinutes = (value: string) => {
+    const [hours = '0', minutes = '0'] = value.split(':')
+    return Number(hours) * 60 + Number(minutes)
+  }
+  return Math.max(0, toMinutes(endAt) - toMinutes(startAt))
+}
+
+function displayCandidatePlan(
+  previous: PlanSnapshot,
+  candidate: CandidatePlanRequest,
+  preview: CandidatePlanPreview,
+): PlanSnapshot {
+  const metrics = preview.metrics
+  return {
+    ...previous,
+    totalCostCents: metrics?.totalCostCents ?? previous.totalCostCents,
+    bufferCents: metrics?.knownBudgetBufferCents ?? previous.bufferCents,
+    totalWalkMeters: metrics?.totalWalkMeters ?? previous.totalWalkMeters,
+    transferCount: metrics?.transferCount ?? previous.transferCount,
+    validationStatus: preview.validationStatus,
+    tasks: candidate.taskFacts.map((fact, index) => {
+      const priorTask = previous.tasks[index]
+      const knownCosts = [fact.place.priceReference.amountCents, fact.route.priceReference.amountCents]
+      const costCents = knownCosts.reduce<number>((total, amount) => total + (amount ?? 0), 0)
+      return {
+        ...priorTask,
+        id: fact.taskId,
+        order: fact.order,
+        title: fact.title,
+        category: fact.category,
+        timeRange: `${fact.startAt.slice(0, 5)}—${fact.endAt.slice(0, 5)}`,
+        durationMinutes: minutesBetween(fact.startAt, fact.endAt),
+        transport: `${routeModeLabels[fact.route.mode]} ${fact.route.distanceMeters} 米 · 约${Math.max(1, Math.round(fact.route.durationSeconds / 60))} 分钟`,
+        costCents,
+        priceKnown: knownCosts.every((amount) => amount !== null),
+        walkMeters: routeWalkingMeters(fact.route),
+        note: fact.note,
+      }
+    }),
+  }
+}
+
 function planningFactsRecoveryMessage(error: unknown) {
   if (!(error instanceof ApiError)) {
     return '服务端规划事实恢复失败；请返回“新建行程”重新生成可信计划。'
@@ -388,6 +441,11 @@ export function WorkspacePage() {
       ? '缺少 T004 已确认 Trip，不能猜测起点、终点或参与者；请返回新建行程重新确认。'
       : '',
   )
+  const [pendingSegmentIndex, setPendingSegmentIndex] = useState<number | null>(null)
+  const [segmentErrors, setSegmentErrors] = useState<Record<number, {
+    message: string
+    mode: TravelMode
+  }>>({})
 
   const applyTripState = useCallback((state: TripPlanState) => {
     const current = state.currentPlan
@@ -697,6 +755,8 @@ export function WorkspacePage() {
     executionAdjustmentCount,
   )
   const hasAdjustableSuffix = currentTaskIndex < activePlan.tasks.length - 1
+  const hasExecutingPlanV1 = storedCurrentPlan?.version === 1 &&
+    storedCurrentPlan.status === 'CURRENT'
   const adjustmentBlockReason = executionAdjustmentBlockReason({
     currentVersion: storedCurrentPlan?.version ?? null,
     completedV2Decisions: executionAdjustmentCount,
@@ -732,6 +792,66 @@ export function WorkspacePage() {
         ? current.filter((item) => item !== option)
         : [...current, option],
     )
+  }
+
+  async function replaceSegment(index: number, mode: TravelMode) {
+    if (!tripId || !candidateRequest || pendingSegmentIndex !== null || hasExecutingPlanV1) {
+      return
+    }
+    setPendingSegmentIndex(index)
+    setSegmentErrors((current) => {
+      const next = { ...current }
+      delete next[index]
+      return next
+    })
+    try {
+      const result = await replaceAmapPlanSegment(
+        tripId,
+        candidateRequest,
+        index,
+        mode,
+        organizerToken,
+      )
+      if (!result.candidateRequest) {
+        const reason = result.preview.constraintResults
+          .map((item) => item.suggestion)
+          .find((item): item is string => Boolean(item)) ?? '路线变更未通过计划校验。'
+        throw new Error(reason)
+      }
+
+      const nextCandidate = result.candidateRequest
+      const nextPlan = displayCandidatePlan(activePlan, nextCandidate, result.preview)
+      const nextEvidence = locationEvidence && {
+        ...locationEvidence,
+        routes: locationEvidence.routes.map((route, routeIndex) =>
+          routeIndex === index ? result.evidence.route : route,
+        ),
+      }
+
+      setCandidateRequest(nextCandidate)
+      setProviderPlan(nextPlan)
+      if (nextEvidence) setLocationEvidence(nextEvidence)
+      setRestoredPlan(null)
+      setPlanningIssue(null)
+      setCandidateReview(null)
+      setReviewValues({})
+      setPersistedPlanId(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '路线更新失败，请重试。'
+      setSegmentErrors((current) => ({
+        ...current,
+        [index]: { message, mode },
+      }))
+    } finally {
+      setPendingSegmentIndex(null)
+    }
+  }
+
+  function retrySegment(index: number) {
+    const failedMode = segmentErrors[index]?.mode
+    if (failedMode) {
+      void replaceSegment(index, failedMode)
+    }
   }
 
   async function handleRegenerateRecommendation() {
@@ -1661,6 +1781,14 @@ export function WorkspacePage() {
                             {formatSource(route.provenance)}
                           </small>
                         </span>
+                        <SegmentRouteModePicker
+                          disabled={hasExecutingPlanV1}
+                          error={segmentErrors[index]?.message ?? ''}
+                          onRetry={() => void retrySegment(index)}
+                          onSelect={(mode) => void replaceSegment(index, mode)}
+                          pending={pendingSegmentIndex === index}
+                          route={candidateRequest?.taskFacts[index]?.route ?? route}
+                        />
                       </div>
                     ))}
                   </>
