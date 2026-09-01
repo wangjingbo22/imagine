@@ -1946,6 +1946,88 @@ select:focus-visible {
   background: #1769e0;
 }
 
+/* Dark blue areas use explicit foreground values rather than inherited tones. */
+.planner-sidebar h1,
+.planner-sidebar strong,
+.planner-sidebar .step-list .is-complete,
+.planner-sidebar .step-list .is-current {
+  color: #ffffff;
+}
+
+.planner-sidebar > div > p,
+.planner-sidebar .step-list li,
+.planner-sidebar .step-list small,
+.planner-sidebar .privacy-note {
+  color: #c8dcf8;
+}
+
+.planner-sidebar .step-list li::after {
+  background: rgba(216, 234, 255, 0.36);
+}
+
+.planner-sidebar .step-list li > span {
+  color: #dceaff;
+  border-color: rgba(220, 234, 255, 0.64);
+}
+
+.planner-sidebar .privacy-note {
+  border-color: rgba(220, 234, 255, 0.25);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.planner-sidebar .privacy-note svg {
+  color: #8fc1ff;
+}
+
+.capability-strip strong {
+  color: #ffffff;
+}
+
+.capability-strip small {
+  color: #bdd7fa;
+}
+
+@media (max-width: 700px) {
+  .planner-sidebar {
+    background: #ffffff;
+    border-bottom: 1px solid #d7e5f5;
+  }
+
+  .planner-sidebar h1,
+  .planner-sidebar strong,
+  .planner-sidebar .step-list .is-complete,
+  .planner-sidebar .step-list .is-current {
+    color: #102f60;
+  }
+
+  .planner-sidebar > div > p,
+  .planner-sidebar .step-list li,
+  .planner-sidebar .step-list small,
+  .planner-sidebar .privacy-note {
+    color: #58718f;
+  }
+
+  .planner-sidebar .step-list li::after {
+    background: #cdddf1;
+  }
+
+  .planner-sidebar .step-list li > span {
+    color: #1769e0;
+    border-color: #9fc4f8;
+  }
+
+  .planner-sidebar .privacy-note {
+    border-color: #d7e5f5;
+    background: #f3f8ff;
+  }
+
+  .planner-sidebar .eyebrow {
+    color: #165cb8;
+    border-color: #cfe1ff;
+    background: #eef5ff;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -4026,7 +4108,42 @@ select:focus-visible {
   }
 
   .planner-sidebar {
-    background: #f8fafc;
+    background: #ffffff;
+    border-bottom: 1px solid #d7e5f5;
+  }
+
+  .planner-sidebar h1,
+  .planner-sidebar strong,
+  .planner-sidebar .step-list .is-complete,
+  .planner-sidebar .step-list .is-current {
+    color: #102f60;
+  }
+
+  .planner-sidebar > div > p,
+  .planner-sidebar .step-list li,
+  .planner-sidebar .step-list small,
+  .planner-sidebar .privacy-note {
+    color: #58718f;
+  }
+
+  .planner-sidebar .step-list li::after {
+    background: #cdddf1;
+  }
+
+  .planner-sidebar .step-list li > span {
+    color: #1769e0;
+    border-color: #9fc4f8;
+  }
+
+  .planner-sidebar .privacy-note {
+    border-color: #d7e5f5;
+    background: #f3f8ff;
+  }
+
+  .planner-sidebar .eyebrow {
+    color: #165cb8;
+    border-color: #cfe1ff;
+    background: #eef5ff;
   }
 
   .execution-web__main {
