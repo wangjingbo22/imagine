@@ -38,6 +38,7 @@ test('model settings show the server error instead of masking failed API Key sto
   assert.match(page, /import \{ ApiError \} from '\.\.\/api\/client'/)
   assert.match(page, /error instanceof ApiError\) return error\.message/)
   assert.match(page, /保存失败：\$\{saveErrorMessage\(error\)\}/)
+  assert.match(page, /await saveModelSettings[\s\S]*navigate\('\/', \{ replace: true \}\)/)
 })
 
 test('recommendation loading presents staged analysis instead of an empty status area', async () => {

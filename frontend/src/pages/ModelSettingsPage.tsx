@@ -23,7 +23,7 @@ export function ModelSettingsPage() {
     if (!apiKey.trim()) { setNotice('请先填写 API Key。'); return }
     if (!model.trim()) { setNotice('请填写模型名称。'); return }
     if (!baseUrl.trim()) { setNotice('请填写模型 API 地址。'); return }
-    try { await saveModelSettings({ apiKey, model: model.trim(), baseUrl: baseUrl.trim() }); setApiKey(''); setNotice(`已绑定账户并启用 ${model.trim()}。`) } catch (error) { setNotice(`保存失败：${saveErrorMessage(error)}`) }
+    try { await saveModelSettings({ apiKey, model: model.trim(), baseUrl: baseUrl.trim() }); setApiKey(''); navigate('/', { replace: true }) } catch (error) { setNotice(`保存失败：${saveErrorMessage(error)}`) }
   }
   async function clear() {
     try { await deleteModelSettings(); setApiKey(''); setNotice('已从账户移除 API Key。') } catch { setNotice('清除失败；请先登录。') }
