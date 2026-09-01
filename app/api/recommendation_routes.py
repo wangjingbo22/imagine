@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from unicodedata import normalize
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -21,7 +22,6 @@ from app.domain.models import ApiResponse, GeoPoint, Place
 from app.domain.recommendation import CandidateFactProvenance
 from app.infrastructure.provider_fact_registry import SqliteProviderFactRegistry
 from app.services.planning.models import CandidateEndpointFact
-from app.schemas.trip import Preference, PreferenceType
 from app.services.recommendation import (
     ProviderFactPlaceSet,
     ProviderFactSetSummary,
@@ -32,6 +32,10 @@ from app.services.recommendation import (
 
 router = APIRouter(tags=["S2 可信候选推荐"])
 PROVIDER_SEARCH_RADIUS_METERS = 25_000
+
+
+def _normalized_place_identity(value: str) -> str:
+    return " ".join(normalize("NFKC", value).strip().casefold().split())
 
 
 def _mark_private_organizer_response(response: Response) -> None:
@@ -329,35 +333,26 @@ async def recommendations(trip_id: UUID, request: Request) -> ApiResponse:
         interests = [interest for item in members for interest in item.interests]
         must_visit = [place for item in members for place in item.must_visit]
         avoid_places = [place for item in members for place in item.avoid_places]
-        sibling_place_names = request.app.state.parent_trip_service.used_place_names_for_child(
-            trip_id
+        parent_place_memory = (
+            request.app.state.parent_trip_service.place_memory_for_child(trip_id)
         )
-        if sibling_place_names:
-            existing = {value.casefold() for value in avoid_places}
-            parent_avoids = [
-                value for value in sibling_place_names
-                if value.casefold() not in existing
+        if parent_place_memory:
+            existing = {
+                _normalized_place_identity(value) for value in avoid_places
+            }
+            memory_labels = [
+                label
+                for item in parent_place_memory
+                for label in (item.place_id, item.place_name)
             ]
+            parent_avoids: list[str] = []
+            for value in memory_labels:
+                normalized = _normalized_place_identity(value)
+                if normalized in existing:
+                    continue
+                existing.add(normalized)
+                parent_avoids.append(value)
             avoid_places.extend(parent_avoids)
-            trip = trip.model_copy(update={
-                "participants": [
-                    participant.model_copy(update={
-                        "preferences": [
-                            *participant.preferences,
-                            *[
-                                Preference(
-                                    type=PreferenceType.AVOID_PLACE,
-                                    value=value,
-                                    weight=5,
-                                    is_hard=True,
-                                )
-                                for value in parent_avoids
-                            ],
-                        ]
-                    })
-                    for participant in trip.participants
-                ]
-            })
         start_fact = await _provider_endpoint_fact(
             request.app.state.location_service,
             city_resolution=city,
@@ -384,6 +379,24 @@ async def recommendations(trip_id: UUID, request: Request) -> ApiResponse:
                 keywords=keywords,
                 citywide=keywords.strip().casefold() in required_search_terms,
             ))
+            if parent_place_memory:
+                remembered_ids = {
+                    _normalized_place_identity(item.place_id)
+                    for item in parent_place_memory
+                }
+                remembered_names = {
+                    _normalized_place_identity(item.place_name)
+                    for item in parent_place_memory
+                }
+                provider_places = [
+                    place for place in provider_places
+                    if (
+                        _normalized_place_identity(place.placeId)
+                        not in remembered_ids
+                        and _normalized_place_identity(place.name)
+                        not in remembered_names
+                    )
+                ]
             try:
                 TrustedRecommendationService.pre_filter_provider_places(
                     provider_places,
@@ -466,6 +479,7 @@ async def recommendations(trip_id: UUID, request: Request) -> ApiResponse:
                         issuance.summary.provider_fact_digest
                     ),
                     "provenance": provenance,
+                    "parent_place_memory": list(parent_place_memory),
                 }
             )
         )

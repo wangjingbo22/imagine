@@ -5,7 +5,7 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from hashlib import sha256
 import json
-from typing import Any, ContextManager, Literal
+from typing import Any, ContextManager, Literal, Protocol
 from unicodedata import normalize
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -106,6 +106,14 @@ class _InMemoryTrustedCandidateFacts:
         return self._records.get(candidate_plan_id)
 
 
+class ParentTripPlaceMemoryGuard(Protocol):
+    def require_unique_candidate_places(
+        self,
+        child_id: UUID,
+        task_facts: Sequence[object],
+    ) -> None: ...
+
+
 class PlanningBoundaryService:
     """Trusted HTTP boundary joining T011, T018 and PlanVersion storage."""
 
@@ -117,11 +125,13 @@ class PlanningBoundaryService:
         trust_repository: SqliteTrustedPlanningRepository,
         readiness_guard: CollaborationReadinessGuard,
         suffix_planner: SuffixPlanner | None = None,
+        parent_trip_place_memory_guard: ParentTripPlaceMemoryGuard | None = None,
     ) -> None:
         self.plan_service = plan_service
         self.workflow_service = workflow_service
         self.trust_repository = trust_repository
         self.readiness_guard = readiness_guard
+        self.parent_trip_place_memory_guard = parent_trip_place_memory_guard
         self.suffix_planner = suffix_planner or DeterministicEventAwareSuffixPlanner()
         if not isinstance(self.suffix_planner, SuffixPlanner):
             raise TypeError("suffix_planner must implement SuffixPlanner")
@@ -150,6 +160,17 @@ class PlanningBoundaryService:
                 "规划操作租约已过期，不能执行状态迁移",
                 409,
                 False,
+            )
+
+    def _require_parent_trip_places_unique(
+        self,
+        trip_id: UUID,
+        task_facts: Sequence[object],
+    ) -> None:
+        if self.parent_trip_place_memory_guard is not None:
+            self.parent_trip_place_memory_guard.require_unique_candidate_places(
+                trip_id,
+                task_facts,
             )
 
     @staticmethod
@@ -614,6 +635,7 @@ class PlanningBoundaryService:
                 request.trip.participants[0].assistance_profile,
             )
             self.workflow_service.require_confirmed_trip(trip_id, request.trip)
+        self._require_parent_trip_places_unique(trip_id, request.task_facts)
         try:
             candidate = generate_candidate_plan(request)
         except CandidatePlanInputError as error:
@@ -808,6 +830,10 @@ class PlanningBoundaryService:
                 confirmed_request,
                 readiness_permit,
             )
+        self._require_parent_trip_places_unique(
+            trip_id,
+            confirmed_request.task_facts,
+        )
         try:
             confirmed_candidate = generate_candidate_plan(confirmed_request)
             proposal = candidate_to_proposed_plan_version(
@@ -1653,6 +1679,10 @@ class PlanningBoundaryService:
                     registration_permit,
                 )
             try:
+                self._require_parent_trip_places_unique(
+                    trip_id,
+                    candidate_request.task_facts,
+                )
                 generated = generate_candidate_plan(candidate_request)
                 proposal = candidate_to_proposed_plan_version_v2(
                     generated,
@@ -1684,6 +1714,18 @@ class PlanningBoundaryService:
                     }
                 )
                 continue
+            except AppError as error:
+                if error.code != "PARENT_TRIP_PLACE_REUSED":
+                    raise
+                generation_failures.append(
+                    {
+                        "candidateIndex": index,
+                        "code": error.code,
+                        "message": error.message,
+                        "conflicts": error.errors,
+                    }
+                )
+                continue
 
             candidate_requests[proposal.plan_id] = candidate_request
             satisfaction_loss_by_plan_id[proposal.plan_id] = satisfaction_loss
@@ -1695,6 +1737,18 @@ class PlanningBoundaryService:
             )
 
         if not candidates:
+            memory_failures = [
+                failure for failure in generation_failures
+                if failure.get("code") == "PARENT_TRIP_PLACE_REUSED"
+            ]
+            if memory_failures and len(memory_failures) == len(candidate_inputs):
+                raise AppError(
+                    code="PARENT_TRIP_PLACE_REUSED",
+                    message="全部重规划候选都复用了父行程其他日期的地点。",
+                    http_status=409,
+                    retryable=False,
+                    errors=memory_failures,
+                )
             if event_constraints is not None:
                 affected = sorted(
                     {
@@ -1934,6 +1988,9 @@ class PlanningBoundaryService:
                 plan_id,
                 current_readiness=self._readiness_binding(permit),
             )
+            self._require_unexpired_permit(permit)
+            plan = self.plan_service.get_plan_version(trip_id, plan_id)
+            self._require_parent_trip_places_unique(trip_id, plan.days[0].tasks)
 
     def confirm_v1(
         self,
@@ -1953,6 +2010,9 @@ class PlanningBoundaryService:
                 plan_id,
                 current_readiness=self._readiness_binding(permit),
             )
+            self._require_unexpired_permit(permit)
+            plan = self.plan_service.get_plan_version(trip_id, plan_id)
+            self._require_parent_trip_places_unique(trip_id, plan.days[0].tasks)
             self._require_unexpired_permit(permit)
             return self.plan_service.confirm(trip_id, plan_id)
 
@@ -2038,6 +2098,13 @@ class PlanningBoundaryService:
                 current_readiness=self._readiness_binding(permit),
             )
             self._require_unexpired_permit(permit)
+            if accept:
+                candidate = self.plan_service.get_plan_version(trip_id, plan_id)
+                self._require_parent_trip_places_unique(
+                    trip_id,
+                    candidate.days[0].tasks,
+                )
+            self._require_unexpired_permit(permit)
             return (
                 self.plan_service.accept_v2(trip_id, plan_id)
                 if accept
@@ -2087,6 +2154,10 @@ class PlanningBoundaryService:
             self._require_unexpired_permit(permit)
             if decision is ExecutionAdjustmentDecision.ACCEPT:
                 candidate = self.plan_service.get_plan_version(trip_id, plan_id)
+                self._require_parent_trip_places_unique(
+                    trip_id,
+                    candidate.days[0].tasks,
+                )
                 parent = self.plan_service.get_plan_version(trip_id, candidate.parent_id)
                 if candidate.days[0].tasks == parent.days[0].tasks:
                     raise AppError(
@@ -2095,6 +2166,7 @@ class PlanningBoundaryService:
                         http_status=409,
                         retryable=False,
                     )
+                self._require_unexpired_permit(permit)
             return (
                 self.plan_service.accept_v2(trip_id, plan_id)
                 if decision is ExecutionAdjustmentDecision.ACCEPT
@@ -2351,4 +2423,4 @@ class PlanningBoundaryService:
             )
 
 
-__all__ = ["PlanningBoundaryService"]
+__all__ = ["ParentTripPlaceMemoryGuard", "PlanningBoundaryService"]

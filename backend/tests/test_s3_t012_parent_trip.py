@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -43,6 +43,25 @@ def service(tmp_path: Path):
     revisions, collaboration = Revisions(), Collaboration()
     return ParentTripService(SqliteParentTripRepository(tmp_path / "t.sqlite3"), revisions,
         collaboration, Plans(), today=lambda: date(2026, 9, 1)), revisions, collaboration
+
+
+def plan_task(
+    place_id: str,
+    title: str,
+    category: str = "景点",
+):
+    return SimpleNamespace(task_id=place_id, title=title, category=category)
+
+
+def plan(*tasks, version=1, status="PROPOSED"):
+    return SimpleNamespace(
+        plan_id=uuid4(),
+        version=version,
+        status=status,
+        created_at=datetime.now(UTC),
+        days=[SimpleNamespace(tasks=list(tasks))],
+        metrics=SimpleNamespace(total_cost_cents=0),
+    )
 
 
 def test_two_and_three_day_parent_are_consecutive_and_budgeted(tmp_path: Path):
@@ -143,16 +162,121 @@ def test_sibling_plan_places_are_automatic_hard_exclusions(tmp_path: Path):
         city_name="北京", travel_date=date(2026, 9, 7), budget_cents=20_000)))
     current.link_day(parent.parent_trip_id, 0, first, "parent-token" * 4, "first-token")
     current.link_day(parent.parent_trip_id, 1, second, "parent-token" * 4, "second-token")
-    current.plans.items[first] = SimpleNamespace(current_plan=SimpleNamespace(days=[
-        SimpleNamespace(tasks=[
-            SimpleNamespace(title="故宫博物院"),
-            SimpleNamespace(title="天坛公园"),
-            SimpleNamespace(title="故宫博物院"),
-        ])
-    ]))
+    first_plan = plan(
+        plan_task("B000A83M61", "故宫博物院"),
+        plan_task("B000A83M62", "天坛公园"),
+        plan_task("B000A83M63", "故宫博物院"),
+        plan_task("return-110000-home", "返回住处", "RETURN"),
+        status="CURRENT",
+    )
+    current.plans.items[first] = SimpleNamespace(
+        current_plan=first_plan,
+        proposed_plans=[],
+        trip_status=SimpleNamespace(value="PLAN_REVIEW"),
+        actual_budget=None,
+    )
 
     assert current.used_place_names_for_child(second) == ("故宫博物院", "天坛公园")
     assert current.used_place_names_for_child(uuid4()) == ()
+    memory = current.place_memory_for_child(second)
+    assert [(item.place_id, item.plan_status) for item in memory] == [
+        ("B000A83M61", "CURRENT"),
+        ("B000A83M62", "CURRENT"),
+    ]
+    aggregate = current.get(parent.parent_trip_id, "parent-token" * 4)
+    assert aggregate.place_memory == list(memory)
+
+
+def test_latest_proposed_v1_is_remembered_and_return_is_reusable(tmp_path: Path):
+    current, revisions, collaboration = service(tmp_path)
+    parent = current.create(request(2), "parent-token" * 4)
+    first, second = uuid4(), uuid4()
+    collaboration.tokens.update({first: "first-token", second: "second-token"})
+    revisions.items[first] = SimpleNamespace(understanding=SimpleNamespace(trip=SimpleNamespace(
+        city_name="北京", travel_date=date(2026, 9, 6), budget_cents=20_000)))
+    revisions.items[second] = SimpleNamespace(understanding=SimpleNamespace(trip=SimpleNamespace(
+        city_name="北京", travel_date=date(2026, 9, 7), budget_cents=20_000)))
+    current.link_day(parent.parent_trip_id, 0, first, "parent-token" * 4, "first-token")
+    current.link_day(parent.parent_trip_id, 1, second, "parent-token" * 4, "second-token")
+    old_v1 = plan(plan_task("old-place", "旧地点"))
+    latest_v1 = plan(
+        plan_task("new-place", "新地点"),
+        plan_task("return-110000-home", "返回住处", "RETURN"),
+    )
+    proposed_v2 = plan(plan_task("v2-place", "重规划地点"), version=2)
+    current.plans.items[first] = SimpleNamespace(
+        current_plan=None,
+        proposed_plans=[old_v1, latest_v1, proposed_v2],
+    )
+
+    memory = current.place_memory_for_child(second)
+
+    assert [(item.place_id, item.place_name) for item in memory] == [
+        ("new-place", "新地点")
+    ]
+    assert memory[0].plan_id == latest_v1.plan_id
+    assert memory[0].plan_status == "PROPOSED"
+
+
+@pytest.mark.parametrize(
+    ("candidate", "expected_place_id"),
+    [
+        (plan_task("B000A83M61", "不同展示名"), "B000A83M61"),
+        (plan_task("different-provider-id", "  故宫博物院  "), "different-provider-id"),
+    ],
+)
+def test_candidate_reusing_sibling_provider_id_or_normalized_name_is_rejected(
+    tmp_path: Path,
+    candidate,
+    expected_place_id: str,
+):
+    current, revisions, collaboration = service(tmp_path)
+    parent = current.create(request(2), "parent-token" * 4)
+    first, second = uuid4(), uuid4()
+    collaboration.tokens.update({first: "first-token", second: "second-token"})
+    revisions.items[first] = SimpleNamespace(understanding=SimpleNamespace(trip=SimpleNamespace(
+        city_name="北京", travel_date=date(2026, 9, 6), budget_cents=20_000)))
+    revisions.items[second] = SimpleNamespace(understanding=SimpleNamespace(trip=SimpleNamespace(
+        city_name="北京", travel_date=date(2026, 9, 7), budget_cents=20_000)))
+    current.link_day(parent.parent_trip_id, 0, first, "parent-token" * 4, "first-token")
+    current.link_day(parent.parent_trip_id, 1, second, "parent-token" * 4, "second-token")
+    current.plans.items[first] = SimpleNamespace(
+        current_plan=plan(
+            plan_task("B000A83M61", "故宫博物院"),
+            status="CURRENT",
+        ),
+        proposed_plans=[],
+    )
+
+    with pytest.raises(AppError) as caught:
+        current.require_unique_candidate_places(second, [candidate])
+
+    assert caught.value.code == "PARENT_TRIP_PLACE_REUSED"
+    assert caught.value.errors[0]["placeId"] == expected_place_id
+    assert caught.value.errors[0]["conflictingDayIndex"] == 0
+    assert caught.value.errors[0]["conflictingPlaceId"] == "B000A83M61"
+
+
+def test_return_task_does_not_conflict_with_sibling_day(tmp_path: Path):
+    current, revisions, collaboration = service(tmp_path)
+    parent = current.create(request(2), "parent-token" * 4)
+    first, second = uuid4(), uuid4()
+    collaboration.tokens.update({first: "first-token", second: "second-token"})
+    revisions.items[first] = SimpleNamespace(understanding=SimpleNamespace(trip=SimpleNamespace(
+        city_name="北京", travel_date=date(2026, 9, 6), budget_cents=20_000)))
+    revisions.items[second] = SimpleNamespace(understanding=SimpleNamespace(trip=SimpleNamespace(
+        city_name="北京", travel_date=date(2026, 9, 7), budget_cents=20_000)))
+    current.link_day(parent.parent_trip_id, 0, first, "parent-token" * 4, "first-token")
+    current.link_day(parent.parent_trip_id, 1, second, "parent-token" * 4, "second-token")
+    current.plans.items[first] = SimpleNamespace(
+        current_plan=plan(plan_task("shared-home", "返回住处"), status="CURRENT"),
+        proposed_plans=[],
+    )
+
+    current.require_unique_candidate_places(
+        second,
+        [plan_task("shared-home", "返回住处", "RETURN")],
+    )
 
 
 @pytest.mark.asyncio
@@ -170,6 +294,7 @@ async def test_parent_trip_http_contract_round_trips_without_revealing_token(tmp
         body = created.json()["data"]
         assert body["totalBudgetCents"] == 70_000
         assert body["plannedCostCents"] is None
+        assert body["placeMemory"] == []
         assert "token" not in created.text.lower()
         # 每日预算通过组织者专用接口修改，返回值立即重算父行程总预算。
         budget_update = await client.put(

@@ -1407,8 +1407,138 @@ body,
 .parent-day-card dd { margin: 0; font-weight: 800; overflow-wrap: anywhere; }
 .parent-day-status { min-height: 24px; color: #687a74; }
 .parent-day-status--actual_recorded { color: #16805a; }
+.parent-place-memory {
+  margin: 0 0 30px;
+  padding: 0 4px 30px;
+  border-bottom: 1px solid #dce6e2;
+}
+
+.parent-place-memory > header,
+.parent-place-memory > header > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.parent-place-memory > header > div {
+  justify-content: flex-start;
+  color: #8a5a10;
+}
+
+.parent-place-memory h2 {
+  margin: 0;
+  color: #162136;
+  font-size: 20px;
+}
+
+.parent-place-memory > header > strong {
+  color: #687a74;
+  font-size: 13px;
+}
+
+.parent-place-memory__days {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.parent-place-memory__days article {
+  min-width: 0;
+  padding: 15px 16px;
+  border-left: 3px solid #d9a441;
+  background: #fffaf0;
+}
+
+.parent-place-memory__days article > div,
+.parent-place-memory__days li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.parent-place-memory__days article > div span,
+.parent-place-memory__days small {
+  color: #687a74;
+  font-size: 11px;
+}
+
+.parent-place-memory__days ul {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.parent-place-memory__days li {
+  min-width: 0;
+  padding: 8px 0;
+  border-top: 1px solid #eadfca;
+}
+
+.parent-place-memory__days li span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.parent-place-memory__days small { flex: 0 0 auto; }
 .parent-trip-return { margin: 18px 4%; border: 0; background: transparent; color: #1765e8; font-weight: 800; cursor: pointer; }
 .parent-trip-scope { margin-top: 28px; color: #78847f; text-align: center; }
+
+.recommendation-place-memory {
+  margin: 0 0 22px;
+  padding: 16px 0;
+  border-top: 1px solid #eadfca;
+  border-bottom: 1px solid #eadfca;
+}
+
+.recommendation-place-memory header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #8a5a10;
+}
+
+.recommendation-place-memory header div {
+  display: grid;
+  gap: 3px;
+}
+
+.recommendation-place-memory header span {
+  color: var(--web-muted);
+  font-size: 10px;
+}
+
+.recommendation-place-memory ul {
+  margin: 14px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+}
+
+.recommendation-place-memory li {
+  min-width: 0;
+  padding: 8px 10px;
+  display: grid;
+  gap: 3px;
+  border-left: 2px solid #d9a441;
+  background: #fffaf0;
+}
+
+.recommendation-place-memory li span {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.recommendation-place-memory li small {
+  color: var(--web-muted);
+  font-size: 9px;
+}
 
 .parent-member-state {
   display: grid;
@@ -1509,6 +1639,7 @@ body,
   .parent-trip-grid,
   .parent-trip-budget-inputs,
   .parent-budget-summary,
+  .parent-place-memory__days,
   .parent-days,
   .parent-member-layout {
     grid-template-columns: 1fr;
@@ -1523,7 +1654,8 @@ body,
 
   .parent-trip-hero,
   .parent-member-header,
-  .parent-collaboration > header {
+  .parent-collaboration > header,
+  .parent-place-memory > header {
     align-items: flex-start;
     flex-direction: column;
   }

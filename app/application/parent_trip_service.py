@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import date, datetime, timedelta
+from unicodedata import normalize
 from uuid import UUID
 
 from app.application.collaboration_service import CollaborationService
@@ -12,11 +13,11 @@ from app.domain.parent_trip import (
     ParentTrip,
     ParentTripCreateRequest,
     ParentTripDay,
-    ParentTripDayBudgetUpdate,
     ParentTripInvitationCreated,
     ParentTripInvitationRedeemed,
     ParentTripMemberProfile,
     ParentTripMemberProfileUpdate,
+    ParentTripPlaceMemoryItem,
     ParentTripSyncView,
 )
 from app.infrastructure.parent_trip_store import (
@@ -66,7 +67,7 @@ class ParentTripService:
             "PARENT_TRIP_DAY_IMMUTABLE": "该日期已经绑定子行程，不能覆盖。",
             "CHILD_TRIP_ALREADY_LINKED": "该单日行程已经绑定到其他日期。",
             "PARENT_TRIP_VERSION_CONFLICT": "父行程协作版本已更新，请刷新后重试。",
-            "PARENT_TRIP_MEMBER_LIMIT": "父行程最多支持 20 位同行成员（含组织者）。",
+            "PARENT_TRIP_MEMBER_LIMIT": "父行程最多包含组织者和两名成员。",
             "PARENT_IDEMPOTENCY_KEY_REUSED": "幂等键已用于不同的父行程邀请请求。",
             "PARENT_INVITATION_UNAVAILABLE": "父行程邀请不存在或已失效。",
             "PARENT_INVITATION_EXPIRED": "父行程邀请已过期。",
@@ -128,54 +129,30 @@ class ParentTripService:
         except ParentTripStoreError as error:
             raise self._error(error) from error
 
-    def update_day_budget(
+    @staticmethod
+    def _normalized_place_value(value: str) -> str:
+        return " ".join(normalize("NFKC", value).strip().casefold().split())
+
+    @staticmethod
+    def _memory_plan(state: object) -> tuple[object, str] | None:
+        current = getattr(state, "current_plan", None)
+        if current is not None:
+            return current, "CURRENT"
+        for plan in reversed(getattr(state, "proposed_plans", ())):
+            if getattr(plan, "version", None) == 1:
+                return plan, "PROPOSED"
+        return None
+
+    def _place_memory_from_rows(
         self,
-        parent_id: UUID,
-        day_index: int,
-        request: ParentTripDayBudgetUpdate,
-        parent_token: str,
-    ) -> ParentTrip:
-        """修改每日预算，同时保护已经绑定的子行程。
-
-        已创建单日 Trip 的预算属于确认事实，父行程不能把当天预算降到它以下；
-        提高预算或修改尚未创建的日期则可以立即生效。
-        """
-        try:
-            _, days = self.repository.authorized_rows(parent_id, parent_token)
-            if day_index < 0 or day_index >= len(days):
-                raise ParentTripStoreError("PARENT_TRIP_DAY_NOT_FOUND")
-            child_id_value = days[day_index]["child_trip_id"]
-            if child_id_value:
-                # 读取子行程当前修订，而不是相信浏览器传入的数据，避免绕过预算约束。
-                revision = self.revisions.get_current(UUID(str(child_id_value)))
-                child_budget = revision.understanding.trip.budget_cents
-                if child_budget is not None and request.budget_cents < child_budget:
-                    raise AppError(
-                        "PARENT_DAY_BUDGET_BELOW_CHILD",
-                        "新预算不能低于已经创建的当日行程预算。",
-                        422,
-                        False,
-                    )
-            self.repository.update_day_budget(
-                parent_id,
-                day_index,
-                request.budget_cents,
-                parent_token,
-            )
-            return self.get(parent_id, parent_token)
-        except ParentTripStoreError as error:
-            raise self._error(error) from error
-
-    def used_place_names_for_child(self, child_id: UUID) -> tuple[str, ...]:
-        """Collect immutable Plan task titles already used by sibling days.
-
-        The current child is excluded.  Missing/unconfirmed sibling plans do
-        not invent exclusions, while confirmed sibling plans become HARD
-        avoid-place inputs at the recommendation boundary.
-        """
-        names: list[str] = []
-        seen: set[str] = set()
-        for row in self.repository.sibling_rows_for_child(child_id):
+        rows: Sequence[dict[str, object]],
+    ) -> tuple[ParentTripPlaceMemoryItem, ...]:
+        memory: list[ParentTripPlaceMemoryItem] = []
+        seen_ids: set[tuple[int, str]] = set()
+        seen_names: set[tuple[int, str]] = set()
+        for row in rows:
+            if row["child_trip_id"] is None:
+                continue
             sibling_id = UUID(str(row["child_trip_id"]))
             try:
                 state = self.plans.get_trip_state(sibling_id)
@@ -183,17 +160,112 @@ class ParentTripService:
                 if error.code == "TRIP_NOT_FOUND":
                     continue
                 raise
-            if state.current_plan is None:
+            selected = self._memory_plan(state)
+            if selected is None:
                 continue
-            for day in state.current_plan.days:
+            plan, plan_status = selected
+            for day in plan.days:
                 for task in day.tasks:
-                    name = task.title.strip()
-                    normalized = name.casefold()
-                    if not name or normalized in seen:
+                    place_id = task.task_id.strip()
+                    place_name = task.title.strip()
+                    category = task.category.strip().upper()
+                    if (
+                        not place_id
+                        or not place_name
+                        or category == "RETURN"
+                        or self._normalized_place_value(place_id).startswith("return-")
+                    ):
                         continue
-                    seen.add(normalized)
-                    names.append(name)
-        return tuple(names)
+                    id_identity = (
+                        int(row["day_index"]),
+                        self._normalized_place_value(place_id),
+                    )
+                    name_identity = (
+                        int(row["day_index"]),
+                        self._normalized_place_value(place_name),
+                    )
+                    if id_identity in seen_ids or name_identity in seen_names:
+                        continue
+                    seen_ids.add(id_identity)
+                    seen_names.add(name_identity)
+                    memory.append(ParentTripPlaceMemoryItem(
+                        dayIndex=row["day_index"],
+                        date=row["travel_date"],
+                        childTripId=sibling_id,
+                        planId=plan.plan_id,
+                        planStatus=plan_status,
+                        placeId=place_id,
+                        placeName=place_name,
+                    ))
+        return tuple(memory)
+
+    def place_memory_for_child(
+        self,
+        child_id: UUID,
+    ) -> tuple[ParentTripPlaceMemoryItem, ...]:
+        """Project attraction tasks already assigned to sibling days."""
+        return self._place_memory_from_rows(
+            self.repository.sibling_rows_for_child(child_id)
+        )
+
+    def used_place_names_for_child(self, child_id: UUID) -> tuple[str, ...]:
+        """Compatibility projection for callers that only consume names."""
+        return tuple(item.place_name for item in self.place_memory_for_child(child_id))
+
+    def require_unique_candidate_places(
+        self,
+        child_id: UUID,
+        task_facts: Sequence[object],
+    ) -> None:
+        """Reject a plan that reuses an attraction assigned to a sibling day."""
+        memory = self.place_memory_for_child(child_id)
+        if not memory:
+            return
+        by_id = {
+            self._normalized_place_value(item.place_id): item
+            for item in memory
+        }
+        by_name = {
+            self._normalized_place_value(item.place_name): item
+            for item in memory
+        }
+        conflicts: list[dict[str, object]] = []
+        for index, task in enumerate(task_facts):
+            task_id = str(getattr(task, "task_id", "")).strip()
+            title = str(getattr(task, "title", "")).strip()
+            category = str(getattr(task, "category", "")).strip().upper()
+            place = getattr(task, "place", None)
+            provider_id = str(getattr(place, "placeId", task_id)).strip()
+            if (
+                category == "RETURN"
+                or self._normalized_place_value(task_id).startswith("return-")
+            ):
+                continue
+            remembered = by_id.get(self._normalized_place_value(provider_id))
+            if remembered is None:
+                remembered = by_name.get(self._normalized_place_value(title))
+            if remembered is None:
+                continue
+            conflicts.append({
+                "field": f"taskFacts[{index}]",
+                "placeId": provider_id,
+                "placeName": title,
+                "conflictingDayIndex": remembered.day_index,
+                "conflictingDate": remembered.date.isoformat(),
+                "conflictingChildTripId": str(remembered.child_trip_id),
+                "conflictingPlanId": str(remembered.plan_id),
+                "conflictingPlaceId": remembered.place_id,
+                "conflictingPlaceName": remembered.place_name,
+            })
+        if conflicts:
+            first_day = int(conflicts[0]["conflictingDayIndex"]) + 1
+            raise AppError(
+                "PARENT_TRIP_PLACE_REUSED",
+                f"所选地点已安排在父行程第 {first_day} 天，请更换地点后重试。",
+                409,
+                False,
+                conflicts,
+            )
 
     def _build_parent(
         self,
@@ -268,6 +340,7 @@ class ParentTripService:
             plannedCostCents=sum(planned_values) if planned_values else None,
             actualSpentCents=sum(actual_values) if actual_values else None,
             days=output,
+            placeMemory=self._place_memory_from_rows(rows),
         )
 
     def get(self, parent_id: UUID, token: str) -> ParentTrip:

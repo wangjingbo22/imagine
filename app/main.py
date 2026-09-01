@@ -369,6 +369,7 @@ def create_app(
             ),
             readiness_guard=resolved_readiness_guard,
             suffix_planner=suffix_planner,
+            parent_trip_place_memory_guard=parent_trip_service,
         )
 
     if (

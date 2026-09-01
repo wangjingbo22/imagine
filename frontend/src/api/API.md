@@ -361,6 +361,10 @@ src/api/tripContract.ts
 - `getParentTripSync()` → `GET /api/v3/parent-trips/{parentTripId}/sync`；组织者使用 `X-Parent-Trip-Token`，成员使用 `X-Parent-Member-Session`，两者不能同时发送。
 - `updateParentTripMemberProfile()` → `PUT /api/v3/parent-trips/{parentTripId}/member-profile`；成员提交当前同步版本，只更新自己的昵称、兴趣和预算上限。
 
-组织者页和成员页固定每 5000 ms 读取一次 `ParentTripSyncView`，不使用 WebSocket、SSE、聊天或投票。成员响应只含自己的 `visibleProfiles`；组织者响应可见最多三人。同步快照同时展示父行程预算和每日子 Trip 状态。
+组织者页和成员页固定每 5000 ms 读取一次 `ParentTripSyncView`，不使用 WebSocket、SSE、聊天或投票。成员响应只含自己的 `visibleProfiles`；组织者响应可见最多三人。同步快照同时展示父行程预算、每日子 Trip 状态和服务端 `parentTrip.placeMemory[]`。
+
+`placeMemory[]` 每项为 `dayIndex/date/childTripId/planId/planStatus/placeId/placeName`，最多 9 项。服务端优先投影兄弟日的 `CURRENT`，没有时使用最新 `PROPOSED V1`；返程任务不进入记忆。`GET /api/v2/trips/{tripId}/recommendations` 通过 `parentPlaceMemory[]` 返回本次已经排除的兄弟日地点。前端只展示该快照，不自行读写地点记忆，也不能只靠页面过滤保证唯一性。
+
+服务端在推荐、V1/review 签发、V2 生成及最终接受前均按高德 `placeId` 优先、Unicode 标准化精确名称兜底校验。复用其他日期景点返回 HTTP 409 `PARENT_TRIP_PLACE_REUSED` 并携带冲突日期、子 Trip、Plan 和地点；每天的 `RETURN` 终点允许相同。
 
 父行程 capability 只进入当前标签页的 `sessionStorage`，禁止写入 `localStorage`。成员页先把邀请 token 从地址栏替换掉，再发起兑换；未登录时安全跳转到 `/account?returnTo=/parent-join`，登录成功后使用当前标签页保留的邀请继续兑换。兑换成功后删除临时邀请，只保留父行程维度的成员 session。页面刷新只能从服务端同步快照恢复，不能用浏览器固定数据伪造成员、预算或子 Trip 状态。

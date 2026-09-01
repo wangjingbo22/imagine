@@ -1078,7 +1078,7 @@ class TrustedRecommendationService:
         must_visit: Sequence[str],
         avoid_places: Sequence[str],
     ) -> list[CandidatePlace]:
-        avoided = {item.casefold() for item in avoid_places}
+        avoided = {_normalized_text(item) for item in avoid_places}
         required = {item.casefold() for item in must_visit}
         interest_words = tuple(item.casefold() for item in interests)
 
@@ -1094,7 +1094,11 @@ class TrustedRecommendationService:
         seen: set[str] = set()
         for fact in sorted(facts, key=sort_key):
             place = fact.place
-            if place.placeId in seen or place.name.casefold() in avoided:
+            if (
+                place.placeId in seen
+                or _normalized_text(place.placeId) in avoided
+                or _normalized_text(place.name) in avoided
+            ):
                 continue
             is_required = any(_place_matches_label(place, label) for label in must_visit)
             if not is_required and _is_non_visit_place(place.name, place.category):

@@ -342,8 +342,12 @@ S3-T009 账号只负责确认成员身份，邀请 token 仍负责授予当前�
 
 ### 16.2 同步与隔离
 
-`ParentTripSyncView` 返回 `parentTrip/syncVersion/viewerRole/viewerParticipantId/visibleProfiles/pollAfterSeconds/changedAt`。其中 `pollAfterSeconds` 固定为 5；`parentTrip` 包含总预算、计划/实际汇总及每日子 Trip 的 `childStatus`。
+`ParentTripSyncView` 返回 `parentTrip/syncVersion/viewerRole/viewerParticipantId/visibleProfiles/pollAfterSeconds/changedAt`。其中 `pollAfterSeconds` 固定为 5；`parentTrip` 包含总预算、计划/实际汇总、每日子 Trip 的 `childStatus`，以及最多 9 项服务端 `placeMemory[]`。每项记忆固定为 `dayIndex/date/childTripId/planId/planStatus/placeId/placeName`。
+
+`placeMemory` 只从兄弟子 Trip 的不可变 PlanVersion 投影：优先读取 `CURRENT`，没有时读取最新 `PROPOSED V1`；`category=RETURN` 或 `taskId` 以 `return-` 开头的返程任务不占用跨日景点。`GET /api/v2/trips/{tripId}/recommendations` 在 `parentPlaceMemory[]` 回显当前子 Trip 看见的兄弟日记忆，并在 Provider FactRef 签发前按高德 `placeId` 优先、Unicode 标准化精确名称兜底排除。V1、review 签发、V2 生成以及 V1/V2 接受边界必须再次读取同一服务端记忆，不能信任浏览器排除结果。
+
+候选复用兄弟日地点时返回 HTTP 409 `PARENT_TRIP_PLACE_REUSED`，`errors[]` 包含当前候选地点及 `conflictingDayIndex/conflictingDate/conflictingChildTripId/conflictingPlanId/conflictingPlaceId/conflictingPlaceName`。返程终点允许每天重复。
 
 组织者可见本父行程全部资料；成员只可见自己的资料行。同步响应禁止返回组织者 token、邀请 token 或成员 session。邀请创建、成员兑换、资料更新和子 Trip 绑定都会推进全局 `syncVersion`；旧 `expectedSyncVersion` 返回 `PARENT_TRIP_VERSION_CONFLICT`（HTTP 409），客户端刷新后才能重试。
 
-固定错误包括：`ACCOUNT_SESSION_REQUIRED`、`PARENT_TRIP_MEMBER_LIMIT`、`PARENT_INVITATION_UNAVAILABLE`、`PARENT_INVITATION_EXPIRED`、`PARENT_INVITATION_ALREADY_REDEEMED`、`PARENT_INVITATION_ACCOUNT_MISMATCH`、`PARENT_ACCOUNT_ALREADY_MEMBER`、`PARENT_MEMBER_SESSION_REQUIRED`、`PARENT_MEMBER_SESSION_INVALID`、`PARENT_MEMBER_SESSION_EXPIRED` 和 `PARENT_AUTH_CONTEXT_INVALID`。本范围不包含聊天、WebSocket、SSE 或投票。
+固定错误包括：`ACCOUNT_SESSION_REQUIRED`、`PARENT_TRIP_MEMBER_LIMIT`、`PARENT_INVITATION_UNAVAILABLE`、`PARENT_INVITATION_EXPIRED`、`PARENT_INVITATION_ALREADY_REDEEMED`、`PARENT_INVITATION_ACCOUNT_MISMATCH`、`PARENT_ACCOUNT_ALREADY_MEMBER`、`PARENT_MEMBER_SESSION_REQUIRED`、`PARENT_MEMBER_SESSION_INVALID`、`PARENT_MEMBER_SESSION_EXPIRED`、`PARENT_AUTH_CONTEXT_INVALID` 和 `PARENT_TRIP_PLACE_REUSED`。本范围不包含聊天、WebSocket、SSE 或投票。
