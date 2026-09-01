@@ -963,7 +963,6 @@ export function WorkspacePage() {
       setCandidateReview(null)
       const facts = await tripApi.getPlanningFacts(tripId, organizerToken)
       setCandidateRequest(facts.data)
-      setPlanLifecycleError('价格、设施与来源事实已由服务端重新校验，Plan V1 已获得 PASS。')
     } catch (error) {
       setPlanLifecycleError(error instanceof Error ? error.message : '候选事实确认失败')
     } finally {
