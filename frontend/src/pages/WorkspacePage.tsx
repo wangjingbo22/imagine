@@ -33,7 +33,6 @@ import { tripApi, USE_PLAN_VERSION_API } from '../api/tripApi'
 import { AppShell } from '../components/AppShell'
 import { MemoryTimelinePanel } from '../components/MemoryTimelinePanel'
 import { RouteOverview } from '../components/RouteOverview'
-import { SegmentRouteModePicker } from '../components/SegmentRouteModePicker'
 import { TaskPhotoCard } from '../components/TaskPhotoCard'
 import type {
   CandidatePlanPreview,
@@ -64,19 +63,13 @@ import type {
 import {
   acceptInitialCandidatePlan,
   canAcceptCurrentCandidate,
-  canReplaceCandidateSegment,
   candidatePreviewConfirmationNotice,
   changeAmapPlanRoute,
   loadAmapPlan,
-  replaceAmapPlanSegment,
   type AmapPlanResult,
   type LocationEvidence,
   type PlanningIssue,
 } from '../services/amapPlan'
-import {
-  applySegmentReplacementResult,
-  type LocalSegmentRouteFailure,
-} from '../services/segmentRouteReplacementState'
 import {
   compileGroupAssistanceConstraints,
   planningCareFromConstraints,
@@ -471,13 +464,6 @@ export function WorkspacePage() {
       ? '缺少 T004 已确认 Trip，不能猜测起点、终点或参与者；请返回新建行程重新确认。'
       : '',
   )
-  const [pendingSegmentIndex, setPendingSegmentIndex] = useState<number | null>(null)
-  const [segmentErrors, setSegmentErrors] = useState<Record<number, {
-    message: string
-    mode: TravelMode
-  }>>({})
-  const [localSegmentFailure, setLocalSegmentFailure] = useState<LocalSegmentRouteFailure | null>(null)
-
   const applyTripState = useCallback((state: TripPlanState) => {
     const current = state.currentPlan
     if (current) {
@@ -691,8 +677,8 @@ export function WorkspacePage() {
     hasCandidateRequest: Boolean(candidateRequest),
     validationStatus: activePlan.validationStatus,
     hasPlanningIssue: Boolean(planningIssue),
-    hasLocalSegmentFailure: Boolean(localSegmentFailure),
-    pendingSegmentIndex,
+    hasLocalSegmentFailure: false,
+    pendingSegmentIndex: null,
   })
   const candidatePreviewNotice = candidatePreviewConfirmationNotice(candidatePreview)
   const hasIssuedPassPlan = serverPlanReady
@@ -815,8 +801,6 @@ export function WorkspacePage() {
     executionAdjustmentCount,
   )
   const hasAdjustableSuffix = currentTaskIndex < activePlan.tasks.length - 1
-  const hasExecutingPlanV1 = storedCurrentPlan?.version === 1 &&
-    storedCurrentPlan.status === 'CURRENT'
   const adjustmentBlockReason = executionAdjustmentBlockReason({
     currentVersion: storedCurrentPlan?.version ?? null,
     completedV2Decisions: executionAdjustmentCount,
@@ -938,72 +922,6 @@ export function WorkspacePage() {
         ? current.filter((item) => item !== option)
         : [...current, option],
     )
-  }
-
-  async function replaceSegment(index: number, mode: TravelMode) {
-    if (!tripId || !candidateRequest || !canReplaceCandidateSegment({
-      hasTripId: Boolean(tripId),
-      hasCandidateRequest: Boolean(candidateRequest),
-      pendingSegmentIndex,
-      hasExecutingPlanV1,
-      isConfirmingPlan,
-    })) {
-      return
-    }
-    setPendingSegmentIndex(index)
-    setSegmentErrors((current) => {
-      const next = { ...current }
-      delete next[index]
-      return next
-    })
-    try {
-      const result = await replaceAmapPlanSegment(
-        tripId,
-        candidateRequest,
-        index,
-        mode,
-        organizerToken,
-      )
-      if (!locationEvidence) {
-        throw new Error('当前没有可替换的路线证据。')
-      }
-      const transition = applySegmentReplacementResult({
-        candidateRequest,
-        providerPlan: activePlan,
-        locationEvidence,
-        persistedPlanId,
-        restoredPlan,
-        candidatePreview,
-        planningIssue,
-        localFailure: localSegmentFailure,
-      }, result)
-
-      setCandidateRequest(transition.state.candidateRequest)
-      setProviderPlan(transition.state.providerPlan)
-      setLocationEvidence(transition.state.locationEvidence)
-      setRestoredPlan(transition.state.restoredPlan)
-      setCandidatePreview(transition.state.candidatePreview)
-      setPlanningIssue(transition.state.planningIssue)
-      setCandidateReview(null)
-      setReviewValues({})
-      setPersistedPlanId(transition.state.persistedPlanId)
-      setLocalSegmentFailure(transition.state.localFailure)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '路线更新失败，请重试。'
-      setSegmentErrors((current) => ({
-        ...current,
-        [index]: { message, mode },
-      }))
-    } finally {
-      setPendingSegmentIndex(null)
-    }
-  }
-
-  function retrySegment(index: number) {
-    const failedMode = segmentErrors[index]?.mode
-    if (failedMode) {
-      void replaceSegment(index, failedMode)
-    }
   }
 
   async function handleRegenerateRecommendation() {
@@ -1142,9 +1060,6 @@ export function WorkspacePage() {
     setIsConfirmingPlan(true)
     setPlanLifecycleError('')
     try {
-      if (pendingSegmentIndex !== null) {
-        throw new Error('路线更新尚未完成，请等待候选事实重新校验。')
-      }
       if (!candidateRequest) {
         throw new Error('当前候选事实不可用，请重新生成计划。')
       }
@@ -1975,25 +1890,6 @@ export function WorkspacePage() {
                             {formatSource(route.provenance)}
                           </small>
                         </span>
-                        <SegmentRouteModePicker
-                          disabled={!canReplaceCandidateSegment({
-                            hasTripId: Boolean(tripId),
-                            hasCandidateRequest: Boolean(candidateRequest),
-                            pendingSegmentIndex,
-                            hasExecutingPlanV1,
-                            isConfirmingPlan,
-                          })}
-                          error={segmentErrors[index]?.message ?? ''}
-                          notice={localSegmentFailure?.segmentIndex === index
-                            ? localSegmentFailure.message
-                            : ''}
-                          onRetry={() => void retrySegment(index)}
-                          onSelect={(mode) => void replaceSegment(index, mode)}
-                          pending={pendingSegmentIndex === index}
-                          route={localSegmentFailure?.segmentIndex === index
-                            ? localSegmentFailure.route
-                            : candidateRequest?.taskFacts[index]?.route ?? route}
-                        />
                       </div>
                     ))}
                   </>

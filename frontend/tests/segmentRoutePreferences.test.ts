@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -35,10 +35,6 @@ const amapPlanSource = readFileSync(
   fileURLToPath(new URL('../src/services/amapPlan.ts', import.meta.url)),
   'utf8',
 )
-const pickerPath = fileURLToPath(
-  new URL('../src/components/SegmentRouteModePicker.tsx', import.meta.url),
-)
-const pickerSource = existsSync(pickerPath) ? readFileSync(pickerPath, 'utf8') : ''
 const stateTransitionPath = fileURLToPath(
   new URL('../src/services/segmentRouteReplacementState.ts', import.meta.url),
 )
@@ -618,20 +614,11 @@ test('final acceptance opens server fact review without confirming or starting a
   assert.deepEqual(calls, ['issue'])
 })
 
-test('workspace exposes safe per-segment mode controls with retry and V1 lockout', () => {
-  assert.match(workspaceSource, /SegmentRouteModePicker/)
-  assert.match(pickerSource, /DRIVING/)
-  assert.match(pickerSource, /TRANSIT/)
-  assert.match(pickerSource, /WALKING/)
-  assert.match(pickerSource, /BICYCLING/)
-  assert.match(pickerSource, /onRetry/)
-  assert.match(workspaceSource, /replaceAmapPlanSegment/)
-  assert.match(workspaceSource, /setCandidateRequest/)
-  assert.match(workspaceSource, /setProviderPlan/)
-  assert.match(workspaceSource, /setLocationEvidence/)
-  assert.match(workspaceSource, /segmentErrors/)
-  assert.match(workspaceSource, /retrySegment/)
-  assert.match(workspaceSource, /storedCurrentPlan\?\.version === 1/)
+test('workspace keeps route replacement mechanics out of the route fact display', () => {
+  assert.doesNotMatch(workspaceSource, /SegmentRouteModePicker/)
+  assert.match(workspaceSource, /provider-route-evidence/)
+  assert.match(workspaceSource, /route\.distanceMeters/)
+  assert.match(workspaceSource, /route\.durationSeconds/)
 })
 
 test('local schedule failure renders its returned route as FAIL without accepting stale candidate facts', async (t) => {
