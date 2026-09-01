@@ -2,6 +2,7 @@ import { Check, Eye, EyeOff, KeyRound, ShieldCheck, Sparkles, Trash2 } from 'luc
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { deleteModelSettings, getModelSettings, saveModelSettings } from '../api/accountApi'
+import { ApiError } from '../api/client'
 import { AppShell } from '../components/AppShell'
 
 export function ModelSettingsPage() {
@@ -12,12 +13,17 @@ export function ModelSettingsPage() {
   const [showKey, setShowKey] = useState(false)
   const [notice, setNotice] = useState('')
 
+  function saveErrorMessage(error: unknown): string {
+    if (error instanceof ApiError) return error.message
+    return '保存失败，请检查网络连接后重试。'
+  }
+
   useEffect(() => { void getModelSettings().then(({ data }) => { if (data.model) setModel(data.model); if (data.baseUrl) setBaseUrl(data.baseUrl); if (data.keyHint) setNotice(`已绑定账户 API Key（${data.keyHint}）`) }).catch(() => navigate('/account?returnTo=%2Fmodel-settings', { replace: true })) }, [navigate])
   async function save() {
     if (!apiKey.trim()) { setNotice('请先填写 API Key。'); return }
     if (!model.trim()) { setNotice('请填写模型名称。'); return }
     if (!baseUrl.trim()) { setNotice('请填写模型 API 地址。'); return }
-    try { await saveModelSettings({ apiKey, model: model.trim(), baseUrl: baseUrl.trim() }); setApiKey(''); setNotice(`已绑定账户并启用 ${model.trim()}。`) } catch { setNotice('保存失败；请确认已登录、模型名称和地址填写正确，地址为 HTTPS 且服务端已配置加密密钥。') }
+    try { await saveModelSettings({ apiKey, model: model.trim(), baseUrl: baseUrl.trim() }); setApiKey(''); setNotice(`已绑定账户并启用 ${model.trim()}。`) } catch (error) { setNotice(`保存失败：${saveErrorMessage(error)}`) }
   }
   async function clear() {
     try { await deleteModelSettings(); setApiKey(''); setNotice('已从账户移除 API Key。') } catch { setNotice('清除失败；请先登录。') }

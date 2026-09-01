@@ -27,6 +27,14 @@ test('account API uses the session cookie and the account contract paths', async
   assert.match(client, /\? ''\s*:\s*resolveApiBaseUrl/)
 })
 
+test('model settings show the server error instead of masking failed API Key storage', async () => {
+  const page = await readFile(new URL('../src/pages/ModelSettingsPage.tsx', import.meta.url), 'utf8')
+
+  assert.match(page, /import \{ ApiError \} from '\.\.\/api\/client'/)
+  assert.match(page, /error instanceof ApiError\) return error\.message/)
+  assert.match(page, /保存失败：\$\{saveErrorMessage\(error\)\}/)
+})
+
 test('account page provides authentication and profile actions through the shared session', async () => {
   const page = await readFile(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8')
 
