@@ -418,7 +418,12 @@ def build_pytest_command(
     python_executable: str = sys.executable,
 ) -> list[str]:
     def relative(path: Path) -> str:
-        return os.path.relpath(path, root)
+        try:
+            return os.path.relpath(path, root)
+        except ValueError:
+            # Windows cannot express a relative path across drive letters.
+            # Pytest and coverage both accept the absolute report path.
+            return str(path)
 
     command = [
         python_executable,
