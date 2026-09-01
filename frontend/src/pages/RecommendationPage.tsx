@@ -1,6 +1,6 @@
 import { ArrowRight, LoaderCircle, RefreshCw, ShieldCheck } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { request } from '../api/client'
 import { tripApi } from '../api/tripApi'
 import { AppShell } from '../components/AppShell'
@@ -39,6 +39,9 @@ function loadRecommendationsOnce(
 export function RecommendationPage() {
   const { tripId = '' } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const parentTripId = searchParams.get('parentTripId')
+  const parentDayIndex = searchParams.get('dayIndex')
   const [bundle, setBundle] = useState<RecommendationBundle | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -132,7 +135,10 @@ export function RecommendationPage() {
         traceStorageKey,
         JSON.stringify(result.recommendationTrace),
       )
-      navigate(`/workspace?tripId=${tripId}`, { state: { tripId, draft, trip: confirmedTrip, amapPlanResult: result } })
+      const workspaceParams = new URLSearchParams({ tripId })
+      if (parentTripId) workspaceParams.set('parentTripId', parentTripId)
+      if (parentDayIndex) workspaceParams.set('dayIndex', parentDayIndex)
+      navigate(`/workspace?${workspaceParams.toString()}`, { state: { tripId, draft, trip: confirmedTrip, amapPlanResult: result } })
     } catch (caught) {
       setConfirmedSelection(null)
       window.sessionStorage.removeItem(traceStorageKey)
@@ -144,7 +150,7 @@ export function RecommendationPage() {
     }
   }
 
-  return <AppShell compact><main className="recommendation-layout"><section className="recommendation-panel" data-reveal="panel">
+  return <AppShell compact><main className="recommendation-layout">{parentTripId && <button className="parent-trip-return" type="button" onClick={() => navigate(`/parent-trips/${parentTripId}`)}>← 返回多日行程规划</button>}<section className="recommendation-panel" data-reveal="panel">
     <header className="recommendation-hero"><span className="section-kicker">ONE TRUSTED RECOMMENDATION</span><h1>唯一推荐方案</h1>
     <p>地点均来自高德事实；模型只负责白名单内的排序与简短理由，不会生成价格、路线或计划状态。</p>
     <ol className="recommendation-flow"><li className="is-done"><span>1</span><div><strong>需求确认</strong><small>六问已完成</small></div></li><li className="is-done"><span>2</span><div><strong>可信地点</strong><small>高德 FactRef</small></div></li><li className="is-current"><span>3</span><div><strong>生成路线</strong><small>核验路线与约束</small></div></li><li><span>4</span><div><strong>行程工作台</strong><small>确认并执行</small></div></li></ol>

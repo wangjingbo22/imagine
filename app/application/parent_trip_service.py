@@ -58,6 +58,35 @@ class ParentTripService:
         except ParentTripStoreError as error:
             raise self._error(error) from error
 
+    def used_place_names_for_child(self, child_id: UUID) -> tuple[str, ...]:
+        """Collect immutable Plan task titles already used by sibling days.
+
+        The current child is excluded.  Missing/unconfirmed sibling plans do
+        not invent exclusions, while confirmed sibling plans become HARD
+        avoid-place inputs at the recommendation boundary.
+        """
+        names: list[str] = []
+        seen: set[str] = set()
+        for row in self.repository.sibling_rows_for_child(child_id):
+            sibling_id = UUID(str(row["child_trip_id"]))
+            try:
+                state = self.plans.get_trip_state(sibling_id)
+            except AppError as error:
+                if error.code == "TRIP_NOT_FOUND":
+                    continue
+                raise
+            if state.current_plan is None:
+                continue
+            for day in state.current_plan.days:
+                for task in day.tasks:
+                    name = task.title.strip()
+                    normalized = name.casefold()
+                    if not name or normalized in seen:
+                        continue
+                    seen.add(normalized)
+                    names.append(name)
+        return tuple(names)
+
     def get(self, parent_id: UUID, token: str) -> ParentTrip:
         try:
             parent, rows = self.repository.authorized_rows(parent_id, token)

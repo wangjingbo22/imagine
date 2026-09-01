@@ -471,7 +471,10 @@ export function ConversationPlannerPage() {
           {links.length > 0 && <div className="invite-card"><strong>成员邀请链接</strong><p>每个链接只对应一名成员，在该成员确认资料前可以重复打开。再次打开会生成新会话，并让该成员上一次打开的旧标签页失效。</p>{links.map((item, index) => <div className="invite-row" key={item.invitationId}><span>成员 {index + 1}</span><code>{item.link}</code><div className="invite-row__actions"><a className="button button--soft" href={item.link}><ArrowRight size={14} />进入成员页</a><button type="button" className="button button--soft" onClick={() => void navigator.clipboard.writeText(item.link)}><Copy size={14} />复制</button></div></div>)}</div>}
           {collaboration && canEnterRecommendation(collaboration) && <button className="button button--primary" type="button" onClick={() => {
             if (planningDraft) setStoredPlanContext(collaboration.tripId, planningDraft)
-            navigate(`/recommendation/${collaboration.tripId}`)
+            const parentQuery = parentTripId && Number.isInteger(parentDayIndex)
+              ? `?parentTripId=${encodeURIComponent(parentTripId)}&dayIndex=${parentDayIndex}`
+              : ''
+            navigate(`/recommendation/${collaboration.tripId}${parentQuery}`)
           }}>查看唯一推荐 <ArrowRight size={18} /></button>}
         </section>}
       </section>

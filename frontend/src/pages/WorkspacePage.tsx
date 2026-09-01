@@ -1337,7 +1337,7 @@ export function WorkspacePage() {
 
   return (
     <AppShell compact>
-      {parentTripId && <button className="parent-trip-return" type="button" onClick={() => { window.location.href = `/parent-trips/${parentTripId}` }}>← 返回多日父行程</button>}
+      {parentTripId && <button className="parent-trip-return" type="button" onClick={() => { window.location.href = `/parent-trips/${parentTripId}` }}>← 返回多日行程规划</button>}
       <main className="workspace">
         <header className="workspace-header" data-reveal="fade">
           <div>

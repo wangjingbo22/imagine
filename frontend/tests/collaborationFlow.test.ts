@@ -210,7 +210,7 @@ test('READY collaboration always exposes the authoritative recommendation action
   assert.match(page, /collaboration && canEnterRecommendation\(collaboration\) && <button/)
   assert.doesNotMatch(page, /canEnterRecommendation\(collaboration\) && planningDraft/)
   assert.match(page, /if \(planningDraft\) setStoredPlanContext/)
-  assert.match(page, /navigate\(`\/recommendation\/\$\{collaboration\.tripId\}`\)/)
+  assert.match(page, /navigate\(`\/recommendation\/\$\{collaboration\.tripId\}\$\{parentQuery\}`\)/)
 })
 
 test('home group card opens the planner directly in multiplayer creation mode', async () => {

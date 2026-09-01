@@ -31,3 +31,14 @@ test('parent and child organizer capabilities are sent separately', async () => 
   assert.match(api, /X-Organizer-Token/)
   assert.doesNotMatch(api, /localStorage/)
 })
+
+test('parent context survives recommendation and workspace navigation', async () => {
+  const planner = await readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8')
+  const recommendation = await readFile(new URL('../src/pages/RecommendationPage.tsx', import.meta.url), 'utf8')
+  const workspace = await readFile(new URL('../src/pages/WorkspacePage.tsx', import.meta.url), 'utf8')
+
+  assert.match(planner, /parentTripId=.*dayIndex=/)
+  assert.match(recommendation, /workspaceParams\.set\('parentTripId'/)
+  assert.match(recommendation, /返回多日行程规划/)
+  assert.match(workspace, /返回多日行程规划/)
+})

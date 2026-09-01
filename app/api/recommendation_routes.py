@@ -21,6 +21,7 @@ from app.domain.models import ApiResponse, GeoPoint, Place
 from app.domain.recommendation import CandidateFactProvenance
 from app.infrastructure.provider_fact_registry import SqliteProviderFactRegistry
 from app.services.planning.models import CandidateEndpointFact
+from app.schemas.trip import Preference, PreferenceType
 from app.services.recommendation import (
     ProviderFactPlaceSet,
     ProviderFactSetSummary,
@@ -309,6 +310,35 @@ async def recommendations(trip_id: UUID, request: Request) -> ApiResponse:
         interests = [interest for item in members for interest in item.interests]
         must_visit = [place for item in members for place in item.must_visit]
         avoid_places = [place for item in members for place in item.avoid_places]
+        sibling_place_names = request.app.state.parent_trip_service.used_place_names_for_child(
+            trip_id
+        )
+        if sibling_place_names:
+            existing = {value.casefold() for value in avoid_places}
+            parent_avoids = [
+                value for value in sibling_place_names
+                if value.casefold() not in existing
+            ]
+            avoid_places.extend(parent_avoids)
+            trip = trip.model_copy(update={
+                "participants": [
+                    participant.model_copy(update={
+                        "preferences": [
+                            *participant.preferences,
+                            *[
+                                Preference(
+                                    type=PreferenceType.AVOID_PLACE,
+                                    value=value,
+                                    weight=5,
+                                    is_hard=True,
+                                )
+                                for value in parent_avoids
+                            ],
+                        ]
+                    })
+                    for participant in trip.participants
+                ]
+            })
         start_fact = await _provider_endpoint_fact(
             request.app.state.location_service,
             city_resolution=city,

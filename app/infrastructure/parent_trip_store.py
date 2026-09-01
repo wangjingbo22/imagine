@@ -98,6 +98,26 @@ class SqliteParentTripRepository:
             ).fetchall()
             return dict(parent), [dict(row) for row in days]
 
+    def sibling_rows_for_child(self, child_trip_id: UUID) -> list[dict[str, object]]:
+        """Return the other days in the same parent trip, if this child is linked.
+
+        This lookup is intentionally internal to server-side planning.  The
+        public parent-trip read path still requires the parent organizer token.
+        """
+        with closing(self._connect()) as connection:
+            owner = connection.execute(
+                "SELECT parent_trip_id FROM parent_trip_days WHERE child_trip_id=?",
+                (str(child_trip_id),),
+            ).fetchone()
+            if owner is None:
+                return []
+            rows = connection.execute(
+                "SELECT * FROM parent_trip_days WHERE parent_trip_id=? "
+                "AND child_trip_id IS NOT NULL AND child_trip_id<>? ORDER BY day_index",
+                (owner["parent_trip_id"], str(child_trip_id)),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def link(self, parent_trip_id: UUID, day_index: int, child_trip_id: UUID, token: str) -> None:
         self.authorized_rows(parent_trip_id, token)
         with closing(self._connect()) as connection:

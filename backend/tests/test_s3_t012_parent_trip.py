@@ -27,7 +27,11 @@ class Collaboration:
 
 
 class Plans:
-    def get_trip_state(self, trip_id): raise AppError("TRIP_NOT_FOUND", "x", 404, False)
+    def __init__(self): self.items = {}
+    def get_trip_state(self, trip_id):
+        if trip_id not in self.items:
+            raise AppError("TRIP_NOT_FOUND", "x", 404, False)
+        return self.items[trip_id]
 
 
 def request(days=3):
@@ -98,6 +102,29 @@ def test_parent_token_is_required_and_child_is_unique_across_days(tmp_path: Path
     with pytest.raises(AppError) as duplicate:
         current.link_day(parent.parent_trip_id, 1, child, "parent-token" * 4, "child-token")
     assert duplicate.value.code == "CHILD_TRIP_ALREADY_LINKED"
+
+
+def test_sibling_plan_places_are_automatic_hard_exclusions(tmp_path: Path):
+    current, revisions, collaboration = service(tmp_path)
+    parent = current.create(request(2), "parent-token" * 4)
+    first, second = uuid4(), uuid4()
+    collaboration.tokens.update({first: "first-token", second: "second-token"})
+    revisions.items[first] = SimpleNamespace(understanding=SimpleNamespace(trip=SimpleNamespace(
+        city_name="北京", travel_date=date(2026, 9, 6), budget_cents=20_000)))
+    revisions.items[second] = SimpleNamespace(understanding=SimpleNamespace(trip=SimpleNamespace(
+        city_name="北京", travel_date=date(2026, 9, 7), budget_cents=20_000)))
+    current.link_day(parent.parent_trip_id, 0, first, "parent-token" * 4, "first-token")
+    current.link_day(parent.parent_trip_id, 1, second, "parent-token" * 4, "second-token")
+    current.plans.items[first] = SimpleNamespace(current_plan=SimpleNamespace(days=[
+        SimpleNamespace(tasks=[
+            SimpleNamespace(title="故宫博物院"),
+            SimpleNamespace(title="天坛公园"),
+            SimpleNamespace(title="故宫博物院"),
+        ])
+    ]))
+
+    assert current.used_place_names_for_child(second) == ("故宫博物院", "天坛公园")
+    assert current.used_place_names_for_child(uuid4()) == ()
 
 
 @pytest.mark.asyncio
