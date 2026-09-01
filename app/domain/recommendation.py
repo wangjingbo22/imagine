@@ -12,7 +12,10 @@ from pydantic import Field, field_validator
 
 from app.domain.collaboration import CollaborationModel
 from app.domain.models import Place, SourceStatus
-from app.domain.parent_trip import ParentTripPlaceMemoryItem
+from app.domain.parent_trip import (
+    MAX_PARENT_TRIP_PLACE_MEMORY,
+    ParentTripPlaceMemoryItem,
+)
 
 
 class FactRef(CollaborationModel):
@@ -105,7 +108,7 @@ class RecommendationBundle(CollaborationModel):
     )
     parent_place_memory: list[ParentTripPlaceMemoryItem] = Field(
         default_factory=list,
-        max_length=9,
+        max_length=MAX_PARENT_TRIP_PLACE_MEMORY,
     )
 
 

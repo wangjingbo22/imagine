@@ -13,6 +13,7 @@ from app.domain.parent_trip import (
     ParentTrip,
     ParentTripCreateRequest,
     ParentTripDay,
+    ParentTripDayBudgetUpdate,
     ParentTripInvitationCreated,
     ParentTripInvitationRedeemed,
     ParentTripMemberProfile,
@@ -94,6 +95,7 @@ class ParentTripService:
             return self.get(request.parent_trip_id, token)
         except ParentTripStoreError as error:
             raise self._error(error) from error
+
     def link_day(
         self,
         parent_id: UUID,
@@ -125,6 +127,38 @@ class ParentTripService:
                     False,
                 )
             self.repository.link(parent_id, day_index, child_id, parent_token)
+            return self.get(parent_id, parent_token)
+        except ParentTripStoreError as error:
+            raise self._error(error) from error
+
+    def update_day_budget(
+        self,
+        parent_id: UUID,
+        day_index: int,
+        request: ParentTripDayBudgetUpdate,
+        parent_token: str,
+    ) -> ParentTrip:
+        try:
+            _, days = self.repository.authorized_rows(parent_id, parent_token)
+            if day_index < 0 or day_index >= len(days):
+                raise ParentTripStoreError("PARENT_TRIP_DAY_NOT_FOUND")
+            child_id_value = days[day_index]["child_trip_id"]
+            if child_id_value:
+                revision = self.revisions.get_current(UUID(str(child_id_value)))
+                child_budget = revision.understanding.trip.budget_cents
+                if child_budget is not None and request.budget_cents < child_budget:
+                    raise AppError(
+                        "PARENT_DAY_BUDGET_BELOW_CHILD",
+                        "新预算不能低于已经创建的当日行程预算。",
+                        422,
+                        False,
+                    )
+            self.repository.update_day_budget(
+                parent_id,
+                day_index,
+                request.budget_cents,
+                parent_token,
+            )
             return self.get(parent_id, parent_token)
         except ParentTripStoreError as error:
             raise self._error(error) from error
