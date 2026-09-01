@@ -2,6 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
 
+from app.api.model_access import require_account_model_credentials
 from app.application.execution_event_draft_service import (
     ExecutionEventDraftService,
 )
@@ -46,6 +47,7 @@ async def parse_execution_adjustment(
     service: ExecutionEventDraftService = Depends(
         get_execution_event_draft_service
     ),
+    _: tuple[str, str, str] = Depends(require_account_model_credentials),
 ) -> ExecutionEventDraft:
     outcome = await service.parse(payload)
     response.headers["X-Recognition-Source"] = outcome.recognition_source

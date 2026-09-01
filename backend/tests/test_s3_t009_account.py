@@ -144,6 +144,28 @@ async def test_secure_account_cookie_is_marked_secure(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_unconfigured_account_cannot_generate_trip_drafts(tmp_path: Path):
+    _, client = await _client(tmp_path)
+    async with client:
+        registered = await client.post(
+            "/api/v1/account/register",
+            json={
+                "email": "unconfigured@example.com",
+                "password": PASSWORD,
+                "displayName": "Unconfigured",
+            },
+        )
+        response = await client.post(
+            "/api/v1/trips/drafts/parse",
+            json={"schemaVersion": "1.0", "rawText": "北京一日游"},
+        )
+
+    assert registered.status_code == 200
+    assert response.status_code == 403
+    assert response.json()["code"] == "ACCOUNT_MODEL_CONFIGURATION_REQUIRED"
+
+
+@pytest.mark.asyncio
 async def test_email_is_normalized_and_unique(tmp_path: Path):
     _, client = await _client(tmp_path)
     async with client:
