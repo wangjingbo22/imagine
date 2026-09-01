@@ -230,14 +230,17 @@ test('event persistence exposes the backend idempotency conflict code', async (t
   )
 })
 
-test('Workspace offers deterministic Plan V2 presets and blocks an empty suffix', async () => {
+test('Workspace uses direct deterministic Plan V2 controls and blocks an empty suffix', async () => {
   const source = await readFile(
     new URL('../src/pages/WorkspacePage.tsx', import.meta.url),
     'utf8',
   )
 
-  assert.match(source, /prepareQuickAdjustment\('LATE', 15\)/)
-  assert.match(source, /prepareQuickAdjustment\('FATIGUE', 'SEVERE'\)/)
+  assert.match(source, /selectExecutionAdjustment\('LATE', minutes\)/)
+  assert.match(source, /selectExecutionAdjustment\('FATIGUE', level\)/)
+  assert.match(source, /aria-label="自定义迟到分钟数"/)
+  assert.doesNotMatch(source, /tripApi\.parseExecutionAdjustment/)
+  assert.doesNotMatch(source, /识别自定义描述/)
   assert.match(source, /hasAdjustableSuffix/)
   assert.match(source, /当前已经是最后一个任务，没有后续安排可生成 Plan V2/)
   assert.match(source, /describePlanV2Error\(error\)/)

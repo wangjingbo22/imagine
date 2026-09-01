@@ -53,7 +53,6 @@ import type {
   ConfirmedExecutionAdjustmentEventInput,
   ExecutionAdjustmentReplanPreview,
   ExecutionAdjustmentType,
-  ExecutionEventParseOutcome,
   FatigueLevel,
 } from '../domain/executionAdjustment'
 import {
@@ -87,8 +86,6 @@ import {
   executionAdjustmentBlockReason,
   S1_REPLAN_LIMIT_MESSAGE,
 } from '../services/replanPolicy'
-
-const EXECUTION_REPLAN_HELP = '实际消费变化在完成当前任务时记录'
 
 type WorkspaceView = 'plan' | 'execute' | 'diff' | 'summary'
 
@@ -386,8 +383,7 @@ export function WorkspacePage() {
   const [appliedFeedback, setAppliedFeedback] = useState<string[]>([])
   const [executionAdjustmentCount, setExecutionAdjustmentCount] = useState(0)
   const [executionNotice, setExecutionNotice] = useState('')
-  const [adjustmentText, setAdjustmentText] = useState('')
-  const [adjustmentParse, setAdjustmentParse] = useState<ExecutionEventParseOutcome | null>(null)
+  const [adjustmentTargetTaskId, setAdjustmentTargetTaskId] = useState<string | null>(null)
   const [adjustmentEventType, setAdjustmentEventType] = useState<ExecutionAdjustmentType | ''>('')
   const [adjustmentLateMinutes, setAdjustmentLateMinutes] = useState('')
   const [adjustmentFatigueLevel, setAdjustmentFatigueLevel] = useState<FatigueLevel | ''>('')
@@ -397,7 +393,6 @@ export function WorkspacePage() {
   const [adjustmentPreview, setAdjustmentPreview] = useState<
     ExecutionAdjustmentReplanPreview | null
   >(null)
-  const [isParsingAdjustment, setIsParsingAdjustment] = useState(false)
   const [isConfirmingAdjustment, setIsConfirmingAdjustment] = useState(false)
   const [providerPlan, setProviderPlan] = useState<PlanSnapshot | null>(
     navigationState?.amapPlanResult?.plan ?? null,
@@ -719,9 +714,12 @@ export function WorkspacePage() {
     hasAdjustableSuffix,
     hasOrganizerToken: Boolean(organizerToken),
   })
-  const adjustmentDetailsComplete = adjustmentEventType === 'LATE'
-    ? Number.isInteger(Number(adjustmentLateMinutes)) && Number(adjustmentLateMinutes) >= 1 && Number(adjustmentLateMinutes) <= 240
-    : adjustmentEventType === 'FATIGUE' && Boolean(adjustmentFatigueLevel)
+  const adjustmentTargetsCurrentTask = adjustmentTargetTaskId === currentTask?.id
+  const adjustmentDetailsComplete = adjustmentTargetsCurrentTask && (
+    adjustmentEventType === 'LATE'
+      ? Number.isInteger(Number(adjustmentLateMinutes)) && Number(adjustmentLateMinutes) >= 1 && Number(adjustmentLateMinutes) <= 240
+      : adjustmentEventType === 'FATIGUE' && Boolean(adjustmentFatigueLevel)
+  )
   const changedExecutionTasks = candidatePlanV2?.days[0].tasks.filter((task) => {
     const previous = storedCurrentPlan?.days[0].tasks.find((item) => item.taskId === task.taskId)
     return !previous || previous.timeRange !== task.timeRange || previous.note !== task.note ||
@@ -839,7 +837,7 @@ export function WorkspacePage() {
       return
     }
     if (persistedPlanId) {
-      setPlanLifecycleError('当前 Plan V1 已由服务端签发；不可在客户端覆盖，请确认后通过 Plan V2 调整。')
+      setPlanLifecycleError('当前方案已经固定，不能继续使用本页反馈重新推荐。请接受并开始行程，或返回新建行程重新规划。')
       setIsFeedbackOpen(false)
       return
     }
@@ -1082,11 +1080,11 @@ export function WorkspacePage() {
     setView('diff')
   }
 
-  function prepareQuickAdjustment(
+  function selectExecutionAdjustment(
     eventType: ExecutionAdjustmentType,
-    value: number | FatigueLevel,
+    value?: number | FatigueLevel,
   ) {
-    if (adjustmentBlockReason || isParsingAdjustment || isConfirmingAdjustment) {
+    if (adjustmentBlockReason || isConfirmingAdjustment) {
       if (adjustmentBlockReason) setPlanLifecycleError(adjustmentBlockReason)
       return
     }
@@ -1098,99 +1096,33 @@ export function WorkspacePage() {
       setPlanLifecycleError('当前已经是最后一个任务，没有后续安排可生成 Plan V2。')
       return
     }
-    const lateMinutes = eventType === 'LATE' ? Number(value) : null
-    const fatigueLevel = eventType === 'FATIGUE' ? value as FatigueLevel : null
-    const draft: ExecutionEventParseOutcome['draft'] = {
-      schemaVersion: '1.0',
-      eventType,
-      taskId: currentTask.id,
-      lateMinutes,
-      fatigueLevel,
-      clarificationQuestions: [],
-    }
-    setAdjustmentParse({
-      draft,
-      recognition: {
-        source: 'DETERMINISTIC_FORM',
-        model: null,
-        degradedReason: null,
-      },
-    })
+    setAdjustmentTargetTaskId(currentTask.id)
     setAdjustmentEventType(eventType)
-    setAdjustmentLateMinutes(lateMinutes === null ? '' : String(lateMinutes))
-    setAdjustmentFatigueLevel(fatigueLevel ?? '')
-    setAdjustmentText(
-      eventType === 'LATE'
-        ? `迟到了 ${lateMinutes} 分钟`
-        : `当前为${fatigueLevel === 'MILD' ? '轻度' : fatigueLevel === 'MODERATE' ? '中度' : '重度'}疲劳`,
-    )
+    if (eventType === 'LATE') {
+      setAdjustmentFatigueLevel('')
+      if (typeof value === 'number') setAdjustmentLateMinutes(String(value))
+    } else {
+      setAdjustmentLateMinutes('')
+      if (typeof value === 'string') setAdjustmentFatigueLevel(value)
+    }
     setPendingAdjustmentEvent(null)
     setPlanLifecycleError('')
   }
 
-  async function parseExecutionAdjustment() {
-    if (adjustmentBlockReason || isParsingAdjustment || isConfirmingAdjustment) {
-      if (adjustmentBlockReason) setPlanLifecycleError(adjustmentBlockReason)
-      return
-    }
-    if (!tripId || !currentTask) {
-      setPlanLifecycleError('当前页面缺少正在执行的任务，无法解析调整。')
-      return
-    }
-    if (!organizerToken) {
-      setPlanLifecycleError('当前浏览器没有组织者凭证，不能提交迟到或疲劳调整。')
-      return
-    }
-    if (!hasAdjustableSuffix) {
-      setPlanLifecycleError('当前已经是最后一个任务，没有后续安排可生成 Plan V2。')
-      return
-    }
-    const rawText = adjustmentText.trim()
-    if (!rawText) {
-      setPlanLifecycleError('请先说明迟到或疲劳情况。')
-      return
-    }
-    setIsParsingAdjustment(true)
-    setPlanLifecycleError('')
-    try {
-      const parsed = await tripApi.parseExecutionAdjustment(
-        {
-          schemaVersion: '1.0',
-          rawText,
-          taskId: currentTask.id,
-          currentTask: { taskId: currentTask.id, title: currentTask.title },
-        },
-        organizerToken,
-      )
-      setAdjustmentParse(parsed)
-      setAdjustmentEventType(parsed.draft.eventType ?? '')
-      setAdjustmentLateMinutes(
-        parsed.draft.lateMinutes === null ? '' : String(parsed.draft.lateMinutes),
-      )
-      setAdjustmentFatigueLevel(parsed.draft.fatigueLevel ?? '')
-      setPendingAdjustmentEvent(null)
-    } catch (error) {
-      setPlanLifecycleError(error instanceof Error ? error.message : '解析迟到或疲劳反馈失败')
-    } finally {
-      setIsParsingAdjustment(false)
-    }
-  }
-
   async function confirmExecutionAdjustment() {
-    if (adjustmentBlockReason || isParsingAdjustment || isConfirmingAdjustment) {
+    if (adjustmentBlockReason || isConfirmingAdjustment) {
       if (adjustmentBlockReason) setPlanLifecycleError(adjustmentBlockReason)
       return
     }
-    if (!tripId || !storedCurrentPlan || !adjustmentParse) {
-      setPlanLifecycleError('请先解析并确认当前任务的迟到或疲劳情况。')
+    if (!tripId || !storedCurrentPlan || !currentTask) {
+      setPlanLifecycleError('当前页面缺少正在执行的任务，不能生成 Plan V2。')
       return
     }
     if (!organizerToken) {
       setPlanLifecycleError('当前浏览器没有组织者凭证，只有组织者可以发起重规划。')
       return
     }
-    if (adjustmentParse.draft.taskId !== currentTask?.id) {
-      setAdjustmentParse(null)
+    if (!adjustmentTargetsCurrentTask) {
       setPendingAdjustmentEvent(null)
       setPlanLifecycleError('当前任务已变化，请重新选择迟到或疲劳情况。')
       return
@@ -1198,12 +1130,17 @@ export function WorkspacePage() {
     setIsConfirmingAdjustment(true)
     setPlanLifecycleError('')
     try {
-      const adjustment = buildConfirmedAdjustment(adjustmentParse.draft, {
-        eventType: adjustmentEventType || undefined,
-        lateMinutes: adjustmentLateMinutes.trim()
+      const adjustment = buildConfirmedAdjustment({
+        schemaVersion: '1.0',
+        eventType: adjustmentEventType || null,
+        taskId: currentTask.id,
+        lateMinutes: adjustmentEventType === 'LATE' && adjustmentLateMinutes.trim()
           ? Number(adjustmentLateMinutes)
           : null,
-        fatigueLevel: adjustmentFatigueLevel || null,
+        fatigueLevel: adjustmentEventType === 'FATIGUE'
+          ? adjustmentFatigueLevel || null
+          : null,
+        clarificationQuestions: [],
       })
       const pendingMatches = pendingAdjustmentEvent !== null &&
         pendingAdjustmentEvent.planVersionId === storedCurrentPlan.planId &&
@@ -1299,8 +1236,7 @@ export function WorkspacePage() {
       setPlanDiff(null)
       setAdjustmentPreview(null)
       setPendingAdjustmentEvent(null)
-      setAdjustmentParse(null)
-      setAdjustmentText('')
+      setAdjustmentTargetTaskId(null)
       setAdjustmentEventType('')
       setAdjustmentLateMinutes('')
       setAdjustmentFatigueLevel('')
@@ -1740,7 +1676,7 @@ export function WorkspacePage() {
                   </button>
                 </section>
               )}
-              {isFeedbackOpen ? (
+              {isFeedbackOpen && !persistedPlanId ? (
                 <section className="recommendation-feedback motion-enter">
                   <div className="recommendation-feedback__head">
                     <span><MessageSquareText size={18} /> 告诉 Agent 哪里不合适</span>
@@ -1783,9 +1719,11 @@ export function WorkspacePage() {
                 </section>
               ) : (
                 <div className="plan-decision-actions">
-                  <button className="button button--ghost" onClick={() => setIsFeedbackOpen(true)} type="button">
-                    <MessageSquareText size={17} /> 不满意，重新推荐
-                  </button>
+                  {!persistedPlanId && (
+                    <button className="button button--ghost" onClick={() => setIsFeedbackOpen(true)} type="button">
+                      <MessageSquareText size={17} /> 不满意，重新推荐
+                    </button>
+                  )}
                   <button
                     className="button button--primary"
                     disabled={isConfirmingPlan || isConfirmingEvidence || changingRouteIndex !== null}
@@ -2052,7 +1990,7 @@ export function WorkspacePage() {
 
               <section className="execution-feedback-card">
                 <div className="source-card__head">
-                  <span><MessageSquareText size={18} /> 迟到 / 疲劳调整</span>
+                  <span><MessageSquareText size={18} /> 调整后续行程</span>
                 </div>
                 {adjustmentBlockReason && (
                   <p className="adjustment-unavailable" role="status">{adjustmentBlockReason}</p>
@@ -2060,122 +1998,92 @@ export function WorkspacePage() {
                 {candidatePlanV2 && (
                   <button className="button button--soft" onClick={() => setView('diff')} type="button">查看已有 Plan V2</button>
                 )}
-                {!adjustmentBlockReason && <>
-                {hasAdjustableSuffix ? (
-                  <div className="adjustment-quick-actions">
-                    <span>直接选择常见情况</span>
-                    <div>
-                      <button disabled={isParsingAdjustment || isConfirmingAdjustment} onClick={() => prepareQuickAdjustment('LATE', 15)} type="button">迟到 15 分钟</button>
-                      <button disabled={isParsingAdjustment || isConfirmingAdjustment} onClick={() => prepareQuickAdjustment('LATE', 30)} type="button">迟到 30 分钟</button>
-                      <button disabled={isParsingAdjustment || isConfirmingAdjustment} onClick={() => prepareQuickAdjustment('FATIGUE', 'MILD')} type="button">有点累</button>
-                      <button disabled={isParsingAdjustment || isConfirmingAdjustment} onClick={() => prepareQuickAdjustment('FATIGUE', 'SEVERE')} type="button">需要明显减负</button>
+                {!adjustmentBlockReason && (
+                  <div className="adjustment-direct-form">
+                    <div className="adjustment-field">
+                      <span className="adjustment-field__label">调整类型</span>
+                      <div className="adjustment-segmented" role="group" aria-label="调整类型">
+                        <button
+                          aria-pressed={adjustmentTargetsCurrentTask && adjustmentEventType === 'LATE'}
+                          className={adjustmentTargetsCurrentTask && adjustmentEventType === 'LATE' ? 'is-selected' : ''}
+                          disabled={isConfirmingAdjustment}
+                          onClick={() => selectExecutionAdjustment('LATE')}
+                          type="button"
+                        >迟到</button>
+                        <button
+                          aria-pressed={adjustmentTargetsCurrentTask && adjustmentEventType === 'FATIGUE'}
+                          className={adjustmentTargetsCurrentTask && adjustmentEventType === 'FATIGUE' ? 'is-selected' : ''}
+                          disabled={isConfirmingAdjustment}
+                          onClick={() => selectExecutionAdjustment('FATIGUE')}
+                          type="button"
+                        >疲劳</button>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <p className="adjustment-unavailable">当前已经是最后一个任务，没有后续安排需要生成 Plan V2。</p>
-                )}
-                <textarea
-                  aria-label="说明迟到或疲劳情况"
-                  disabled={isParsingAdjustment || isConfirmingAdjustment || !organizerToken || !hasAdjustableSuffix}
-                  maxLength={160}
-                  onChange={(event) => {
-                    setAdjustmentText(event.target.value)
-                    setAdjustmentParse(null)
-                    setPendingAdjustmentEvent(null)
-                  }}
-                  placeholder="例如：迟到了 25 分钟；或者：我现在很累"
-                  value={adjustmentText}
-                />
-                <button
-                  className="button button--soft"
-                  disabled={
-                    isParsingAdjustment ||
-                    isConfirmingAdjustment ||
-                    !organizerToken ||
-                    !hasAdjustableSuffix ||
-                    !adjustmentText.trim()
-                  }
-                  onClick={() => void parseExecutionAdjustment()}
-                  type="button"
-                >
-                  {isParsingAdjustment
-                    ? <LoaderCircle className="spin-icon" size={15} />
-                    : <Send size={15} />}
-                  {isParsingAdjustment ? '正在识别…' : '识别自定义描述'}
-                </button>
-                {!organizerToken && (
-                  <p className="media-error">当前浏览器没有组织者凭证，只能查看行程，不能发起重规划。</p>
-                )}
-                <p>{EXECUTION_REPLAN_HELP}；迟到或疲劳可在这里确认后立即生成 Plan V2 预览。</p>
-                <p>这里只支持真实的迟到或疲劳情况；“想先吃东西”等用餐顺序调整暂不支持，不要选择疲劳来代替。</p>
-                {adjustmentParse && (
-                  <div className="evidence-review-list adjustment-confirmation" aria-live="polite">
-                    <p>
-                      确认当前情况
-                      {adjustmentParse.recognition.degradedReason
-                        ? '（智能识别暂不可用，已切换为固定选项）'
-                        : ''}
-                    </p>
-                    {adjustmentParse.draft.clarificationQuestions.map((question) => (
-                      <p key={question.questionKey}>{question.prompt}</p>
-                    ))}
-                    {!adjustmentParse.draft.eventType && <p>尚未识别到迟到或疲劳。只有确实发生这些情况时，才填写下方选项。</p>}
-                    <label htmlFor="execution-adjustment-type">调整类型</label>
-                    <select
-                      id="execution-adjustment-type"
-                      disabled={isParsingAdjustment || isConfirmingAdjustment}
-                      onChange={(event) => {
-                        setAdjustmentEventType(event.target.value as ExecutionAdjustmentType | '')
-                        setPendingAdjustmentEvent(null)
-                      }}
-                      value={adjustmentEventType}
-                    >
-                      <option value="">请选择</option>
-                      <option value="LATE">迟到</option>
-                      <option value="FATIGUE">疲劳</option>
-                    </select>
-                    {adjustmentEventType === 'LATE' && (
-                      <label htmlFor="execution-adjustment-late-minutes">
-                        迟到分钟数（1–240）
-                        <input
-                          id="execution-adjustment-late-minutes"
-                          disabled={isParsingAdjustment || isConfirmingAdjustment}
-                          inputMode="numeric"
-                          max="240"
-                          min="1"
-                          onChange={(event) => {
-                            setAdjustmentLateMinutes(event.target.value)
-                            setPendingAdjustmentEvent(null)
-                          }}
-                          type="number"
-                          value={adjustmentLateMinutes}
-                        />
-                      </label>
+
+                    {adjustmentTargetsCurrentTask && adjustmentEventType === 'LATE' && (
+                      <div className="adjustment-field motion-enter">
+                        <span className="adjustment-field__label">迟到时间</span>
+                        <div className="adjustment-choice-grid" role="group" aria-label="迟到时间快捷选项">
+                          {[15, 30, 60].map((minutes) => (
+                            <button
+                              aria-pressed={Number(adjustmentLateMinutes) === minutes}
+                              className={Number(adjustmentLateMinutes) === minutes ? 'is-selected' : ''}
+                              disabled={isConfirmingAdjustment}
+                              key={minutes}
+                              onClick={() => selectExecutionAdjustment('LATE', minutes)}
+                              type="button"
+                            >{minutes} 分钟</button>
+                          ))}
+                        </div>
+                        <label className="adjustment-number-entry" htmlFor="execution-adjustment-late-minutes">
+                          <span>自定义</span>
+                          <input
+                            aria-label="自定义迟到分钟数"
+                            id="execution-adjustment-late-minutes"
+                            disabled={isConfirmingAdjustment}
+                            inputMode="numeric"
+                            max="240"
+                            min="1"
+                            onChange={(event) => {
+                              selectExecutionAdjustment('LATE')
+                              setAdjustmentLateMinutes(event.target.value)
+                              setPendingAdjustmentEvent(null)
+                            }}
+                            placeholder="1–240"
+                            type="number"
+                            value={adjustmentLateMinutes}
+                          />
+                          <b>分钟</b>
+                        </label>
+                      </div>
                     )}
-                    {adjustmentEventType === 'FATIGUE' && (
-                      <label htmlFor="execution-adjustment-fatigue-level">
-                        疲劳程度
-                        <select
-                          id="execution-adjustment-fatigue-level"
-                          disabled={isParsingAdjustment || isConfirmingAdjustment}
-                          onChange={(event) => {
-                            setAdjustmentFatigueLevel(event.target.value as FatigueLevel | '')
-                            setPendingAdjustmentEvent(null)
-                          }}
-                          value={adjustmentFatigueLevel}
-                        >
-                          <option value="">请选择</option>
-                          <option value="MILD">轻度</option>
-                          <option value="MODERATE">中度</option>
-                          <option value="SEVERE">重度</option>
-                        </select>
-                      </label>
+
+                    {adjustmentTargetsCurrentTask && adjustmentEventType === 'FATIGUE' && (
+                      <div className="adjustment-field motion-enter">
+                        <span className="adjustment-field__label">疲劳程度</span>
+                        <div className="adjustment-choice-grid" role="group" aria-label="疲劳程度">
+                          {([
+                            ['MILD', '轻度'],
+                            ['MODERATE', '中度'],
+                            ['SEVERE', '重度'],
+                          ] as const).map(([level, label]) => (
+                            <button
+                              aria-pressed={adjustmentFatigueLevel === level}
+                              className={adjustmentFatigueLevel === level ? 'is-selected' : ''}
+                              disabled={isConfirmingAdjustment}
+                              key={level}
+                              onClick={() => selectExecutionAdjustment('FATIGUE', level)}
+                              type="button"
+                            >{label}</button>
+                          ))}
+                        </div>
+                      </div>
                     )}
+
                     <button
                       className="button button--primary"
                       disabled={
                         isConfirmingAdjustment ||
-                        isParsingAdjustment ||
                         Boolean(adjustmentBlockReason) ||
                         !hasAdjustableSuffix ||
                         !adjustmentDetailsComplete
@@ -2190,7 +2098,6 @@ export function WorkspacePage() {
                     </button>
                   </div>
                 )}
-                </>}
                 {executionNotice && <p><CheckCircle2 size={14} /> {executionNotice}</p>}
                 {planLifecycleError && <p className="media-error">{planLifecycleError}</p>}
               </section>
