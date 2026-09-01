@@ -31,7 +31,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { tripApi, USE_PLAN_VERSION_API } from '../api/tripApi'
 import { AppShell } from '../components/AppShell'
-import { MemoryTimelinePanel } from '../components/MemoryTimelinePanel'
+import { MemoryTimelinePanel, memoryPlanStatusLabel } from '../components/MemoryTimelinePanel'
 import { RouteOverview } from '../components/RouteOverview'
 import { TaskPhotoCard } from '../components/TaskPhotoCard'
 import type {
@@ -57,8 +57,6 @@ import type {
 import type {
   ConfirmedExecutionAdjustmentEventInput,
   ExecutionAdjustmentReplanPreview,
-  ExecutionAdjustmentType,
-  FatigueLevel,
 } from '../domain/executionAdjustment'
 import {
   acceptInitialCandidatePlan,
@@ -97,6 +95,7 @@ import {
   S1_REPLAN_LIMIT_MESSAGE,
 } from '../services/replanPolicy'
 import { useAccountSession } from '../session/useAccountSession'
+import { userFacingErrorMessage } from '../utils/userFacingError'
 
 type WorkspaceView = 'plan' | 'execute' | 'diff' | 'summary'
 
@@ -120,6 +119,25 @@ const diffChangeLabels = {
   ADDED: '新增',
   CHANGED: '变更',
 } as const
+
+const planVersionReasonLabels: Record<string, string> = {
+  INITIAL_PLAN: '初始方案',
+  EXPENSE_CHANGE: '费用变化',
+  DELAY: '行程延误',
+  FATIGUE: '行程强度调整',
+  USER_FEEDBACK: '用户反馈调整',
+  OTHER: '其他调整',
+}
+
+const explanationStatusLabels: Record<string, string> = {
+  GENERATED: '说明已生成',
+  UNAVAILABLE: '说明暂不可用',
+  NOT_REQUESTED: '未请求文字说明',
+}
+
+function planVersionReasonLabel(reason: string): string {
+  return planVersionReasonLabels[reason] ?? '其他调整'
+}
 
 const sourceStatusLabels: Record<SourceStatus, string> = {
   ONLINE: '在线获取',
@@ -167,7 +185,7 @@ const facilityTypeLabels: Record<string, string> = {
 
 function describePlanV2Error(error: unknown) {
   if (!(error instanceof ApiError)) {
-    return error instanceof Error ? error.message : '确认事件并生成 V2 失败'
+    return userFacingErrorMessage(error, '调整方案生成失败，请稍后重试。')
   }
   const messages: Record<string, string> = {
     REPLAN_ADJUSTMENT_NO_CHANGE: '当前安排已满足本次限制，没有实际任务变化，已保留原计划，不生成空白 V2。',
@@ -195,11 +213,11 @@ function describePlanV2Error(error: unknown) {
       if (rule.includes('restIntervalMinutes')) return '现有后续安排无法满足所需休息频率'
       if (rule.includes('BUDGET')) return '已消费金额加剩余费用超过预算，或仍有费用未确认'
       if (rule.includes('CARE')) return '关怀限制或设施事实尚未满足，请核对相关要求'
-      return `未通过规则：${rule}`
+      return '当前方案还有一项限制未满足，请调整后重试'
     }))]
     return [messages.REPLAN_NO_FEASIBLE_CANDIDATE, ...explanations].join(' ')
   }
-  return messages[String(error.code)] ?? `${error.message}（${String(error.code)}）`
+  return messages[String(error.code)] ?? userFacingErrorMessage(error, '调整方案生成失败，请稍后重试。')
 }
 
 function formatMoney(cents: number) {
@@ -264,7 +282,7 @@ function planningFailureDetails(issue: PlanningIssue) {
     if (ruleId === 'T011.BUDGET.LIMIT') {
       return ['当前已知费用超过已确认预算。']
     }
-    return ruleId ? [`未通过规则：${ruleId}`] : []
+    return ruleId ? ['当前方案还有一项限制未满足，请调整后重试。'] : []
   })
 }
 
@@ -359,11 +377,11 @@ function planningFactsRecoveryMessage(error: unknown) {
     case 'PLANNING_PLAN_NOT_ISSUED':
       return '当前计划没有服务端签发记录，已禁止重规划；请返回“新建行程”重新生成。'
     case 'PLANNING_FACTS_NOT_FOUND':
-      return '当前计划缺少可恢复的 Provider 事实，已禁止重规划；请返回“新建行程”重新生成。'
+      return '当前计划缺少可恢复的地点与路线信息，已禁止重规划；请返回“新建行程”重新生成。'
     case 'PLANNING_PROPOSAL_DIGEST_MISMATCH':
       return '服务端规划事实摘要校验不一致，已禁止重规划；请重新生成计划或联系维护人员。'
     default:
-      return `服务端规划事实恢复失败（${String(error.code)}）：${error.message}`
+      return userFacingErrorMessage(error, '行程信息恢复失败，请重新生成计划。')
   }
 }
 
@@ -419,9 +437,7 @@ export function WorkspacePage() {
   const [executionAdjustmentCount, setExecutionAdjustmentCount] = useState(0)
   const [executionNotice, setExecutionNotice] = useState('')
   const [adjustmentTargetTaskId, setAdjustmentTargetTaskId] = useState<string | null>(null)
-  const [adjustmentEventType, setAdjustmentEventType] = useState<ExecutionAdjustmentType | ''>('')
   const [adjustmentLateMinutes, setAdjustmentLateMinutes] = useState('')
-  const [adjustmentFatigueLevel, setAdjustmentFatigueLevel] = useState<FatigueLevel | ''>('')
   const [pendingAdjustmentEvent, setPendingAdjustmentEvent] = useState<
     ConfirmedExecutionAdjustmentEventInput | null
   >(null)
@@ -464,7 +480,7 @@ export function WorkspacePage() {
   )
   const [locationEvidenceError, setLocationEvidenceError] = useState(
     tripId && draft && !confirmedTrip && !navigationState?.amapPlanResult
-      ? '缺少 T004 已确认 Trip，不能猜测起点、终点或参与者；请返回新建行程重新确认。'
+      ? '已确认的行程信息不完整，请返回新建行程重新确认。'
       : '',
   )
   const [localPlannerDraftAvailable, setLocalPlannerDraftAvailable] = useState(false)
@@ -574,7 +590,7 @@ export function WorkspacePage() {
           setView('diff')
         }).catch((error: unknown) => {
           if (cancelled) return
-          setPlanLifecycleError(error instanceof Error ? error.message : '恢复 Plan V2 Diff 失败')
+          setPlanLifecycleError(error instanceof Error ? error.message : '调整方案恢复失败，请稍后重试。')
         })
       } else if (response.data.tripStatus === 'EXECUTING') {
         setView('execute')
@@ -677,10 +693,10 @@ export function WorkspacePage() {
             </div>
             <p>
               {isLoadingLocationEvidence
-                ? '正在通过后端读取高德 Web 服务：解析城市、检索同城 POI，并逐段规划路线。'
+                ? '正在通过高德地图解析城市、检索同城地点，并逐段规划路线。'
                 : locationEvidenceError || '没有可恢复的真实计划，请从“新建行程”重新进入。'}
             </p>
-            {locationEvidenceError && <p className="media-error">不会使用固定数据或 Mock 自动回退。</p>}
+            {locationEvidenceError && <p className="media-error">地点与路线加载失败，请稍后重试。</p>}
             {localPlannerDraftAvailable && <button className="button button--primary" type="button" onClick={() => navigate('/plan')}>继续填写未完成行程</button>}
           </section>
         </main>
@@ -828,11 +844,10 @@ export function WorkspacePage() {
     hasOrganizerToken: Boolean(organizerToken),
   })
   const adjustmentTargetsCurrentTask = adjustmentTargetTaskId === currentTask?.id
-  const adjustmentDetailsComplete = adjustmentTargetsCurrentTask && (
-    adjustmentEventType === 'LATE'
-      ? Number.isInteger(Number(adjustmentLateMinutes)) && Number(adjustmentLateMinutes) >= 1 && Number(adjustmentLateMinutes) <= 240
-      : adjustmentEventType === 'FATIGUE' && Boolean(adjustmentFatigueLevel)
-  )
+  const adjustmentDetailsComplete = adjustmentTargetsCurrentTask &&
+    Number.isInteger(Number(adjustmentLateMinutes)) &&
+    Number(adjustmentLateMinutes) >= 1 &&
+    Number(adjustmentLateMinutes) <= 240
   const changedExecutionTasks = candidatePlanV2?.days[0].tasks.filter((task) => {
     const previous = storedCurrentPlan?.days[0].tasks.find((item) => item.taskId === task.taskId)
     return !previous || previous.timeRange !== task.timeRange || previous.note !== task.note ||
@@ -960,7 +975,7 @@ export function WorkspacePage() {
     }
     const planningTrip = candidateRequest?.trip ?? confirmedTrip
     if (!planningTrip) {
-      setPlanLifecycleError('缺少 T004 已确认 Trip，不能猜测起终点；请返回新建行程重新确认。')
+      setPlanLifecycleError('已确认的行程信息不完整，请返回新建行程重新确认。')
       return
     }
     setIsRegenerating(true)
@@ -1022,7 +1037,7 @@ export function WorkspacePage() {
     amountCents: number | null = null,
   ) {
     if (!tripId) {
-      throw new Error('当前页面缺少 tripId。')
+      throw new Error('当前页面缺少行程信息。')
     }
     await tripApi.createExecutionEvent(tripId, {
       schemaVersion: '1.0',
@@ -1072,7 +1087,7 @@ export function WorkspacePage() {
 
   async function handleAcceptPlan() {
     if (!tripId) {
-      setPlanLifecycleError('当前页面缺少 tripId，请从“新建行程”重新进入。')
+      setPlanLifecycleError('当前页面缺少行程信息，请从“新建行程”重新进入。')
       return
     }
     setIsConfirmingPlan(true)
@@ -1082,7 +1097,7 @@ export function WorkspacePage() {
         throw new Error('当前候选事实不可用，请重新生成计划。')
       }
       if (activePlan.tasks.length < 3) {
-        throw new Error('真实 Provider 地点不足 3 个，当前计划不能确认。')
+        throw new Error('高德返回的同城地点不足 3 个，当前计划不能确认。')
       }
       const acceptance = await acceptInitialCandidatePlan({
         validationStatus: activePlan.validationStatus,
@@ -1208,10 +1223,7 @@ export function WorkspacePage() {
     setView('diff')
   }
 
-  function selectExecutionAdjustment(
-    eventType: ExecutionAdjustmentType,
-    value?: number | FatigueLevel,
-  ) {
+  function selectLateAdjustment(value?: number) {
     if (adjustmentBlockReason || isConfirmingAdjustment) {
       if (adjustmentBlockReason) setPlanLifecycleError(adjustmentBlockReason)
       return
@@ -1225,14 +1237,7 @@ export function WorkspacePage() {
       return
     }
     setAdjustmentTargetTaskId(currentTask.id)
-    setAdjustmentEventType(eventType)
-    if (eventType === 'LATE') {
-      setAdjustmentFatigueLevel('')
-      if (typeof value === 'number') setAdjustmentLateMinutes(String(value))
-    } else {
-      setAdjustmentLateMinutes('')
-      if (typeof value === 'string') setAdjustmentFatigueLevel(value)
-    }
+    if (typeof value === 'number') setAdjustmentLateMinutes(String(value))
     setPendingAdjustmentEvent(null)
     setPlanLifecycleError('')
   }
@@ -1252,7 +1257,7 @@ export function WorkspacePage() {
     }
     if (!adjustmentTargetsCurrentTask) {
       setPendingAdjustmentEvent(null)
-      setPlanLifecycleError('当前任务已变化，请重新选择迟到或疲劳情况。')
+      setPlanLifecycleError('当前任务已变化，请重新选择迟到时间。')
       return
     }
     setIsConfirmingAdjustment(true)
@@ -1260,14 +1265,12 @@ export function WorkspacePage() {
     try {
       const adjustment = buildConfirmedAdjustment({
         schemaVersion: '1.0',
-        eventType: adjustmentEventType || null,
+        eventType: 'LATE',
         taskId: currentTask.id,
-        lateMinutes: adjustmentEventType === 'LATE' && adjustmentLateMinutes.trim()
+        lateMinutes: adjustmentLateMinutes.trim()
           ? Number(adjustmentLateMinutes)
           : null,
-        fatigueLevel: adjustmentEventType === 'FATIGUE'
-          ? adjustmentFatigueLevel || null
-          : null,
+        fatigueLevel: null,
         clarificationQuestions: [],
       })
       const pendingMatches = pendingAdjustmentEvent !== null &&
@@ -1314,15 +1317,15 @@ export function WorkspacePage() {
         preview.data.currentPlanChanged ||
         preview.data.currentPlanId !== storedCurrentPlan.planId
       ) {
-        throw new Error('服务端候选预览违反 CURRENT 不变约束，已停止展示。')
+        throw new Error('调整方案与当前行程状态不一致，已停止展示。')
       }
       setAdjustmentPreview(preview.data)
       setCandidatePlanV2(preview.data.candidatePlan)
       setPlanDiff(preview.data.diff)
       setExecutionNotice(
         preview.data.explanation.status === 'UNAVAILABLE'
-          ? '结构化 V2 与 Diff 已生成；文字解释暂不可用，不影响组织者决策。'
-          : '迟到或疲劳事件已确认，候选 V2 尚未替换当前计划。',
+          ? '调整方案和变更内容已生成；文字解释暂不可用，不影响组织者决策。'
+          : '迟到事件已确认，候选 V2 尚未替换当前计划。',
       )
       setView('diff')
     } catch (error) {
@@ -1365,9 +1368,7 @@ export function WorkspacePage() {
       setAdjustmentPreview(null)
       setPendingAdjustmentEvent(null)
       setAdjustmentTargetTaskId(null)
-      setAdjustmentEventType('')
       setAdjustmentLateMinutes('')
-      setAdjustmentFatigueLevel('')
       setExecutionNotice(
         decision === 'accept'
           ? '已接受 Plan V2；Plan V1 已转为历史版本。'
@@ -1636,7 +1637,7 @@ export function WorkspacePage() {
                 startLocationText={candidateRequest?.trip.days[0].startLocationText ?? null}
               />
               <section className="metric-card">
-                <div className="metric-card__head"><span>Provider 已知费用</span><strong>{formatMoney(activePlan.totalCostCents)} / {formatMoney(budgetCents)}</strong></div>
+                <div className="metric-card__head"><span>已知计划费用</span><strong>{formatMoney(activePlan.totalCostCents)} / {formatMoney(budgetCents)}</strong></div>
                 <div className="progress-bar"><i style={{ width: `${budgetUsagePercent}%` }} /></div>
                 <div className="metric-grid">
                   <div><Wallet size={18} /><span>剩余缓冲<strong>{formatMoney(remainingBudgetCents)}</strong></span></div>
@@ -1659,10 +1660,9 @@ export function WorkspacePage() {
                           ? '计划未通过硬约束'
                           : '计划需要补充事实'}
                       </strong>
-                      <small>{planningIssue.code}</small>
                     </span>
                   </div>
-                  <p>{planningIssue.message}</p>
+                  <p>{userFacingErrorMessage(planningIssue.message, '当前方案需要补充信息后才能确认。')}</p>
                   {hardFailureDetails.length > 0 && (
                     <ul>{hardFailureDetails.map((detail) => <li key={detail}>{detail}</li>)}</ul>
                   )}
@@ -1806,7 +1806,7 @@ export function WorkspacePage() {
               )}
               <section className="explanation-card">
                 <div className="explanation-card__head">
-                  <span><Sparkles size={18} /> Agent 推荐理由</span>
+                  <span><Sparkles size={18} /> 推荐理由</span>
                   <small>可解释</small>
                 </div>
                 <p>优先满足{planningDraft?.interests.slice(0, 2).join('和') || '历史文化和特色餐饮'}偏好，在满足{planningDraft?.assistanceMode === 'standard' ? '时间与预算' : '关怀'}约束的前提下，减少无效折返并保留返程缓冲。</p>
@@ -1820,7 +1820,7 @@ export function WorkspacePage() {
                 <div className="source-card__head">
                   <span><Layers3 size={18} /> 数据可信状态</span>
                   <strong className="city-code-chip">
-                    {displayedCityCode ? `cityCode ${displayedCityCode}` : '正在核验城市'}
+                    {displayedCityCode ? '当前城市已核验' : '正在核验城市'}
                   </strong>
                 </div>
                 <div>
@@ -1830,10 +1830,10 @@ export function WorkspacePage() {
                 </div>
                 <div>
                   <CircleDollarSign size={15} />
-                  <span>Provider 价格</span>
+                  <span>地点参考价格</span>
                   <strong className={priceProvenance?.sourceStatus === 'UNKNOWN' ? 'needs-confirmation' : ''}>
                     {serverPlanReady
-                      ? 'Provider 原值 + 用户确认 · 已完整'
+                      ? '原始价格与用户确认 · 已完整'
                       : knownPrice?.amountCents !== null && knownPrice?.amountCents !== undefined
                       ? `${formatMoney(knownPrice.amountCents)} · ${sourceStatusLabels[knownPrice.provenance.sourceStatus]}`
                       : priceProvenance
@@ -1862,22 +1862,20 @@ export function WorkspacePage() {
               </section>
               <section className="provider-evidence-card">
                 <div className="source-card__head">
-                  <span><BadgeCheck size={18} /> 同城 Provider 证据</span>
+                  <span><BadgeCheck size={18} /> 同城地点与路线</span>
                   {isLoadingLocationEvidence && <LoaderCircle className="spin-icon" size={15} />}
                 </div>
                 {locationEvidence ? (
                   <>
                     <p>
-                      “{locationEvidence.queries.join(' / ')}”候选仅来自
-                      {locationEvidence.city.cityContext.cityName}（{locationEvidence.city.cityContext.cityCode}），
-                      不会读取其他城市缓存。
+                      以下地点与路线均已按{locationEvidence.city.cityContext.cityName}核验，不会混入其他城市的结果。
                     </p>
                     <div className="provider-place-list">
                       {locationEvidence.places.length > 0 ? locationEvidence.places.slice(0, 3).map((place) => (
                         <article key={place.placeId}>
                           <div>
                             <strong>{place.name}</strong>
-                            <small>{place.address || '地址待 Provider 补充'}</small>
+                            <small>{place.address || '地址信息待补充'}</small>
                           </div>
                           <div>
                             <span>{formatSource(place.provenance)}</span>
@@ -1913,29 +1911,26 @@ export function WorkspacePage() {
                   </>
                 ) : storedCurrentPlan ? (
                   <>
-                    <p>
-                      已从不可变 PlanVersion 恢复 {storedProviderSources.length} 条 AMAP 来源快照；
-                      cityCode 为 {storedCurrentPlan.tripSnapshot.cityContext.cityCode}。
-                    </p>
+                    <p>已恢复当前方案的地点与路线信息。</p>
                     <div className="provider-route-evidence">
                       <Layers3 size={17} />
                       <span>
-                        <strong>来源快照已恢复</strong>
-                        <small>页面刷新不会把 Provider 来源改写为 Mock；重新搜索需要从新建行程页进入。</small>
+                        <strong>来源信息已恢复</strong>
+                        <small>页面刷新后会保留当前方案；重新搜索需要从新建行程页进入。</small>
                       </span>
                     </div>
                   </>
                 ) : isLoadingLocationEvidence ? (
-                  <p>正在向高德 Web 服务核验城市、地点候选和路线……</p>
+                  <p>正在通过高德地图核验城市、地点候选和路线……</p>
                 ) : (
                   <p>当前页面没有可恢复的城市输入，请从“新建行程”重新进入。</p>
                 )}
-                {locationEvidenceError && <p className="media-error">{locationEvidenceError}</p>}
+                {locationEvidenceError && <p className="media-error">{userFacingErrorMessage(locationEvidenceError, '地点与路线加载失败，请稍后重试。')}</p>}
               </section>
               {isFeedbackOpen && !persistedPlanId ? (
                 <section className="recommendation-feedback motion-enter">
                   <div className="recommendation-feedback__head">
-                    <span><MessageSquareText size={18} /> 告诉 Agent 哪里不合适</span>
+                    <span><MessageSquareText size={18} /> 告诉我们哪里不合适</span>
                     <button onClick={() => setIsFeedbackOpen(false)} type="button"><X size={16} /></button>
                   </div>
                   <div className="recommendation-feedback__options">
@@ -1976,7 +1971,7 @@ export function WorkspacePage() {
               ) : (
                 <div className="plan-decision-actions">
                   {planningIssue && !candidateReview && (
-                    <p aria-live="polite" className="media-error">{planningIssue.message}</p>
+                    <p aria-live="polite" className="media-error">{userFacingErrorMessage(planningIssue.message, '当前方案需要补充信息后才能确认。')}</p>
                   )}
                   {candidatePreviewNotice && (
                     <div aria-live="polite" className="evidence-review-list">
@@ -2003,7 +1998,7 @@ export function WorkspacePage() {
                     {primaryActionLabel}
                     {!isConfirmingPlan && !isConfirmingEvidence && <ArrowRight size={18} />}
                   </button>
-                  {planLifecycleError && <p className="media-error">{planLifecycleError}</p>}
+                  {planLifecycleError && <p className="media-error">{userFacingErrorMessage(planLifecycleError, '当前操作失败，请稍后重试。')}</p>}
                 </div>
               )}
             </aside>
@@ -2016,7 +2011,7 @@ export function WorkspacePage() {
               <div>
                 <span className="section-kicker">候选方案审核 · 等待你的决定</span>
                 <h2>V1/V2 变更对比</h2>
-                <p>候选 Plan V2 尚未覆盖当前计划。只有接受后，V2 才会成为唯一的 CURRENT 版本。</p>
+                <p>候选方案 V2 尚未覆盖当前计划。只有接受后，V2 才会成为当前使用的版本。</p>
               </div>
               <span className="plan-diff-version">V1 <ArrowRight size={16} /> V2</span>
             </div>
@@ -2025,22 +2020,22 @@ export function WorkspacePage() {
               <section className="explanation-card" aria-live="polite">
                 <div className="explanation-card__head">
                   <span><Sparkles size={18} /> 本次执行调整</span>
-                  <small>{adjustmentPreview.explanation.status}</small>
+                  <small>{explanationStatusLabels[adjustmentPreview.explanation.status] ?? '说明状态待确认'}</small>
                 </div>
                 <p>
                   {adjustmentPreview.explanation.status === 'GENERATED'
                     ? adjustmentPreview.explanation.summary
                     : adjustmentPreview.explanation.status === 'UNAVAILABLE'
-                      ? '文字解释暂不可用；下方结构化 Diff、HARD 校验和决策仍然有效。'
-                      : '本次未请求文字解释；请以结构化 Diff 为准。'}
+                      ? '文字解释暂不可用；下方的变更内容、硬性限制校验和决策仍然有效。'
+                      : '本次未请求文字解释；请以下方变更内容为准。'}
                 </p>
                 <div className="reason-tags">
                   {adjustmentPreview.eventConstraints.reasons.map((reason) => (
-                    <span key={reason.reasonCode}>{reason.message}</span>
+                    <span key={reason.reasonCode}>{userFacingErrorMessage(reason.message, '本次调整需要重新核对行程限制。')}</span>
                   ))}
                   <span>冻结任务 {adjustmentPreview.frozenTaskIds.length} 个</span>
                   <span>
-                    HARD 校验 {
+                    硬性限制校验 {
                       adjustmentPreview.validationReport.checks.every(
                         (check) => check.hardness !== 'HARD' || check.status === 'PASS',
                       ) ? '通过' : '未通过'
@@ -2133,7 +2128,7 @@ export function WorkspacePage() {
                   {isDecidingV2 ? '正在处理决策…' : '接受 V2 并继续执行'}
                 </button>
               </div>
-              {planLifecycleError && <p className="media-error">{planLifecycleError}</p>}
+              {planLifecycleError && <p className="media-error">{userFacingErrorMessage(planLifecycleError, '当前操作失败，请稍后重试。')}</p>}
             </div>
           </section>
         )}
@@ -2143,7 +2138,7 @@ export function WorkspacePage() {
             <div className="execution-web__main">
               <div className="execution-web__heading">
                 <div>
-                  <span className="section-kicker">LIVE EXECUTION · CONTINUOUS PLAN</span>
+                  <span className="section-kicker">行程执行中</span>
                   <h2>当前任务</h2>
                 </div>
                 <span className="execution-status"><span className="status-dot" /> 行程执行中</span>
@@ -2263,89 +2258,45 @@ export function WorkspacePage() {
                   <p className="adjustment-unavailable" role="status">{adjustmentBlockReason}</p>
                 )}
                 {candidatePlanV2 && (
-                  <button className="button button--soft" onClick={() => setView('diff')} type="button">查看已有 Plan V2</button>
+                  <button className="button button--soft" onClick={() => setView('diff')} type="button">查看已有调整方案</button>
                 )}
                 {!adjustmentBlockReason && (
                   <div className="adjustment-direct-form">
                     <div className="adjustment-field">
-                      <span className="adjustment-field__label">调整类型</span>
-                      <div className="adjustment-segmented" role="group" aria-label="调整类型">
-                        <button
-                          aria-pressed={adjustmentTargetsCurrentTask && adjustmentEventType === 'LATE'}
-                          className={adjustmentTargetsCurrentTask && adjustmentEventType === 'LATE' ? 'is-selected' : ''}
-                          disabled={isConfirmingAdjustment}
-                          onClick={() => selectExecutionAdjustment('LATE')}
-                          type="button"
-                        >迟到</button>
-                        <button
-                          aria-pressed={adjustmentTargetsCurrentTask && adjustmentEventType === 'FATIGUE'}
-                          className={adjustmentTargetsCurrentTask && adjustmentEventType === 'FATIGUE' ? 'is-selected' : ''}
-                          disabled={isConfirmingAdjustment}
-                          onClick={() => selectExecutionAdjustment('FATIGUE')}
-                          type="button"
-                        >疲劳</button>
-                      </div>
-                    </div>
-
-                    {adjustmentTargetsCurrentTask && adjustmentEventType === 'LATE' && (
-                      <div className="adjustment-field motion-enter">
-                        <span className="adjustment-field__label">迟到时间</span>
-                        <div className="adjustment-choice-grid" role="group" aria-label="迟到时间快捷选项">
-                          {[15, 30, 60].map((minutes) => (
-                            <button
-                              aria-pressed={Number(adjustmentLateMinutes) === minutes}
-                              className={Number(adjustmentLateMinutes) === minutes ? 'is-selected' : ''}
-                              disabled={isConfirmingAdjustment}
-                              key={minutes}
-                              onClick={() => selectExecutionAdjustment('LATE', minutes)}
-                              type="button"
-                            >{minutes} 分钟</button>
-                          ))}
-                        </div>
-                        <label className="adjustment-number-entry" htmlFor="execution-adjustment-late-minutes">
-                          <span>自定义</span>
-                          <input
-                            aria-label="自定义迟到分钟数"
-                            id="execution-adjustment-late-minutes"
+                      <span className="adjustment-field__label">迟到时间</span>
+                      <div className="adjustment-choice-grid" role="group" aria-label="迟到时间快捷选项">
+                        {[15, 30, 60].map((minutes) => (
+                          <button
+                            aria-pressed={adjustmentTargetsCurrentTask && Number(adjustmentLateMinutes) === minutes}
+                            className={adjustmentTargetsCurrentTask && Number(adjustmentLateMinutes) === minutes ? 'is-selected' : ''}
                             disabled={isConfirmingAdjustment}
-                            inputMode="numeric"
-                            max="240"
-                            min="1"
-                            onChange={(event) => {
-                              selectExecutionAdjustment('LATE')
-                              setAdjustmentLateMinutes(event.target.value)
-                              setPendingAdjustmentEvent(null)
-                            }}
-                            placeholder="1–240"
-                            type="number"
-                            value={adjustmentLateMinutes}
-                          />
-                          <b>分钟</b>
-                        </label>
+                            key={minutes}
+                            onClick={() => selectLateAdjustment(minutes)}
+                            type="button"
+                          >{minutes} 分钟</button>
+                        ))}
                       </div>
-                    )}
-
-                    {adjustmentTargetsCurrentTask && adjustmentEventType === 'FATIGUE' && (
-                      <div className="adjustment-field motion-enter">
-                        <span className="adjustment-field__label">疲劳程度</span>
-                        <div className="adjustment-choice-grid" role="group" aria-label="疲劳程度">
-                          {([
-                            ['MILD', '轻度'],
-                            ['MODERATE', '中度'],
-                            ['SEVERE', '重度'],
-                          ] as const).map(([level, label]) => (
-                            <button
-                              aria-pressed={adjustmentFatigueLevel === level}
-                              className={adjustmentFatigueLevel === level ? 'is-selected' : ''}
-                              disabled={isConfirmingAdjustment}
-                              key={level}
-                              onClick={() => selectExecutionAdjustment('FATIGUE', level)}
-                              type="button"
-                            >{label}</button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                      <label className="adjustment-number-entry" htmlFor="execution-adjustment-late-minutes">
+                        <span>自定义</span>
+                        <input
+                          aria-label="自定义迟到分钟数"
+                          id="execution-adjustment-late-minutes"
+                          disabled={isConfirmingAdjustment}
+                          inputMode="numeric"
+                          max="240"
+                          min="1"
+                          onChange={(event) => {
+                            selectLateAdjustment()
+                            setAdjustmentLateMinutes(event.target.value)
+                            setPendingAdjustmentEvent(null)
+                          }}
+                          placeholder="1–240"
+                          type="number"
+                          value={adjustmentLateMinutes}
+                        />
+                        <b>分钟</b>
+                      </label>
+                    </div>
 
                     <button
                       className="button button--primary"
@@ -2366,7 +2317,7 @@ export function WorkspacePage() {
                   </div>
                 )}
                 {executionNotice && <p><CheckCircle2 size={14} /> {executionNotice}</p>}
-                {planLifecycleError && <p className="media-error">{planLifecycleError}</p>}
+                {planLifecycleError && <p className="media-error">{userFacingErrorMessage(planLifecycleError, '当前操作失败，请稍后重试。')}</p>}
               </section>
 
               <section className="execution-rules-card">
@@ -2383,7 +2334,7 @@ export function WorkspacePage() {
           <section className="summary-stage motion-enter">
             <div className="summary-hero">
               <span className="summary-icon"><BadgeCheck size={34} /></span>
-              <span className="section-kicker">JOURNEY COMPLETE</span>
+              <span className="section-kicker">行程已完成</span>
               <h2>今天，你和{planningDraft?.cityName ?? activePlan.cityName}认真地见了一面。</h2>
               <p>行程已经结束。以下数字和版本历史均来自服务端总结。</p>
             </div>
@@ -2396,13 +2347,13 @@ export function WorkspacePage() {
             {summaryView?.visibleSections.includes('history') && summary && (
               <div className="summary-history">
                 <div className="panel-heading">
-                  <div><span className="section-kicker">PLAN HISTORY</span><h2>版本变化</h2></div>
+                  <div><h2>版本变化</h2></div>
                 </div>
                 {summary.planHistory.map((item) => (
                   <div className="summary-history__row" key={item.planId}>
-                    <span>Plan V{item.version}</span>
-                    <strong>{item.status}</strong>
-                    <small>{item.reason}</small>
+                    <span>方案 V{item.version}</span>
+                    <strong>{memoryPlanStatusLabel(item.status)}</strong>
+                    <small>{planVersionReasonLabel(item.reason)}</small>
                   </div>
                 ))}
               </div>

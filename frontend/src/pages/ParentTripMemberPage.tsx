@@ -14,7 +14,10 @@ import {
   updateParentTripMemberProfile,
 } from '../api/parentTripApi'
 import { AppShell } from '../components/AppShell'
-import type { ParentTripSyncView } from '../domain/parentTrip'
+import {
+  parentTripChildStatusLabel,
+  type ParentTripSyncView,
+} from '../domain/parentTrip'
 import {
   capturePendingInvitation,
   clearParentMemberSession,
@@ -25,6 +28,7 @@ import {
   readPendingInvitation,
   storeParentMemberSession,
 } from '../services/parentTripCollaboration'
+import { userFacingErrorMessage } from '../utils/userFacingError'
 
 const yuan = (cents: number | null) => (
   cents === null ? '尚未生成' : `¥${(cents / 100).toFixed(0)}`
@@ -229,7 +233,7 @@ export function ParentTripMemberPage() {
       <section className="parent-member-state" aria-live="polite">
         <RefreshCw className={phase === 'ERROR' ? '' : 'is-spinning'} size={26} />
         <h1>{phase === 'JOINING' ? '正在加入父行程' : phase === 'ERROR' ? '无法打开父行程' : '正在同步父行程'}</h1>
-        {error && <p className="inline-error" role="alert">{error}</p>}
+        {error && <p className="inline-error" role="alert">{userFacingErrorMessage(error, '成员行程加载失败，请稍后重试。')}</p>}
         {phase === 'ERROR' && !parentTripId && <button className="button button--soft" type="button" onClick={() => { setPhase('JOINING'); setError(''); setJoinAttempt((value) => value + 1) }}>重试</button>}
       </section>
     </main></AppShell>
@@ -269,10 +273,10 @@ export function ParentTripMemberPage() {
         <header><CalendarDays size={21} /><h2>每日行程</h2></header>
         {trip.days.map((day) => <article className="parent-member-day" key={day.dayIndex}>
           <div><strong>第 {day.dayIndex + 1} 天</strong><span>{day.date}</span></div>
-          <div><span>预算 {yuan(day.budgetCents)}</span><b>{day.childTripId ? day.childStatus : '尚未创建'}</b></div>
+          <div><span>预算 {yuan(day.budgetCents)}</span><b>{day.childTripId ? parentTripChildStatusLabel(day.childStatus) : '尚未创建'}</b></div>
         </article>)}
       </section>
     </div>
-    {error && <p className="inline-error parent-member-error" role="alert">{error}</p>}
+    {error && <p className="inline-error parent-member-error" role="alert">{userFacingErrorMessage(error, '成员行程操作失败，请稍后重试。')}</p>}
   </main></AppShell>
 }

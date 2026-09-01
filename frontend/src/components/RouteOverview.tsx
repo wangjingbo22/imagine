@@ -11,6 +11,7 @@ import {
   type AMapPosition,
 } from '../lib/amapJsApi'
 import type { LocationEvidence } from '../services/amapPlan'
+import { userFacingErrorMessage } from '../utils/userFacingError'
 
 interface RouteOverviewProps {
   cityName: string
@@ -193,8 +194,8 @@ function AmapRouteCanvas({
 
   const missingConfig = !config.key || !config.securityJsCode
   const message = missingConfig
-    ? '请在 frontend/.env 填写高德 Web端（JS API）Key 和安全密钥，然后重启前端。'
-    : mapError
+    ? '地图暂时无法加载，请联系维护人员检查地图配置。'
+    : userFacingErrorMessage(mapError, '地图暂时无法加载，请稍后重试。')
 
   return (
     <div className={`real-route-map${expanded ? ' real-route-map--expanded' : ''}`}>
@@ -206,7 +207,7 @@ function AmapRouteCanvas({
           <span>{message}</span>
         </div>
       )}
-      <div className="real-route-map__city">{cityName} · 高德地图 · GCJ‑02</div>
+      <div className="real-route-map__city">{cityName} · 高德地图</div>
       <div className="real-route-map__legend" aria-label="分段路线">
         {evidence.routes.map((route, index) => (
           <span

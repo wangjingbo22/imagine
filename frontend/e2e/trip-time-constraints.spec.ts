@@ -46,6 +46,7 @@ test('a protected planner revealed after account restoration remains visible', a
   const panel = page.locator('.conversation-panel')
   await expect(panel).toHaveClass(/is-revealed/)
   await expect(page.getByRole('button', { name: /单人创建/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /测试模板/ })).toHaveCount(0)
 })
 
 test('parent day planning opens today expectation and omits inherited city and date', async ({ page }) => {
@@ -69,6 +70,15 @@ test('parent day planning opens today expectation and omits inherited city and d
   await expect(page.getByText('问题 1 / 4')).toBeVisible()
   await expect(page.getByRole('heading', { name: '从哪里出发、最终回到哪里？' })).toBeVisible()
   await expect(page.getByLabel('当日预算（多日行程已分配）')).toHaveValue('500')
+  await page.getByLabel('出发地').fill('北京站')
+  await page.getByLabel('结束地').fill('北京站')
+  await page.getByRole('button', { name: /下一个问题/ }).click()
+  await page.locator('.conversation-textarea--answer').fill('喜欢历史文化，故宫必去，避开酒吧。')
+  await page.getByRole('button', { name: /下一个问题/ }).click()
+  await expect(page.getByRole('heading', { name: '是否有步行、换乘、休息或关怀需求？' })).toBeVisible()
+  await expect(page.getByLabel('个人预算上限（元）')).toHaveCount(0)
+  await expect(page.getByLabel('关怀模式')).toHaveValue('ORDINARY')
+  await expect(page.getByRole('button', { name: /下一个问题/ })).toBeEnabled()
 
   await page.goto(`/plan?${new URLSearchParams({ ...baseParams, mode: 'group' })}`)
   await expect(page.getByText('先填写今天的期待', { exact: true })).toBeVisible()

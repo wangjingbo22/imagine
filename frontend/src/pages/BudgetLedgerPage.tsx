@@ -5,6 +5,7 @@ import { getParentTripSync } from '../api/parentTripApi'
 import { AppShell } from '../components/AppShell'
 import type { ParentTripDay } from '../domain/parentTrip'
 import { parentTripOrganizerTokenKey } from '../services/parentTripCollaboration'
+import { userFacingErrorMessage } from '../utils/userFacingError'
 
 type ExpenseCategory = '交通' | '门票' | '餐饮' | '其他'
 type FactStatus = 'REALTIME' | 'ESTIMATED' | 'UNKNOWN'
@@ -82,7 +83,7 @@ export function BudgetLedgerPage() {
         }
       })
       .catch((error: Error) => {
-        setNotice(`父行程账本读取失败：${error.message}`)
+        setNotice(userFacingErrorMessage(error, '费用账本读取失败，请稍后重试。'))
         setLines(fallbackLedgerLines())
       })
   }, [parentTripId])

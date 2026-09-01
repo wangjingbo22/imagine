@@ -13,8 +13,9 @@ import {
   updateParentTripDayBudget,
 } from '../api/parentTripApi'
 import { AppShell } from '../components/AppShell'
-import type {
-  ParentTrip,
+import {
+  parentTripChildStatusLabel,
+  type ParentTrip,
 } from '../domain/parentTrip'
 import {
   parentTripOrganizerTokenKey,
@@ -26,6 +27,7 @@ import {
   tripDateRangeDayCount,
   validateTripDateRange,
 } from '../services/tripTimeConstraints'
+import { userFacingErrorMessage } from '../utils/userFacingError'
 
 const citySuggestions = ['北京', '上海', '成都', '西安', '杭州']
 const MIN_DAY_COUNT = 2
@@ -233,9 +235,9 @@ export function ParentTripPage() {
       <section className="parent-days">{trip.days.map((day) => <article key={day.dayIndex} className="parent-day-card"><div className="parent-day-date"><CalendarDays/><div><b>第 {day.dayIndex + 1} 天</b><span>{day.date}</span></div></div>
         <div className="parent-day-budget-editor"><label htmlFor={`day-budget-${day.dayIndex}`}>当日预算（元）</label><div><input id={`day-budget-${day.dayIndex}`} type="number" min="0" inputMode="decimal" value={budgetDrafts[day.dayIndex] ?? String(day.budgetCents / 100)} onChange={(event) => setBudgetDrafts((current) => ({ ...current, [day.dayIndex]: event.target.value }))} /><button className="button button--soft" type="button" disabled={budgetBusyDay === day.dayIndex || Number(budgetDrafts[day.dayIndex]) * 100 === day.budgetCents} onClick={() => void saveDayBudget(day.dayIndex)}>{budgetBusyDay === day.dayIndex ? '保存中' : '保存预算'}</button></div></div>
         <dl><div><dt>计划费用</dt><dd>{yuan(day.plannedCostCents)}</dd></div><div><dt>实际支出</dt><dd>{yuan(day.actualSpentCents)}</dd></div></dl>
-        <p className={`parent-day-status parent-day-status--${day.costStatus.toLowerCase()}`}>{day.childTripId ? `单日 Trip · ${day.childStatus}` : '尚未创建单日 Trip'}</p>
+        <p className={`parent-day-status parent-day-status--${day.costStatus.toLowerCase()}`}>{day.childTripId ? `单日行程 · ${parentTripChildStatusLabel(day.childStatus)}` : '尚未创建单日行程'}</p>
         <button className="button button--primary" onClick={() => enterDay(day.dayIndex)}>{day.childTripId ? '进入当日行程' : '创建当日行程'} <ChevronRight size={17}/></button></article>)}</section></>}
-    {error && <p className="inline-error" role="alert">{error}</p>}
+    {error && <p className="inline-error" role="alert">{userFacingErrorMessage(error, '多日行程操作失败，请稍后重试。')}</p>}
     <p className="parent-trip-scope">当前范围不包含酒店、跨城搜索预订或跨日自动重规划。</p>
   </main></AppShell>
 }

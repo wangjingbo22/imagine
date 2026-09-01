@@ -16,6 +16,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { AppShell } from '../components/AppShell'
 import type { CreateSingleDayTrip, TripDraftInput } from '../domain/trip'
 import { loadAmapPlan, type AmapPlanResult } from '../services/amapPlan'
+import { userFacingErrorMessage } from '../utils/userFacingError'
 
 const processSteps = [
   {
@@ -40,6 +41,13 @@ const processSteps = [
   },
 ]
 
+const phaseDetails = {
+  CITY: '正在确认本次行程的目的城市',
+  PLACES: '正在检索符合偏好的同城地点',
+  ROUTES: '正在规划地点之间的实际路线',
+  PLAN: '正在核对预算、时间和关怀需求',
+} as const
+
 export function AgentProcessPage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -56,10 +64,10 @@ export function AgentProcessPage() {
   const [planningResult, setPlanningResult] = useState<AmapPlanResult | null>(null)
   const [planningError, setPlanningError] = useState(() => {
     if (!draft) return '缺少行程草稿，请返回新建行程页面重新提交。'
-    if (!tripId || !confirmedTrip) return '缺少 T004 已确认 Trip，请返回新建行程页面重新确认。'
+    if (!tripId || !confirmedTrip) return '行程信息不完整，请返回新建行程页面重新确认。'
     return ''
   })
-  const [providerDetail, setProviderDetail] = useState('等待连接高德 Web 服务')
+  const [providerDetail, setProviderDetail] = useState('等待连接高德地图服务')
   const [retryToken, setRetryToken] = useState(0)
   const planningPromiseRef = useRef<Promise<AmapPlanResult> | null>(null)
 
@@ -72,10 +80,10 @@ export function AgentProcessPage() {
     const planningPromise = planningPromiseRef.current ?? loadAmapPlan(
       tripId,
       draft,
-      (phase, detail) => {
+      (phase) => {
         if (cancelled) return
         setCompletedSteps(phaseStep[phase])
-        setProviderDetail(detail)
+        setProviderDetail(phaseDetails[phase])
       },
       { confirmedTrip },
     )
@@ -86,7 +94,7 @@ export function AgentProcessPage() {
       setCompletedSteps(processSteps.length)
       setProviderDetail(
         result.planningIssue
-          ? `高德事实已返回；服务端标记 ${result.planningIssue.code}`
+          ? '地点与路线已返回，部分信息需要确认'
           : `高德返回 ${result.evidence.places.length} 个地点和 ${result.evidence.routes.length} 段路线`,
       )
       setIsPlanReady(true)
@@ -95,8 +103,8 @@ export function AgentProcessPage() {
       if (planningPromiseRef.current === planningPromise) {
         planningPromiseRef.current = null
       }
-      setPlanningError(error instanceof Error ? error.message : '高德真实数据生成失败')
-      setProviderDetail('未使用固定数据回退')
+      setPlanningError(userFacingErrorMessage(error, '行程方案暂时生成失败，请稍后重试。'))
+      setProviderDetail('本次生成未完成')
     })
     return () => {
       cancelled = true
@@ -140,11 +148,11 @@ export function AgentProcessPage() {
   ]
   const dynamicStepResults = [
     `${9 + (draft?.mustVisit.length ?? 0) + (draft?.avoidPlaces.length ?? 0)} 项结构化字段`,
-    planningResult ? `${planningResult.evidence.places.length} 个高德 POI` : '正在读取 Provider',
+    planningResult ? `${planningResult.evidence.places.length} 个高德地点` : '正在读取地点信息',
     planningResult ? `${planningResult.evidence.routes.length} 段真实路线` : '正在规划逐段路线',
     planningResult
       ? `已知费用 ¥${Math.round(planningResult.knownCostCents / 100)}，${planningResult.unknownPriceCount} 项待确认`
-      : '等待 Provider 价格事实',
+      : '等待价格信息',
     planningResult?.registeredPlan
       ? '服务端确定性校验通过'
       : planningResult?.planningIssue
@@ -156,7 +164,7 @@ export function AgentProcessPage() {
     <AppShell compact>
       <main className="agent-page">
         <section className="agent-page__intro" data-reveal="side">
-          <span className="eyebrow"><Sparkles size={14} /> AGENT PLANNING SESSION</span>
+          <span className="eyebrow"><Sparkles size={14} /> 智能行程规划</span>
           <h1>把一句愿望，变成<br />一条走得通的路线。</h1>
           <p>
             大模型负责理解和解释，确定性程序负责金额、路线与关怀约束。
@@ -177,13 +185,13 @@ export function AgentProcessPage() {
           </div>
           {planningError && (
             <div className="provider-retry">
-              <p className="media-error">{planningError}</p>
+              <p className="media-error">{userFacingErrorMessage(planningError, '行程方案暂时生成失败，请稍后重试。')}</p>
               <button
                 className="button button--soft"
                 onClick={() => {
                   setPlanningError('')
                   setCompletedSteps(0)
-                  setProviderDetail('正在重新连接高德 Web 服务')
+                  setProviderDetail('正在重新连接高德地图服务')
                   planningPromiseRef.current = null
                   setRetryToken((current) => current + 1)
                 }}
@@ -199,9 +207,9 @@ export function AgentProcessPage() {
           <div className="agent-console__header">
             <div>
               <span className="agent-console__pulse" />
-              <strong>Planning graph</strong>
+              <strong>规划进度</strong>
             </div>
-              <span>{tripId ?? '缺少已确认 tripId'}</span>
+              <span>{isPlanReady ? '方案已生成' : '正在处理'}</span>
           </div>
           <div className="agent-step-list">
             {processSteps.map(({ title, icon: Icon }, index) => {
@@ -241,7 +249,7 @@ export function AgentProcessPage() {
                   {isPlanReady
                     ? planningResult?.registeredPlan
                       ? '也可以立即点击右侧按钮查看'
-                      : '未知价格或设施不会被当作 PASS，补齐前无法确认'
+                      : '未知价格或设施不会被视为已通过，补齐前无法确认'
                     : '失败时将返回具体冲突，而不是生成看似合理的方案'}
                 </small>
               </span>

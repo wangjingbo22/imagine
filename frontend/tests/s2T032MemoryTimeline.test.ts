@@ -4,6 +4,8 @@ import test from 'node:test'
 import {
   assistanceProfileDetails,
   extractBoundTimelinePhotos,
+  memoryPlanStatusLabel,
+  memoryTimelineItemTitle,
   orderMemoryTimelineItems,
   type MemoryTimelineItem,
 } from '../src/components/MemoryTimelinePanel.tsx'
@@ -51,6 +53,21 @@ test('T032 memory items render by real occurredAt while preserving server tie or
     'earlier',
     'same-time-second',
   ])
+})
+
+test('plan versions use Chinese presentation labels instead of API enums', () => {
+  const item = timelineItem('plan-current', '2026-09-05T01:00:00Z', {
+    kind: 'PLAN_VERSION',
+    eventType: null,
+    planVersion: 1,
+    planStatus: 'CURRENT',
+    title: '行程方案 V1：CURRENT',
+  })
+
+  assert.equal(memoryPlanStatusLabel('CURRENT'), '当前使用')
+  assert.equal(memoryPlanStatusLabel('REJECTED'), '已拒绝')
+  assert.equal(memoryPlanStatusLabel('UNKNOWN_STATUS'), '状态待确认')
+  assert.equal(memoryTimelineItemTitle(item), '行程方案 V1：当前使用')
 })
 
 test('T032 memory photos require the timeline item and media to bind the same task', () => {

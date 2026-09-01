@@ -33,6 +33,7 @@ import {
   type RecommendationBundle,
   type RecommendationCandidate,
 } from '../services/recommendationSelection'
+import { userFacingErrorMessage } from '../utils/userFacingError'
 
 // React StrictMode intentionally re-runs mount effects in development. A
 // recommendation request owns the collaboration planning lease, so share an
@@ -333,7 +334,7 @@ export function RecommendationPage() {
                   <h2 id="recommendation-error-title">
                     {bundle ? '方案暂时无法生成' : '推荐加载失败'}
                   </h2>
-                  <p id="recommendation-error-message">{error}</p>
+                  <p id="recommendation-error-message">{userFacingErrorMessage(error, '推荐方案暂时无法生成，请稍后重试。')}</p>
                 </div>
                 <button
                   aria-label="关闭提示"
@@ -379,14 +380,14 @@ export function RecommendationPage() {
         )}
         <section className="recommendation-panel" data-reveal="panel">
           <header className="recommendation-hero">
-            <span className="section-kicker">TRIP RECOMMENDATION</span>
+            <span className="section-kicker">行程推荐</span>
             <h1>推荐方案</h1>
             <p>根据你确认的时间、预算、偏好和同行需求，我们整理了这份地点方案。确认后将为你生成完整路线。</p>
           </header>
 
           {loading && (
             <section className="recommendation-loading" role="status" aria-live="polite">
-              <div className="recommendation-loading__signal"><LoaderCircle className="spin-icon" size={19} /><span>LIVE ANALYSIS</span></div>
+              <div className="recommendation-loading__signal"><LoaderCircle className="spin-icon" size={19} /><span>正在分析</span></div>
               <div className="recommendation-loading__copy"><h2>正在编排行程候选</h2><p>系统正在校验地点、路线距离、时间窗口与关怀限制。</p></div>
               <ol className="recommendation-loading__steps">
                 <li><span>01</span><strong>恢复已确认的出行事实</strong><i /></li>

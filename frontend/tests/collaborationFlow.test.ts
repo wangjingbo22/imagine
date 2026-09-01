@@ -198,10 +198,9 @@ test('organizer page keeps test presets out of the user-facing entry flow', asyn
   assert.match(page, /collaborationPlanningDraft\(created\.revision\)/)
   assert.match(page, /collaborationPlanningDraft\(revision\)/)
   assert.match(page, /draft && canEnterRecommendation\(current\)/)
-  assert.doesNotMatch(page, /function applyTestPreset\(\)/)
-  assert.doesNotMatch(page, /function applyGroupOrganizerTestPreset\(\)/)
-  assert.doesNotMatch(page, /填入北京单人测试模板/)
-  assert.doesNotMatch(page, /填入北京多人组织者模板/)
+  assert.doesNotMatch(page, /applyTestPreset|applyGroupOrganizerTestPreset|测试模板/)
+  assert.match(page, /updateParty\(1, '旅行者'\)/)
+  assert.match(page, /updateParty\(2, ''\)/)
 })
 
 test('READY collaboration always exposes the authoritative recommendation action', async () => {
@@ -246,7 +245,7 @@ test('fixed-question fallback requires an explicit visible-answer review and a f
   assert.doesNotMatch(page, /disabled=\{!fallbackReviewComplete \|\| loading\}/)
   assert.match(page, /conversationKey\.current = null\s+await analyze\(true\)/)
   assert.match(page, /reviewedFallback: preserveReviewedFallback/)
-  assert.match(page, /在确认资料前仍不会调用 Provider 或规划/)
+  assert.match(page, /确认资料前不会生成路线方案/)
   assert.match(page, /智能整理服务暂不可用/)
   assert.match(page, /已保留 \$\{visibleQuestionCount\} \/ \$\{visibleQuestionCount\} 核对结果/)
   assert.match(page, /再次尝试智能整理/)
@@ -360,12 +359,12 @@ test('member conversation keeps shared questions read-only and edits only person
   assert.doesNotMatch(page, /setTripFields|setRouteFields|updateTripField|updateRouteField/)
 })
 
-test('organizer presents each reusable member invitation as a direct link with rotation guidance', async () => {
+test('organizer presents reusable member invitations for copying without entering the member page', async () => {
   const page = await readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8')
   assert.match(page, /确认资料前可以重复打开/)
-  assert.match(page, /href=\{item\.link\}/)
-  assert.doesNotMatch(page, /href=\{item\.link\} target="_blank"/)
-  assert.match(page, /进入成员页/)
+  assert.doesNotMatch(page, /href=\{item\.link\}/)
+  assert.doesNotMatch(page, /进入成员页/)
+  assert.match(page, /navigator\.clipboard\.writeText\(item\.link\)/)
   assert.match(page, /确认组织者资料并生成成员邀请链接/)
   assert.match(page, /organizer-invitations:\$\{revision\.tripId\}/)
   assert.match(page, /成员邀请入口/)

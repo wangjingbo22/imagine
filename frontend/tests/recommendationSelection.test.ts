@@ -306,7 +306,7 @@ test('missing trace, six intermediates or changed server facts fail closed', () 
   }
   assert.throws(
     () => selectedPlacesFromSignedFactSet(tamperedPayload, selection),
-    /签发地点已失效/,
+    /推荐地点的信息已失效/,
   )
 })
 

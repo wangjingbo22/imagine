@@ -1,6 +1,7 @@
 import { Camera, ImageOff } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { request } from '../api/client'
+import { userFacingErrorMessage } from '../utils/userFacingError'
 
 export type MemoryPhoto = {
   taskId: string
@@ -79,7 +80,7 @@ export function MemoryPhotoStrip({
   const error = controlledPhotos !== undefined
     ? ''
     : !tripId
-      ? '缺少 tripId，无法读取任务照片。'
+      ? '缺少行程信息，无法读取任务照片。'
       : legacyResult?.requestKey === requestKey
         ? legacyResult.error
         : ''
@@ -94,10 +95,10 @@ export function MemoryPhotoStrip({
 
   return <section className="summary-media">
     <div className="panel-heading">
-      <div><span className="section-kicker">TASK PHOTOS</span><h2>{heading}</h2></div>
+      <div><span className="section-kicker">旅程照片</span><h2>{heading}</h2></div>
       <small>{byTask.size} 张未删除照片</small>
     </div>
-    {error && <p className="summary-media__error" role="alert">{error}</p>}
+    {error && <p className="summary-media__error" role="alert">{userFacingErrorMessage(error, '旅行照片加载失败，请稍后重试。')}</p>}
     {unknownTaskCount > 0 && <p className="summary-media__error" role="alert">
       {unknownTaskCount} 张照片没有对应的任务，已停止展示。
     </p>}

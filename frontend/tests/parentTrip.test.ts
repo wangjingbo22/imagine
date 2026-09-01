@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import { parentTripChildStatusLabel } from '../src/domain/parentTrip.ts'
+
+test('parent trip child statuses never expose backend enum text', () => {
+  assert.equal(parentTripChildStatusLabel('NOT_CREATED'), '尚未创建')
+  assert.equal(parentTripChildStatusLabel('PLAN_REVIEW'), '方案待确认')
+  assert.equal(parentTripChildStatusLabel('COMPLETED'), '已完成')
+  assert.equal(parentTripChildStatusLabel('UNKNOWN_STATUS'), '状态待确认')
+})
 
 test('T012 exposes an expanded multi-day parent route and reuses the single-day planner', async () => {
   const [app, page, planner] = await Promise.all([

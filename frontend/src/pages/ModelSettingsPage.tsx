@@ -2,8 +2,8 @@ import { Check, Eye, EyeOff, KeyRound, ShieldCheck, Sparkles, Trash2 } from 'luc
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { deleteModelSettings, getModelSettings, saveModelSettings } from '../api/accountApi'
-import { ApiError } from '../api/client'
 import { AppShell } from '../components/AppShell'
+import { userFacingErrorMessage } from '../utils/userFacingError'
 
 export function ModelSettingsPage() {
   const navigate = useNavigate()
@@ -14,8 +14,7 @@ export function ModelSettingsPage() {
   const [notice, setNotice] = useState('')
 
   function saveErrorMessage(error: unknown): string {
-    if (error instanceof ApiError) return error.message
-    return '保存失败，请检查网络连接后重试。'
+    return userFacingErrorMessage(error, '保存失败，请检查网络连接后重试。')
   }
 
   useEffect(() => { void getModelSettings().then(({ data }) => { if (data.model) setModel(data.model); if (data.baseUrl) setBaseUrl(data.baseUrl); if (data.keyHint) setNotice(`已绑定账户 API Key（${data.keyHint}）`) }).catch(() => navigate('/account?returnTo=%2Fmodel-settings', { replace: true })) }, [navigate])
@@ -29,7 +28,7 @@ export function ModelSettingsPage() {
     try { await deleteModelSettings(); setApiKey(''); setNotice('已从账户移除 API Key。') } catch { setNotice('清除失败；请先登录。') }
   }
   return <AppShell compact><main className="model-settings">
-    <section className="model-settings__intro"><p className="section-kicker">MODEL CONTROLS</p><h1>配置这次对话的模型</h1><p>绑定自己的 API Key 后才能使用 AI 解析行程；未配置时不能生成行程。</p></section>
+    <section className="model-settings__intro"><p className="section-kicker">模型设置</p><h1>配置这次对话的模型</h1><p>绑定自己的 API Key 后才能使用 AI 解析行程；未配置时不能生成行程。</p></section>
     <section className="model-settings__panel">
       <div className="model-settings__title"><span><Sparkles size={19} /></span><div><h2>模型连接</h2><p>填写你的模型名称和兼容 OpenAI 的 API 地址。</p></div></div>
       <label className="key-input"><span>模型名称</span><div><input type="text" value={model} onChange={(event) => setModel(event.target.value)} placeholder="例如：qwen-plus 或 gpt-4.1-mini" autoComplete="off" required /></div></label>

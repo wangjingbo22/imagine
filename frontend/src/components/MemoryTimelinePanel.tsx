@@ -12,6 +12,7 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import { request } from '../api/client'
 import type { AssistanceProfile } from '../domain/trip'
+import { userFacingErrorMessage } from '../utils/userFacingError'
 import { MemoryPhotoStrip, type MemoryPhoto } from './MemoryPhotoStrip'
 
 export type MemoryTimelineItemKind =
@@ -94,6 +95,24 @@ const assistanceTypeLabels: Record<AssistanceProfile['type'], string> = {
   PARENT_CHILD: '亲子关怀',
   LOW_STAMINA: '低体力关怀',
   MOBILITY_ASSISTANCE_BETA: '行动辅助',
+}
+
+const planStatusLabels: Record<string, string> = {
+  PROPOSED: '待确认',
+  CURRENT: '当前使用',
+  REJECTED: '已拒绝',
+  SUPERSEDED: '历史版本',
+}
+
+export function memoryPlanStatusLabel(status: string): string {
+  return planStatusLabels[status] ?? '状态待确认'
+}
+
+export function memoryTimelineItemTitle(item: MemoryTimelineItem): string {
+  if (item.kind !== 'PLAN_VERSION') return item.title
+  if (item.planVersion === null) return '行程方案状态更新'
+  const status = item.planStatus ? `：${memoryPlanStatusLabel(item.planStatus)}` : ''
+  return `行程方案 V${item.planVersion}${status}`
 }
 
 function loadMemoryTimeline(tripId: string): Promise<MemoryTimeline> {
@@ -184,7 +203,7 @@ function formatOccurredAt(value: string): string {
 function itemDetails(item: MemoryTimelineItem): string[] {
   const details: string[] = []
   if (item.planVersion !== null) {
-    details.push(`Plan V${item.planVersion}${item.planStatus ? ` · ${item.planStatus}` : ''}`)
+    details.push(`方案 V${item.planVersion}${item.planStatus ? ` · ${memoryPlanStatusLabel(item.planStatus)}` : ''}`)
   }
   if (item.amountCents !== null) details.push(formatMoney(item.amountCents))
   if (item.cumulativeActualCostCents !== null) {
@@ -248,7 +267,7 @@ export function MemoryTimelinePanel({
   )
   const timeline = hasCurrentResult ? loadResult?.timeline ?? null : null
   const error = !tripId
-    ? '缺少 tripId，无法读取旅行回忆时间线。'
+    ? '缺少行程信息，无法读取旅行回忆时间线。'
     : hasCurrentResult
       ? loadResult?.error ?? ''
       : ''
@@ -269,7 +288,6 @@ export function MemoryTimelinePanel({
   return <section className="memory-timeline-panel" aria-labelledby="memory-timeline-title">
     <header className="memory-timeline-panel__heading">
       <div>
-        <span className="section-kicker">MEMORY TIMELINE</span>
         <h2 id="memory-timeline-title">真实旅程时间线</h2>
         <p>按实际发生时间汇总计划、执行、费用、关怀结果和仍然保留的任务照片。</p>
       </div>
@@ -281,7 +299,7 @@ export function MemoryTimelinePanel({
     </p>}
 
     {error && <div className="memory-timeline-panel__error" role="alert">
-      <div><strong>回忆聚合暂时不可用</strong><p>{error}</p></div>
+      <div><strong>回忆聚合暂时不可用</strong><p>{userFacingErrorMessage(error, '旅行回忆加载失败，请稍后重试。')}</p></div>
       <button className="button button--soft" type="button" onClick={() => setAttempt((value) => value + 1)}>
         <RefreshCw size={17} aria-hidden="true" />重新加载
       </button>
@@ -292,7 +310,7 @@ export function MemoryTimelinePanel({
         <article><span>任务完成</span><strong>{timeline.summary.completedTaskCount}/{timeline.summary.totalTaskCount}</strong><small>{timeline.summary.completionRatePercent}% 完成</small></article>
         <article><span>计划 / 实际费用</span><strong>{formatMoney(timeline.summary.plannedCostCents)}</strong><small>实际 {formatMoney(timeline.summary.actualCostCents)}</small></article>
         <article><span>费用差额</span><strong>{costDifference > 0 ? '+' : ''}{formatMoney(costDifference)}</strong><small>{costDifference > 0 ? '超出计划' : costDifference < 0 ? '低于计划' : '与计划一致'}</small></article>
-        <article><span>最终版本</span><strong>Plan V{timeline.summary.currentPlanVersion}</strong><small>{timeline.summary.planChangeCount} 次版本变化</small></article>
+        <article><span>最终版本</span><strong>方案 V{timeline.summary.currentPlanVersion}</strong><small>{timeline.summary.planChangeCount} 次版本变化</small></article>
       </div>
 
       <section className="memory-care-result" aria-labelledby="memory-care-title">
@@ -313,7 +331,7 @@ export function MemoryTimelinePanel({
             <span className="memory-timeline-item__icon" aria-hidden="true"><TimelineIcon kind={item.kind} /></span>
             <div className="memory-timeline-item__body">
               <div><span>{timelineKindLabels[item.kind]}</span><time dateTime={item.occurredAt}>{formatOccurredAt(item.occurredAt)}</time></div>
-              <strong>{item.title}</strong>
+              <strong>{memoryTimelineItemTitle(item)}</strong>
               {details.length > 0 && <p>{details.map((detail) => <span key={detail}>{detail}</span>)}</p>}
             </div>
           </li>
