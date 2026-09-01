@@ -14,9 +14,12 @@ import type {
   Place,
   ProviderRoute,
   PlanSnapshot,
+  StoredPlanVersion,
   TravelMode,
 } from '../src/domain/trip.ts'
 import {
+  acceptInitialCandidatePlan,
+  loadAmapPlan,
   orderByShortestNextSegment,
   replaceAmapPlanSegment,
   requestDefaultAmapRoute,
@@ -25,6 +28,10 @@ import { buildCandidateRequestFromConfirmedTrip } from '../src/services/candidat
 
 const workspaceSource = readFileSync(
   fileURLToPath(new URL('../src/pages/WorkspacePage.tsx', import.meta.url)),
+  'utf8',
+)
+const amapPlanSource = readFileSync(
+  fileURLToPath(new URL('../src/services/amapPlan.ts', import.meta.url)),
   'utf8',
 )
 const pickerPath = fileURLToPath(
@@ -226,6 +233,151 @@ function planSnapshotFor(base: CandidatePlanRequest): PlanSnapshot {
     })),
   }
 }
+
+test('initial planning previews exactly one candidate without issuing V1', async (t) => {
+  const originalFetch = globalThis.fetch
+  const originalDateNow = Date.now
+  t.after(() => {
+    globalThis.fetch = originalFetch
+    Date.now = originalDateNow
+  })
+  let now = 0
+  Date.now = () => (now += 2_000)
+  const { base, city } = fixture()
+  const calls: Array<{ url: string; init: RequestInit }> = []
+  const nearbyPlaces = base.taskFacts.slice(0, 3).map((fact) => fact.place)
+  globalThis.fetch = (async (input, init = {}) => {
+    const url = String(input)
+    calls.push({ url, init })
+    if (url.endsWith('/api/v1/cities/resolve')) return ok(city)
+    if (url.endsWith('/api/v1/geocoding/forward')) {
+      return ok({
+        cityCode: base.trip.cityContext.cityCode,
+        adCode: '110101',
+        formattedAddress: base.trip.days[0].startLocationText,
+        location: base.startLocation.location,
+        provenance,
+      })
+    }
+    if (url.endsWith('/api/v1/places/nearby')) return ok({ places: nearbyPlaces })
+    if (url.endsWith('/api/v1/routes/plan')) {
+      const request = JSON.parse(String(init.body)) as { origin: GeoPoint; destination: GeoPoint; mode: TravelMode }
+      return ok({
+        cityCode: base.trip.cityContext.cityCode,
+        routes: [route(
+          `initial-${request.destination.longitude}`,
+          request.origin,
+          request.destination,
+          request.mode,
+        )],
+        provenance,
+      })
+    }
+    if (url.endsWith(`/api/v1/trips/${base.trip.tripId}/plan-previews/validate`)) {
+      return ok(passingPreview)
+    }
+    if (url.includes('/plan-versions/generate')) {
+      throw new Error('initial planning must not issue Plan V1')
+    }
+    throw new Error(`unexpected request: ${url}`)
+  }) as typeof fetch
+
+  const result = await loadAmapPlan(base.trip.tripId, {
+    schemaVersion: '1.0',
+    cityName: base.trip.cityContext.cityName,
+    travelDate: base.trip.days[0].date,
+    startTime: '09:00',
+    endTime: '20:00',
+    startLocationText: base.trip.days[0].startLocationText,
+    endLocationText: base.trip.days[0].endLocationText,
+    budgetCents: base.trip.totalBudgetCents,
+    interests: [],
+    mustVisit: ['fixture'],
+    avoidPlaces: [],
+    assistanceMode: 'standard',
+    assistanceProfile: { maxSegmentWalkMeters: null, maxTransfers: null, restIntervalMinutes: null },
+    naturalLanguageRequest: 'fixture',
+  }, undefined, {
+    confirmedTrip: base.trip,
+    organizerToken: 'organizer-token',
+  })
+
+  const previews = calls.filter((call) => call.url.endsWith('/plan-previews/validate'))
+  assert.equal(previews.length, 1)
+  assert.equal(calls.filter((call) => call.url.includes('/plan-versions/generate')).length, 0)
+  assert.equal(new Headers(previews[0].init.headers).get('X-Organizer-Token'), 'organizer-token')
+  assert.deepEqual(JSON.parse(String(previews[0].init.body)), result.candidateRequest)
+  assert.equal(result.registeredPlan, null)
+  assert.equal(result.plan.validationStatus, 'PASS')
+})
+
+test('initial planning defers V1 issuance to the workspace acceptance action', () => {
+  assert.doesNotMatch(amapPlanSource, /generatePlanVersion\(tripId, candidateRequest/)
+  assert.match(amapPlanSource, /previewCandidatePlan/)
+  assert.match(workspaceSource, /generatePlanVersion\(tripId, candidateRequest/)
+})
+
+test('final acceptance blocks a failed preview before issuing V1', async () => {
+  const calls: string[] = []
+  await assert.rejects(
+    acceptInitialCandidatePlan({
+      validationStatus: 'FAIL',
+      persistedPlanId: null,
+      issuePlan: async () => {
+        calls.push('issue')
+        return {} as StoredPlanVersion
+      },
+      confirmPlan: async () => { calls.push('confirm') },
+      startExecution: async () => { calls.push('start') },
+    }),
+    /未通过服务端预览校验/,
+  )
+  assert.deepEqual(calls, [])
+})
+
+test('final acceptance issues a previewed candidate then confirms and starts its V1 in order', async () => {
+  const calls: string[] = []
+  const result = await acceptInitialCandidatePlan({
+    validationStatus: 'NEEDS_CONFIRMATION',
+    persistedPlanId: null,
+    issuePlan: async () => {
+      calls.push('issue')
+      return { planId: 'issued-v1' } as StoredPlanVersion
+    },
+    confirmPlan: async (planId) => { calls.push(`confirm:${planId}`) },
+    startExecution: async () => { calls.push('start') },
+  })
+  assert.deepEqual(result, { kind: 'STARTED', planId: 'issued-v1' })
+  assert.deepEqual(calls, ['issue', 'confirm:issued-v1', 'start'])
+})
+
+test('final acceptance opens server fact review without confirming or starting an issued candidate', async () => {
+  const calls: string[] = []
+  const result = await acceptInitialCandidatePlan({
+    validationStatus: 'NEEDS_CONFIRMATION',
+    persistedPlanId: null,
+    issuePlan: async () => {
+      calls.push('issue')
+      throw new ApiError('CANDIDATE_CONFIRMATION_REQUIRED', 'review required', [], [{
+        review: {
+          schemaVersion: '1.0',
+          reviewId: 'review-1',
+          tripId: 'trip-1',
+          candidateId: 'candidate-1',
+          status: 'PENDING',
+          createdAt: '2026-09-02T09:00:00+08:00',
+          confirmedAt: null,
+          items: [],
+        },
+      }])
+    },
+    confirmPlan: async () => { calls.push('confirm') },
+    startExecution: async () => { calls.push('start') },
+  })
+  assert.equal(result.kind, 'REVIEW_REQUIRED')
+  assert.equal(result.planningIssue.review?.reviewId, 'review-1')
+  assert.deepEqual(calls, ['issue'])
+})
 
 test('workspace exposes safe per-segment mode controls with retry and V1 lockout', () => {
   assert.match(workspaceSource, /SegmentRouteModePicker/)

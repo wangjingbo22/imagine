@@ -628,38 +628,6 @@ function previewFromCandidate(
   }
 }
 
-function previewFromStored(
-  stored: StoredPlanVersion,
-  request: CandidatePlanRequest,
-): PlanSnapshot {
-  const preview = previewFromCandidate(request, stored.version)
-  const byTaskId = new globalThis.Map(preview.tasks.map((task) => [task.id, task]))
-  return {
-    ...preview,
-    id: stored.planId,
-    totalCostCents: stored.metrics.totalCostCents,
-    bufferCents: stored.metrics.bufferCents,
-    totalWalkMeters: stored.metrics.totalWalkMeters,
-    transferCount: stored.metrics.transferCount,
-    validationStatus: stored.metrics.validationStatus,
-    tasks: stored.days[0].tasks.map((task, index) => ({
-      id: task.taskId,
-      order: task.order,
-      title: task.title,
-      category: task.category,
-      timeRange: task.timeRange.replace('-', ' — '),
-      durationMinutes: task.durationMinutes,
-      transport: task.transport,
-      costCents: task.costCents,
-      priceKnown: true,
-      walkMeters: task.walkMeters,
-      note: task.note,
-      status: index === 0 ? 'current' as const : 'upcoming' as const,
-      coordinates: byTaskId.get(task.taskId)?.coordinates ?? [50, 50],
-    })),
-  }
-}
-
 function countUnknownPrices(request: CandidatePlanRequest) {
   return request.taskFacts.reduce(
     (count, fact) => count +
@@ -682,7 +650,7 @@ function elapsedForFacts(
   )
 }
 
-function confirmationIssue(error: unknown): PlanningIssue | null {
+export function candidatePlanningIssue(error: unknown): PlanningIssue | null {
   if (!(error instanceof ApiError) || (
     error.code !== 'CANDIDATE_CONFIRMATION_REQUIRED' &&
     error.code !== 'CANDIDATE_PLAN_REJECTED'
@@ -700,6 +668,42 @@ function confirmationIssue(error: unknown): PlanningIssue | null {
       : `服务端硬约束校验未通过：${error.message}`,
     review,
   }
+}
+
+export async function acceptInitialCandidatePlan({
+  validationStatus,
+  persistedPlanId,
+  issuePlan,
+  confirmPlan,
+  startExecution,
+}: {
+  validationStatus: PlanSnapshot['validationStatus']
+  persistedPlanId: string | null
+  issuePlan: () => Promise<StoredPlanVersion>
+  confirmPlan: (planId: string) => Promise<unknown>
+  startExecution: () => Promise<unknown>
+}): Promise<
+  | { kind: 'STARTED'; planId: string }
+  | { kind: 'REVIEW_REQUIRED'; planningIssue: NonNullable<ReturnType<typeof candidatePlanningIssue>> }
+> {
+  if (validationStatus !== 'PASS' && validationStatus !== 'NEEDS_CONFIRMATION') {
+    throw new Error('候选事实未通过服务端预览校验，当前计划不能确认。')
+  }
+  let planId = persistedPlanId
+  if (!planId) {
+    try {
+      planId = (await issuePlan()).planId
+    } catch (error) {
+      const planningIssue = candidatePlanningIssue(error)
+      if (planningIssue?.code === 'CANDIDATE_CONFIRMATION_REQUIRED') {
+        return { kind: 'REVIEW_REQUIRED', planningIssue }
+      }
+      throw error
+    }
+  }
+  await confirmPlan(planId)
+  await startExecution()
+  return { kind: 'STARTED', planId }
 }
 
 async function createAmapPlan(
@@ -794,23 +798,16 @@ async function createAmapPlan(
     places,
     routes,
   )
-  let registeredPlan: StoredPlanVersion | null = null
-  let planningIssue: PlanningIssue | null = null
-  let plan = previewFromCandidate(candidateRequest, 1)
-  try {
-    registeredPlan = (await tripApi.generatePlanVersion(
-      tripId,
-      candidateRequest,
-      options.organizerToken,
-    )).data
-    plan = previewFromStored(registeredPlan, candidateRequest)
-  } catch (error) {
-    planningIssue = confirmationIssue(error)
-    if (!planningIssue) throw error
-    if (planningIssue.code === 'CANDIDATE_PLAN_REJECTED') {
-      plan = { ...plan, validationStatus: 'FAIL' }
-    }
-  }
+  const candidatePreview = (await tripApi.previewCandidatePlan(
+    tripId,
+    candidateRequest,
+    options.organizerToken,
+  )).data
+  const plan = previewFromCandidate(
+    candidateRequest,
+    1,
+    candidatePreview.validationStatus,
+  )
   const unknownPriceCount = countUnknownPrices(candidateRequest)
   return {
     evidence: {
@@ -821,8 +818,8 @@ async function createAmapPlan(
     },
     plan,
     candidateRequest,
-    registeredPlan,
-    planningIssue,
+    registeredPlan: null,
+    planningIssue: null,
     knownCostCents: plan.totalCostCents,
     unknownPriceCount,
     recommendationTrace: selection ?? null,

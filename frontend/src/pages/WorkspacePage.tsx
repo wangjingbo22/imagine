@@ -58,6 +58,7 @@ import type {
   FatigueLevel,
 } from '../domain/executionAdjustment'
 import {
+  acceptInitialCandidatePlan,
   loadAmapPlan,
   replaceAmapPlanSegment,
   type AmapPlanResult,
@@ -608,6 +609,10 @@ export function WorkspacePage() {
   const serverPlanReady = Boolean(persistedPlanId) &&
     activePlan.validationStatus === 'PASS' &&
     !planningIssue
+  const candidateReadyForAcceptance = Boolean(candidateRequest) &&
+    !planningIssue &&
+    !localSegmentFailure &&
+    (activePlan.validationStatus === 'PASS' || activePlan.validationStatus === 'NEEDS_CONFIRMATION')
   const hasIssuedPassPlan = serverPlanReady
   const remainingBudgetCents = Math.max(0, budgetCents - activePlan.totalCostCents)
   const budgetUsagePercent = budgetCents > 0
@@ -941,20 +946,27 @@ export function WorkspacePage() {
     setIsConfirmingPlan(true)
     setPlanLifecycleError('')
     try {
-      if (planningIssue) {
-        throw new Error(planningIssue.message)
-      }
-      if (activePlan.validationStatus !== 'PASS') {
-        throw new Error('候选事实尚未获得服务端 T011 的完整 PASS，当前计划不能确认。')
+      if (!candidateRequest) {
+        throw new Error('当前候选事实不可用，请重新生成计划。')
       }
       if (activePlan.tasks.length < 3) {
         throw new Error('真实 Provider 地点不足 3 个，当前计划不能确认。')
       }
-      if (!persistedPlanId) {
-        throw new Error('服务端尚未签发可信 Plan V1；请先补齐未知价格、设施或来源证据。')
+      const acceptance = await acceptInitialCandidatePlan({
+        validationStatus: activePlan.validationStatus,
+        persistedPlanId,
+        issuePlan: async () => (await tripApi.generatePlanVersion(tripId, candidateRequest, organizerToken)).data,
+        confirmPlan: (planId) => tripApi.confirmPlan(tripId, planId, organizerToken),
+        startExecution: () => tripApi.startExecution(tripId),
+      })
+      if (acceptance.kind === 'REVIEW_REQUIRED') {
+        setPlanningIssue(acceptance.planningIssue)
+        setCandidateReview(acceptance.planningIssue.review)
+        setPersistedPlanId(null)
+        setPlanLifecycleError(acceptance.planningIssue.message)
+        return
       }
-      await tripApi.confirmPlan(tripId, persistedPlanId, organizerToken)
-      await tripApi.startExecution(tripId)
+      setPersistedPlanId(acceptance.planId)
       const restored = await tripApi.getTrip(tripId)
       if (restored.data.currentPlan) {
         applyTripState(restored.data)
@@ -1819,14 +1831,14 @@ export function WorkspacePage() {
                   </button>
                   <button
                     className="button button--primary"
-                    disabled={isConfirmingPlan || !serverPlanReady}
+                    disabled={isConfirmingPlan || !candidateReadyForAcceptance}
                     onClick={handleAcceptPlan}
                     type="button"
                   >
                     {isConfirmingPlan ? <LoaderCircle className="spin-icon" size={17} /> : null}
                     {isConfirmingPlan
                       ? '正在确认…'
-                      : serverPlanReady
+                      : candidateReadyForAcceptance
                         ? '接受推荐并确认 Plan V1'
                         : '证据待确认，暂不可接受'}
                     {!isConfirmingPlan && <ArrowRight size={18} />}
