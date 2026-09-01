@@ -143,6 +143,7 @@ export const recommendationBundle = {
   },
   factSetId: 'fact-set-t024-browser-fixture',
   providerFactDigest: 'c'.repeat(64),
+  parentPlaceMemory: [],
   provenance: Array.from({ length: 6 }, (_, index) => ({
     factRefId: `place-fact-${index + 1}`,
     providerObjectId: `place-${index + 1}`,

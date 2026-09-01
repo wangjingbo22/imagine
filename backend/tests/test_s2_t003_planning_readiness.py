@@ -26,6 +26,14 @@ class RejectingReadinessGuard:
         yield
 
 
+class CountingParentTripPlaceMemoryGuard:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def require_unique_candidate_places(self, child_id, task_facts) -> None:
+        self.calls += 1
+
+
 def _access(operation: PlanningOperation) -> PlanningAccess:
     return PlanningAccess(
         trip_id=TRIP_ID,
@@ -35,13 +43,16 @@ def _access(operation: PlanningOperation) -> PlanningAccess:
     )
 
 
-def _service() -> PlanningBoundaryService:
+def _service(
+    memory_guard: CountingParentTripPlaceMemoryGuard | None = None,
+) -> PlanningBoundaryService:
     return PlanningBoundaryService(
         plan_service=object(),  # type: ignore[arg-type]
         workflow_service=object(),  # type: ignore[arg-type]
         trust_repository=object(),  # type: ignore[arg-type]
         suffix_planner=DeterministicRetainedSuffixPlanner(),
         readiness_guard=RejectingReadinessGuard(),
+        parent_trip_place_memory_guard=memory_guard,
     )
 
 
@@ -111,10 +122,13 @@ def _service() -> PlanningBoundaryService:
     ],
 )
 def test_not_ready_planning_has_zero_downstream_calls(operation, invoke) -> None:
-    service = _service()
+    memory_guard = CountingParentTripPlaceMemoryGuard()
+    service = _service(memory_guard)
 
     with pytest.raises(AppError, match="全部成员确认"):
         invoke(service, _access(operation))
+
+    assert memory_guard.calls == 0
 
 
 def test_access_operation_mismatch_is_rejected_before_planning() -> None:

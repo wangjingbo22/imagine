@@ -3,6 +3,7 @@ import {
   Check,
   ChevronRight,
   Copy,
+  MapPin,
   RefreshCw,
   UserPlus,
   Users,
@@ -197,6 +198,11 @@ export function ParentTripPage() {
   }
 
   const memberLimitReached = (syncView?.visibleProfiles.length ?? 1) >= 3
+  const placeMemory = trip?.placeMemory ?? []
+  const rememberedDays = trip?.days.map((day) => ({
+    day,
+    places: placeMemory.filter((item) => item.dayIndex === day.dayIndex),
+  })).filter((item) => item.places.length > 0) ?? []
 
   return <AppShell><main className="parent-trip-page">
     {!trip ? <section className="parent-trip-card"><p className="eyebrow">多日同行</p><h1>创建 2–3 天同城父行程</h1>
@@ -217,6 +223,11 @@ export function ParentTripPage() {
         {invitationUrl && <div className="parent-invitation"><div><span>邀请链接</span>{invitation && <small>有效期至 {new Date(invitation.expiresAt).toLocaleString('zh-CN')}</small>}</div><div><input aria-label="成员邀请链接" readOnly value={invitationUrl} /><button className="icon-button" type="button" title="复制邀请链接" aria-label="复制邀请链接" onClick={() => void copyInvitation()}>{copyDone ? <Check size={18} /> : <Copy size={18} />}</button></div></div>}
         <div className="parent-participant-list">{syncView?.visibleProfiles.map((profile) => <article key={profile.participantId}><div className={`parent-participant-avatar parent-participant-avatar--${profile.accessStatus.toLowerCase()}`}>{profile.nickname.slice(0, 1)}</div><div><strong>{profile.nickname}</strong><span>{accessLabel[profile.accessStatus]}</span></div><div className="parent-participant-details"><span>{profile.interests.length ? profile.interests.join(' · ') : '兴趣待填写'}</span><b>{profile.budgetCapCents === null ? '预算待填写' : `个人上限 ${yuan(profile.budgetCapCents)}`}</b></div></article>)}</div>
       </section>
+
+      {placeMemory.length > 0 && <section className="parent-place-memory" aria-label="跨日地点记忆">
+        <header><div><MapPin size={22} /><h2>跨日地点记忆</h2></div><strong>{placeMemory.length} 个地点已占用</strong></header>
+        <div className="parent-place-memory__days">{rememberedDays.map(({ day, places }) => <article key={day.dayIndex}><div><b>第 {day.dayIndex + 1} 天</b><span>{day.date}</span></div><ul>{places.map((place) => <li key={`${place.planId}:${place.placeId}`}><span>{place.placeName}</span><small>{place.planStatus === 'CURRENT' ? '已确认' : '计划草稿'}</small></li>)}</ul></article>)}</div>
+      </section>}
 
       <section className="parent-days">{trip.days.map((day) => <article key={day.dayIndex} className="parent-day-card"><div className="parent-day-date"><CalendarDays/><div><b>第 {day.dayIndex + 1} 天</b><span>{day.date}</span></div></div>
         <dl><div><dt>当日预算</dt><dd>{yuan(day.budgetCents)}</dd></div><div><dt>计划费用</dt><dd>{yuan(day.plannedCostCents)}</dd></div><div><dt>实际支出</dt><dd>{yuan(day.actualSpentCents)}</dd></div></dl>

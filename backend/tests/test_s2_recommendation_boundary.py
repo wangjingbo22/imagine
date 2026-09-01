@@ -37,6 +37,24 @@ def test_facts_are_filtered_and_invalid_llm_ranking_falls_back() -> None:
     assert [item.place_id for item in result.recommendations] == ["a", "b"]
 
 
+def test_parent_memory_avoid_labels_match_provider_id_and_normalized_name() -> None:
+    service = TrustedRecommendationService()
+
+    candidates = service.issue_candidates(
+        [
+            _fact("remembered-id", "不同展示名"),
+            _fact("other-id", "ＡＭＡＰ 博物馆"),
+            _fact("branch-id", "AMAP 博物馆分馆"),
+            _fact("kept-id", "城市公园"),
+        ],
+        interests=[],
+        must_visit=[],
+        avoid_places=["remembered-id", "AMAP 博物馆"],
+    )
+
+    assert [item.place_id for item in candidates] == ["branch-id", "kept-id"]
+
+
 def test_valid_llm_ranking_is_only_allowed_place_ids_and_reasons() -> None:
     service = TrustedRecommendationService()
     candidates = service.issue_candidates([_fact("a", "故宫"), _fact("b", "国博")], interests=[], must_visit=[], avoid_places=[])

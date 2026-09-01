@@ -33,6 +33,16 @@ class ParentTripDay(CollaborationModel):
     cost_status: Literal["NOT_AVAILABLE", "PLANNED", "ACTUAL_RECORDED"] = "NOT_AVAILABLE"
 
 
+class ParentTripPlaceMemoryItem(CollaborationModel):
+    day_index: int = Field(ge=0, le=2)
+    date: date
+    child_trip_id: UUID4
+    plan_id: UUID4
+    plan_status: Literal["PROPOSED", "CURRENT"]
+    place_id: str = Field(min_length=1, max_length=160)
+    place_name: str = Field(min_length=1, max_length=120)
+
+
 class ParentTrip(CollaborationModel):
     schema_version: Literal["1.0"] = "1.0"
     parent_trip_id: UUID4
@@ -44,6 +54,10 @@ class ParentTrip(CollaborationModel):
     planned_cost_cents: int | None = Field(default=None, ge=0)
     actual_spent_cents: int | None = Field(default=None, ge=0)
     days: list[ParentTripDay] = Field(min_length=2, max_length=3)
+    place_memory: list[ParentTripPlaceMemoryItem] = Field(
+        default_factory=list,
+        max_length=9,
+    )
 
 
 class ParentTripDayLinkRequest(CollaborationModel):
@@ -132,5 +146,6 @@ __all__ = [
     "ParentTripInvitationRedeemed",
     "ParentTripMemberProfile",
     "ParentTripMemberProfileUpdate",
+    "ParentTripPlaceMemoryItem",
     "ParentTripSyncView",
 ]

@@ -42,3 +42,19 @@ test('parent context survives recommendation and workspace navigation', async ()
   assert.match(recommendation, /返回多日行程规划/)
   assert.match(workspace, /返回多日行程规划/)
 })
+
+test('multi-day planning exposes and propagates cross-day place memory', async () => {
+  const [domain, parentPage, recommendation, selection] = await Promise.all([
+    readFile(new URL('../src/domain/parentTrip.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/pages/ParentTripPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/pages/RecommendationPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/services/recommendationSelection.ts', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(domain, /placeMemory: ParentTripPlaceMemoryItem\[\]/)
+  assert.match(domain, /planStatus: 'PROPOSED' \| 'CURRENT'/)
+  assert.match(parentPage, /跨日地点记忆/)
+  assert.match(parentPage, /placeMemory\.filter/)
+  assert.match(selection, /parentPlaceMemory: ParentTripPlaceMemoryItem\[\]/)
+  assert.match(recommendation, /已排除 \{parentPlaceMemory\.length\}/)
+})

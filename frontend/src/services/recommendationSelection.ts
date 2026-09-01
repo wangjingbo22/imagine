@@ -1,4 +1,5 @@
 import type { Place, SourceStatus } from '../domain/trip'
+import type { ParentTripPlaceMemoryItem } from '../domain/parentTrip'
 
 export interface RecommendationCandidate {
   factRefId: string
@@ -36,6 +37,7 @@ export interface RecommendationBundle {
   factSetId: string | null
   providerFactDigest: string | null
   provenance: RecommendationProvenance[]
+  parentPlaceMemory: ParentTripPlaceMemoryItem[]
 }
 
 export interface ConfirmedRecommendationPlace {

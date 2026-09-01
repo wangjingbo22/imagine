@@ -1,4 +1,4 @@
-import { ArrowRight, LoaderCircle, RefreshCw, ShieldCheck } from 'lucide-react'
+import { ArrowRight, LoaderCircle, MapPin, RefreshCw, ShieldCheck } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { request } from '../api/client'
@@ -94,6 +94,7 @@ export function RecommendationPage() {
     }
   }, [load])
   const trustedPlan = bundle?.trustedPlan
+  const parentPlaceMemory = bundle?.parentPlaceMemory ?? []
 
   function confirmUniqueRecommendation() {
     if (!bundle) return
@@ -157,6 +158,7 @@ export function RecommendationPage() {
     </header>
     {loading && <p>正在读取已核验地点…</p>}
     {error && <section className="draft-confirmation"><p className="form-error">{error}</p><button className="button button--soft" onClick={() => void load()}><RefreshCw size={16} />重试</button></section>}
+    {bundle && parentPlaceMemory.length > 0 && <section className="recommendation-place-memory" aria-label="本次跨日排除地点"><header><MapPin size={20} /><div><strong>跨日地点记忆</strong><span>已排除 {parentPlaceMemory.length} 个其他日期地点</span></div></header><ul>{parentPlaceMemory.map((place) => <li key={`${place.childTripId}:${place.planId}:${place.placeId}`}><span>{place.placeName}</span><small>第 {place.dayIndex + 1} 天 · {place.date}</small></li>)}</ul></section>}
     {bundle && trustedPlan && <section className="trusted-plan"><div className="draft-confirmation__heading"><span><ShieldCheck size={18} /></span><div><strong>唯一方案 · {bundle.usedDeterministicFallback ? '确定性排序' : '白名单排序'}</strong><p>按所有成员中的最低分优先选择；每一项均可回溯至高德 FactRef。</p></div></div>
       <section className="trusted-plan__tasks"><header><span>唯一行程骨架</span><strong>{trustedPlan.tasks.length} 个核验任务</strong></header><ol>{trustedPlan.tasks.map((place, index) => <li key={place.placeId}><span>{index + 1}</span><div><strong>{place.name}</strong><small>{place.category || '地点'} · FactRef: {place.factRefId}</small></div></li>)}</ol></section>
       <section className="trusted-plan__scores"><header><div><span>偏好覆盖评分 · 非路线质量分</span><strong>最低成员分 {trustedPlan.lowestMemberScore}/100</strong></div><small>从 100 分起算；每项未覆盖的已确认兴趣扣 20 分。硬约束由独立校验负责，不用固定基础分充数。</small></header><div>{trustedPlan.memberScores.map((member, index) => <article key={member.participantId}><span>成员 {index + 1}</span><strong>{member.score}</strong><div className="trusted-plan__score-meter" aria-label={`成员 ${index + 1} 偏好覆盖 ${member.score} 分`}><i style={{ width: `${member.score}%` }} /></div><p>{member.reasons.join('；')}</p>{member.penaltyRuleIds.map((rule) => <small key={rule}>扣分规则：{rule}</small>)}</article>)}</div></section>

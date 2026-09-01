@@ -5,10 +5,21 @@ export type ParentTripDay = {
   childStatus: string; costStatus: 'NOT_AVAILABLE' | 'PLANNED' | 'ACTUAL_RECORDED'
 }
 
+export type ParentTripPlaceMemoryItem = {
+  dayIndex: number
+  date: string
+  childTripId: string
+  planId: string
+  planStatus: 'PROPOSED' | 'CURRENT'
+  placeId: string
+  placeName: string
+}
+
 export type ParentTrip = {
   schemaVersion: '1.0'; parentTripId: string; title: string; cityName: string
   startDate: string; endDate: string; totalBudgetCents: number
   plannedCostCents: number | null; actualSpentCents: number | null; days: ParentTripDay[]
+  placeMemory: ParentTripPlaceMemoryItem[]
 }
 
 export type ParentTripMemberProfile = {

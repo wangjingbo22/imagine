@@ -49,6 +49,7 @@ function bundle(): RecommendationBundle {
     },
     factSetId: 'facts-trip-revision-1',
     providerFactDigest: digest,
+    parentPlaceMemory: [],
     provenance: candidates.map((item) => ({
       factRefId: item.factRefId,
       providerObjectId: item.placeId,
