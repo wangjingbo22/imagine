@@ -106,7 +106,7 @@
     border-color 0.35s ease;
 }
 
-.mode-card:hover {
+.mode-card--active:hover {
   transform: translateY(-9px) scale(1.008);
 }
 

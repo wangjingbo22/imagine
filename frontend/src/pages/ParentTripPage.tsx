@@ -6,7 +6,7 @@ import {
   WalletCards,
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   createParentTrip,
   getParentTripSync,
@@ -23,25 +23,46 @@ import {
 import {
   futureDateValue,
   localDateValue,
-  validateFutureDate,
+  tripDateRangeDayCount,
+  validateTripDateRange,
 } from '../services/tripTimeConstraints'
 
 const citySuggestions = ['北京', '上海', '成都', '西安', '杭州']
 const MIN_DAY_COUNT = 2
 const MAX_DAY_COUNT = 30
+type ParentTripMode = 'single' | 'group'
 const yuan = (cents: number | null) => cents === null ? '尚未生成' : `¥${(cents / 100).toFixed(0)}`
 
 export function ParentTripPage() {
   const { parentTripId = '' } = useParams()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const [trip, setTrip] = useState<ParentTrip | null>(null)
-  const [form, setForm] = useState(() => ({ title: '周末同城之旅', cityName: '北京', startDate: futureDateValue(), dayCount: 2, totalBudget: '1000' }))
+  const [form, setForm] = useState(() => {
+    const startDate = searchParams.get('startDate') || futureDateValue()
+    return {
+      title: searchParams.get('title')?.trim().slice(0, 80) || '周末同城之旅',
+      cityName: searchParams.get('city')?.trim().slice(0, 80) || '北京',
+      startDate,
+      endDate: searchParams.get('endDate') || futureDateValue(new Date(), 2),
+      totalBudget: '1000',
+    }
+  })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [temporalNow, setTemporalNow] = useState(() => new Date())
   const [budgetDrafts, setBudgetDrafts] = useState<Record<number, string>>({})
   const [budgetBusyDay, setBudgetBusyDay] = useState<number | null>(null)
-  const startDateError = validateFutureDate(form.startDate, temporalNow)
+  const requestedMode = searchParams.get('mode')
+  const explicitMode: ParentTripMode | null = requestedMode === 'single' || requestedMode === 'group'
+    ? requestedMode
+    : null
+  const tripMode: ParentTripMode = explicitMode ?? (trip ? 'single' : 'group')
+  const dateRangeError = validateTripDateRange(form, temporalNow, MAX_DAY_COUNT)
+  const dayCount = tripDateRangeDayCount(form)
+  const parentTripFormError = dateRangeError ?? (
+    dayCount === 1 ? `多日行程至少需要 ${MIN_DAY_COUNT} 天。` : null
+  )
 
   useEffect(() => {
     const timer = window.setInterval(() => setTemporalNow(new Date()), 60_000)
@@ -90,7 +111,7 @@ export function ParentTripPage() {
 
   async function create() {
     const submittedAt = new Date()
-    const submittedDateError = validateFutureDate(form.startDate, submittedAt)
+    const submittedDateError = validateTripDateRange(form, submittedAt, MAX_DAY_COUNT)
     if (submittedDateError) {
       setTemporalNow(submittedAt)
       setError(submittedDateError)
@@ -99,17 +120,18 @@ export function ParentTripPage() {
     setBusy(true)
     setError('')
     try {
-      if (!Number.isInteger(form.dayCount) || form.dayCount < MIN_DAY_COUNT || form.dayCount > MAX_DAY_COUNT) {
-        throw new Error(`目前支持 ${MIN_DAY_COUNT}–${MAX_DAY_COUNT} 天，请填写有效天数。`)
+      const submittedDayCount = tripDateRangeDayCount(form)
+      if (!submittedDayCount || submittedDayCount < MIN_DAY_COUNT || submittedDayCount > MAX_DAY_COUNT) {
+        throw new Error(`多日行程目前支持 ${MIN_DAY_COUNT}–${MAX_DAY_COUNT} 天。`)
       }
       const id = crypto.randomUUID()
       const token = `${crypto.randomUUID()}${crypto.randomUUID()}`
       const totalBudgetCents = Math.round(Number(form.totalBudget) * 100)
       if (!Number.isFinite(totalBudgetCents) || totalBudgetCents < 0) throw new Error('请填写有效的行程总预算。')
-      const baseBudget = Math.floor(totalBudgetCents / form.dayCount)
-      const remainder = totalBudgetCents % form.dayCount
+      const baseBudget = Math.floor(totalBudgetCents / submittedDayCount)
+      const remainder = totalBudgetCents % submittedDayCount
       const values = Array.from(
-        { length: form.dayCount },
+        { length: submittedDayCount },
         (_, index) => baseBudget + (index < remainder ? 1 : 0),
       )
       window.sessionStorage.setItem(parentTripOrganizerTokenKey(id), token)
@@ -122,7 +144,7 @@ export function ParentTripPage() {
         parentToken: token,
       })
       setTrip(created)
-      navigate(`/parent-trips/${id}`, { replace: true })
+      navigate(`/parent-trips/${id}?mode=${tripMode}`, { replace: true })
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '父行程创建失败。')
     } finally {
@@ -172,7 +194,15 @@ export function ParentTripPage() {
       navigate(`/workspace?tripId=${day.childTripId}&parentTripId=${trip.parentTripId}`)
       return
     }
-    navigate(`/plan?parentTripId=${trip.parentTripId}&dayIndex=${day.dayIndex}&city=${encodeURIComponent(trip.cityName)}&date=${day.date}&budget=${day.budgetCents}`)
+    const params = new URLSearchParams({
+      parentTripId: trip.parentTripId,
+      dayIndex: String(day.dayIndex),
+      city: trip.cityName,
+      date: day.date,
+      budget: String(day.budgetCents),
+      mode: tripMode,
+    })
+    navigate(`/plan?${params.toString()}`)
   }
 
   const placeMemory = trip?.placeMemory ?? []
@@ -182,15 +212,15 @@ export function ParentTripPage() {
   })).filter((item) => item.places.length > 0) ?? []
 
   return <AppShell><main className="parent-trip-page">
-    {!trip ? <section className="parent-trip-card"><p className="eyebrow">多日同行</p><h1>创建多天同城行程</h1><p className="parent-trip-card__lead">一次创建 2–30 天的行程框架，再逐日完成具体规划。</p>
+    {!trip ? <section className="parent-trip-card"><p className="eyebrow">{tripMode === 'single' ? '多日单人行程' : '多日同行'}</p><h1>创建多天同城行程</h1><p className="parent-trip-card__lead">一次创建 2–30 天的行程框架，再逐日完成具体规划。</p>
       <label>行程名称<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
       <div className="parent-trip-grid"><label>城市<input list="parent-trip-city-suggestions" value={form.cityName} onChange={(event) => setForm({ ...form, cityName: event.target.value })} placeholder="输入目的城市" required /></label>
-      <label>开始日期<input aria-invalid={Boolean(startDateError)} min={localDateValue(temporalNow)} type="date" value={form.startDate} onFocus={() => setTemporalNow(new Date())} onChange={(event) => { setError(''); setForm({ ...form, startDate: event.target.value }) }} /></label>
-      <label>天数<input type="number" min={MIN_DAY_COUNT} max={MAX_DAY_COUNT} step="1" inputMode="numeric" value={form.dayCount} onChange={(event) => setForm({ ...form, dayCount: Number(event.target.value) })} aria-describedby="parent-trip-day-hint" /><small id="parent-trip-day-hint">自定义填写，支持 2–30 天</small></label></div>
+      <label>出发日期<input aria-invalid={Boolean(parentTripFormError)} min={localDateValue(temporalNow)} type="date" value={form.startDate} onFocus={() => setTemporalNow(new Date())} onChange={(event) => { const startDate = event.target.value; setError(''); setForm({ ...form, startDate, endDate: form.endDate < startDate ? startDate : form.endDate }) }} /></label>
+      <label>结束日期<input aria-invalid={Boolean(parentTripFormError)} min={form.startDate || localDateValue(temporalNow)} type="date" value={form.endDate} onFocus={() => setTemporalNow(new Date())} onChange={(event) => { setError(''); setForm({ ...form, endDate: event.target.value }) }} /><small>{dayCount ? `共 ${dayCount} 天，支持 2–30 天` : '请选择结束日期'}</small></label></div>
       <datalist id="parent-trip-city-suggestions">{citySuggestions.map((city) => <option key={city} value={city} />)}</datalist>
-      {startDateError && <p className="form-error" role="alert">{startDateError}</p>}
+      {parentTripFormError && <p className="form-error" role="alert">{parentTripFormError}</p>}
       <div className="parent-trip-budget-inputs"><label>多日行程总预算（元）<input type="number" min="0" inputMode="decimal" value={form.totalBudget} onChange={(event) => setForm({ ...form, totalBudget: event.target.value })} /><small>创建后会自动平均分配到每天；进入单日规划时无需再次填写。</small></label></div>
-      <button className="button button--primary" disabled={busy || Boolean(startDateError)} onClick={() => void create()}>创建父行程 <ChevronRight size={18} /></button>
+      <button className="button button--primary" disabled={busy || Boolean(parentTripFormError) || !dayCount} onClick={() => void create()}>创建父行程 <ChevronRight size={18} /></button>
     </section> : <><section className="parent-trip-hero"><div><p className="eyebrow">同城 {trip.days.length} 天父行程</p><h1>{trip.title}</h1><p>{trip.cityName} · {trip.startDate} 至 {trip.endDate}</p></div>
       <div className="parent-trip-sync-state"><span>每日行程总览</span><button className="icon-button" type="button" title="立即刷新" aria-label="立即刷新" onClick={() => void load(trip.parentTripId).catch((caught: Error) => setError(caught.message))}><RefreshCw size={18} /></button></div></section>
       <section className="parent-budget-summary"><div><WalletCards/><span>分配总预算</span><strong>{yuan(trip.totalBudgetCents)}</strong></div><div><span>已生成计划合计</span><strong>{yuan(trip.plannedCostCents)}</strong></div><div><span>已记录支出合计</span><strong>{yuan(trip.actualSpentCents)}</strong></div></section>

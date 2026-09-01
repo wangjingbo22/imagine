@@ -234,5 +234,6 @@ export function collaborationState(ready: boolean) {
       confirmedRevision: ready ? 1 : null,
     }],
     confirmationItems: [],
+    changeProposals: [],
   }
 }

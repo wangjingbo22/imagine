@@ -234,6 +234,29 @@ async function mockRecommendationRouteBuild(page: Page, routeDurationSeconds = 6
       }),
     })
   })
+  await page.route(`**/api/v1/trips/${T024_TRIP_ID}/plan-previews/validate`, async (route) => {
+    generatedCandidate = route.request().postDataJSON()
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: api({
+        schemaVersion: '1.0',
+        validationStatus: 'PASS',
+        metrics: {
+          totalCostCents: 5000,
+          knownTotalCostCents: 5000,
+          unknownAmountCount: 0,
+          budgetLimitCents: 35000,
+          knownBudgetBufferCents: 30000,
+          totalWalkMeters: 720,
+          transferCount: 0,
+          validationStatus: 'PASS',
+        },
+        constraintResults: [],
+        warnings: [],
+      }),
+    })
+  })
   await page.route(`**/api/v1/trips/${T024_TRIP_ID}/plan-versions/generate`, async (route) => {
     generatedCandidate = route.request().postDataJSON()
     await route.fulfill({ status: 200, contentType: 'application/json', body: api(currentPlanV1) })
@@ -301,9 +324,12 @@ test('six-question entry has no horizontal overflow and reachable actions', asyn
 })
 
 test('mocked single-person UI integration confirms the recommendation and enters the workspace', async ({ page }) => {
+  await installSession(page)
   let ready = false
+  const conversationRequests: Array<{ answers: Array<{ questionId: string; answer: string }> }> = []
   const routeAudit = await mockRecommendationRouteBuild(page)
   await page.route('**/api/v2/trips/conversations', async (route) => {
+    conversationRequests.push(route.request().postDataJSON())
     await route.fulfill({ status: 200, contentType: 'application/json', body: api(organizerConversation) })
   })
   await page.route(`**/api/v2/trips/${T024_TRIP_ID}/collaboration`, async (route) => {
@@ -322,9 +348,9 @@ test('mocked single-person UI integration confirms the recommendation and enters
   await page.getByLabel('这趟旅行，你最希望得到什么？').fill('想轻松游览北京的历史文化景点。')
   await page.getByRole('button', { name: /开始回答 5 个问题/ }).click()
   await page.getByLabel('目的城市').fill('北京')
-  await page.getByLabel('出行日期').fill(futureDateValue())
-  await page.getByLabel('开始').fill('09:00')
-  await page.getByLabel('结束').fill('20:00')
+  const travelDate = futureDateValue()
+  await page.getByLabel('出发日期').fill(travelDate)
+  await page.getByLabel('结束日期').fill(travelDate)
   await page.getByRole('button', { name: /下一个问题/ }).click()
   await page.getByLabel('出发地').fill('北京站')
   await page.getByLabel('结束地').fill('北京站')
@@ -335,12 +361,18 @@ test('mocked single-person UI integration confirms the recommendation and enters
   await page.getByRole('button', { name: /下一个问题/ }).click()
   await page.locator('.conversation-textarea--answer').fill('以上信息正确。')
   await page.getByRole('button', { name: /完成问答并智能整理/ }).click()
-  await expect(page.getByText('Agent 解析确认卡')).toBeVisible()
-  await page.getByRole('button', { name: /确认组织者资料/ }).click()
-  const recommendation = page.getByRole('button', { name: /查看推荐方案/ })
-  await expect(recommendation).toBeVisible()
+  await expect(page.getByText('智能整理完成')).toBeVisible()
+  expect(conversationRequests[0].answers[0].answer).toContain('出行时间：08:30到21:00')
+
+  await page.getByRole('button', { name: '调整时间' }).click()
+  await page.getByLabel('开始时间').fill('10:00')
+  await page.getByLabel('结束时间').fill('19:00')
+  await page.getByRole('button', { name: '应用并重新整理' }).click()
+  await expect.poll(() => conversationRequests.length).toBe(2)
+  expect(conversationRequests[1].answers[0].answer).toContain('出行时间：10:00到19:00')
+
+  await page.getByRole('button', { name: /确认并生成推荐方案/ }).click()
   await expect.poll(() => page.evaluate((tripId) => Boolean(window.sessionStorage.getItem(`s2-plan-context:${tripId}`)), T024_TRIP_ID)).toBe(true)
-  await recommendation.click()
   await expect(page).toHaveURL(new RegExp(`/recommendation/${T024_TRIP_ID}$`))
   await expect(page.getByRole('heading', { name: '推荐方案' })).toBeVisible()
   await page.getByRole('combobox', { name: '第 1 个地点', exact: true }).selectOption('place-fact-6')

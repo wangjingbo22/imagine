@@ -214,17 +214,28 @@ test('READY collaboration always exposes the authoritative recommendation action
   assert.match(page, /enterRecommendation\(current, draft\)/)
 })
 
-test('home group card opens the planner directly in multiplayer creation mode', async () => {
+test('home journey cards are informational and expose no workflow links', async () => {
   const [home, planner] = await Promise.all([
     readFile(new URL('../src/pages/HomePage.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8'),
   ])
-  assert.match(home, /to="\/plan\?mode=group"/)
-  assert.match(home, /创建多人行程/)
-  assert.doesNotMatch(home, /即将开放/)
-  assert.match(planner, /searchParams\.get\('mode'\) === 'group'/)
-  assert.match(planner, /opensGroupCreation \? 2 : 1/)
-  assert.match(planner, /opensGroupCreation \? 'group' : null/)
+  assert.match(home, /<article className="mode-card"/)
+  assert.doesNotMatch(home, /<Link className="mode-card/)
+  assert.doesNotMatch(home, /创建多日行程|立即开始|创建多人行程/)
+  assert.match(planner, /const requestedMode = searchParams\.get\('mode'\)/)
+  assert.match(planner, /requestedMode === 'single' \|\| isParentDay/)
+  assert.match(planner, /initialEntryMode === 'group' \? 2 : 1/)
+})
+
+test('parent day planning opens the daily expectation directly and skips inherited trip facts', async () => {
+  const page = await readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8')
+  assert.match(page, /const isParentDay = Boolean\(parentTripId/)
+  assert.match(page, /modeQuestionIndexes\.filter\(\(questionIndex\) => questionIndex !== 0\)/)
+  assert.match(page, /setStep\(visibleQuestionIndexes\[0\] \?\? 0\)/)
+  assert.match(page, /先填写今天的期待/)
+  assert.match(page, /今天，你最希望得到什么？/)
+  assert.match(page, /确认并生成推荐方案/)
+  assert.match(page, /outcomeRef\.current\?\.scrollIntoView/)
 })
 
 test('fixed-question fallback requires an explicit visible-answer review and a fresh retry key', async () => {

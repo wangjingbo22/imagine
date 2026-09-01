@@ -29,8 +29,10 @@ function MotionController() {
 
   useEffect(() => {
     let observer: IntersectionObserver | undefined
+    let mutationObserver: MutationObserver | undefined
     const frameId = window.requestAnimationFrame(() => {
-      const revealItems = document.querySelectorAll<HTMLElement>('[data-reveal]')
+      const observedItems = new WeakSet<HTMLElement>()
+      let revealIndex = 0
       observer = new IntersectionObserver(
         (entries) => {
           entries.forEach((entry) => {
@@ -43,14 +45,29 @@ function MotionController() {
         { threshold: 0.12, rootMargin: '0px 0px -6% 0px' },
       )
 
-      revealItems.forEach((item, index) => {
-        item.style.setProperty('--reveal-delay', `${Math.min(index * 65, 260)}ms`)
+      const observeItem = (item: HTMLElement) => {
+        if (observedItems.has(item) || item.classList.contains('is-revealed')) return
+        observedItems.add(item)
+        item.style.setProperty('--reveal-delay', `${Math.min(revealIndex * 65, 260)}ms`)
+        revealIndex += 1
         observer?.observe(item)
+      }
+      const observeTree = (node: Node) => {
+        if (!(node instanceof Element)) return
+        if (node instanceof HTMLElement && node.matches('[data-reveal]')) observeItem(node)
+        node.querySelectorAll<HTMLElement>('[data-reveal]').forEach(observeItem)
+      }
+
+      document.querySelectorAll<HTMLElement>('[data-reveal]').forEach(observeItem)
+      mutationObserver = new MutationObserver((records) => {
+        records.forEach((record) => record.addedNodes.forEach(observeTree))
       })
+      mutationObserver.observe(document.body, { childList: true, subtree: true })
     })
 
     return () => {
       window.cancelAnimationFrame(frameId)
+      mutationObserver?.disconnect()
       observer?.disconnect()
     }
   }, [location.pathname])

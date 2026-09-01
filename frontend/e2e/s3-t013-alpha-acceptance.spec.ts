@@ -98,7 +98,7 @@ for (const dayCount of [2, 3] as const) {
     }
     const memberNickname = `T013 成员 ${dayCount}日`
     const startDate = futureDateValue(new Date(), dayCount === 2 ? 11 : 18)
-    const budgets = ['500', '600', '700']
+    const budgets = Array.from({ length: dayCount }, () => '600')
     const memberContext = await browser.newContext({
       locale: 'zh-CN',
       reducedMotion: 'reduce',
@@ -118,14 +118,12 @@ for (const dayCount of [2, 3] as const) {
 
       await organizer.goto('/parent-trips/new')
       await organizer.getByLabel('行程名称').fill(title)
-      await organizer.getByLabel('城市').selectOption('北京')
-      await organizer.getByLabel('开始日期').fill(startDate)
-      await organizer.getByLabel('天数').selectOption(String(dayCount))
-      for (let index = 0; index < dayCount; index += 1) {
-        await organizer.getByLabel(`第 ${index + 1} 天预算（元）`).fill(budgets[index])
-      }
+      await organizer.getByLabel('城市').fill('北京')
+      await organizer.getByLabel('出发日期').fill(startDate)
+      await organizer.getByLabel('结束日期').fill(addDays(startDate, dayCount - 1))
+      await organizer.getByLabel('多日行程总预算（元）').fill(String(600 * dayCount))
       await organizer.getByRole('button', { name: /创建父行程/ }).click()
-      await expect(organizer).toHaveURL(/\/parent-trips\/[0-9a-f-]{36}$/)
+      await expect(organizer).toHaveURL(/\/parent-trips\/[0-9a-f-]{36}\?mode=group$/)
       await expect(organizer.getByRole('heading', { name: title })).toBeVisible()
       const parentTripId = new URL(organizer.url()).pathname.split('/').at(-1)
       expect(parentTripId).toMatch(/^[0-9a-f-]{36}$/)
@@ -193,11 +191,11 @@ for (const dayCount of [2, 3] as const) {
         expect(target.searchParams.get('dayIndex')).toBe(String(index))
         expect(target.searchParams.get('city')).toBe('北京')
         expect(target.searchParams.get('budget')).toBe(String(Number(budgets[index]) * 100))
-        await organizer.getByRole('button', { name: /单人创建/ }).click()
-        await organizer.getByLabel('这趟旅行，你最希望得到什么？').fill('希望当天行程轻松、顺路，并符合多日总计划。')
+        await expect(organizer.getByRole('button', { name: /单人创建|多人创建/ })).toHaveCount(0)
+        await organizer.getByLabel('今天，你最希望得到什么？').fill('希望当天行程轻松、顺路，并符合多日总计划。')
         await organizer.getByRole('button', { name: /开始回答 5 个问题/ }).click()
-        await expect(organizer.getByLabel('目的城市')).toHaveValue('北京')
-        await expect(organizer.getByLabel('出行日期')).toHaveValue(addDays(startDate, index))
+        await expect(organizer.getByLabel('目的城市')).toHaveCount(0)
+        await expect(organizer.getByText('问题 1 / 5')).toBeVisible()
         if (index === dayCount - 1) {
           await organizer.screenshot({
             path: testInfo.outputPath(`${dayCount}-day-child-trip-entry.png`),

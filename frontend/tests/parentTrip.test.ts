@@ -10,12 +10,13 @@ test('T012 exposes an expanded multi-day parent route and reuses the single-day 
   ])
   assert.match(app, /\/parent-trips\/new/)
   assert.match(app, /\/parent-trips\/:parentTripId/)
-  assert.match(page, /dayCount: 2/)
-  assert.match(page, /max=\{MAX_DAY_COUNT\}/)
+  assert.match(page, /tripDateRangeDayCount\(form\)/)
+  assert.match(page, /searchParams\.get\('endDate'\)/)
+  assert.match(page, /validateTripDateRange\(form, temporalNow, MAX_DAY_COUNT\)/)
   assert.match(page, /多日行程总预算/)
   assert.match(page, /MAX_DAY_COUNT = 30/)
   assert.match(page, /saveDayBudget/)
-  assert.match(page, /\/plan\?parentTripId=/)
+  assert.match(page, /navigate\(`\/plan\?\$\{params\.toString\(\)\}`\)/)
   assert.match(planner, /linkParentTripDay/)
 })
 
@@ -36,6 +37,21 @@ test('parent and child organizer capabilities are sent separately', async () => 
   assert.doesNotMatch(api, /localStorage/)
 })
 
+test('a child trip is linked only after its final organizer review', async () => {
+  const planner = await readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8')
+  const analyzeBody = planner.slice(
+    planner.indexOf('async function analyze('),
+    planner.indexOf('async function retryAfterFallbackReview()'),
+  )
+  const confirmationBody = planner.slice(
+    planner.indexOf('async function confirmAndPrepare()'),
+    planner.indexOf('async function resolveConflict('),
+  )
+
+  assert.doesNotMatch(analyzeBody, /linkParentTripDay/)
+  assert.match(confirmationBody, /linkParentTripDay/)
+})
+
 test('parent context survives recommendation and workspace navigation', async () => {
   const planner = await readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8')
   const recommendation = await readFile(new URL('../src/pages/RecommendationPage.tsx', import.meta.url), 'utf8')
@@ -45,6 +61,18 @@ test('parent context survives recommendation and workspace navigation', async ()
   assert.match(recommendation, /workspaceParams\.set\('parentTripId'/)
   assert.match(recommendation, /返回多日行程规划/)
   assert.match(workspace, /返回多日行程规划/)
+})
+
+test('multi-day travel mode is preserved outside the simplified parent dashboard', async () => {
+  const [parentPage, planner] = await Promise.all([
+    readFile(new URL('../src/pages/ParentTripPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(planner, /params\.set\('mode', entryMode\)/)
+  assert.match(parentPage, /navigate\(`\/parent-trips\/\$\{id\}\?mode=\$\{tripMode\}`/)
+  assert.match(parentPage, /mode: tripMode/)
+  assert.doesNotMatch(parentPage, /parent-collaboration|createParentTripInvitation/)
 })
 
 test('multi-day planning exposes and propagates cross-day place memory', async () => {

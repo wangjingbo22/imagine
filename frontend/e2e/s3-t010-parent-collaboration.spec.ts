@@ -47,7 +47,7 @@ test('S3-T010 three people collaborate through isolated polling sessions', async
     await organizer.goto('/parent-trips/new')
     await organizer.getByLabel('行程名称').fill(title)
     await organizer.getByRole('button', { name: '创建父行程' }).click()
-    await expect(organizer).toHaveURL(/\/parent-trips\/[0-9a-f-]{36}$/)
+    await expect(organizer).toHaveURL(/\/parent-trips\/[0-9a-f-]{36}\?mode=group$/)
     await expect(organizer.getByRole('heading', { name: title })).toBeVisible()
     await assertNoHorizontalOverflow(organizer)
 

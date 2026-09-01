@@ -2,11 +2,14 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  defaultPlanningTimeWindow,
   futureDateValue,
   localDateValue,
   localTimeValue,
   minimumStartTime,
+  tripDateRangeDayCount,
   validateFutureDate,
+  validateTripDateRange,
   validateTripSchedule,
 } from '../src/services/tripTimeConstraints.ts'
 
@@ -40,4 +43,38 @@ test('future windows pass and reversed windows fail', () => {
     startTime: '18:00',
     endTime: '09:00',
   }, NOW), '结束时间必须晚于开始时间。')
+})
+
+test('date ranges count inclusive days and reject invalid boundaries', () => {
+  assert.equal(tripDateRangeDayCount({
+    startDate: '2026-09-02',
+    endDate: '2026-09-04',
+  }), 3)
+  assert.equal(validateTripDateRange({
+    startDate: '2026-08-31',
+    endDate: '2026-09-02',
+  }, NOW), '出发日期不能早于今天。')
+  assert.equal(validateTripDateRange({
+    startDate: '2026-09-03',
+    endDate: '2026-09-02',
+  }, NOW), '结束日期不能早于出发日期。')
+  assert.equal(validateTripDateRange({
+    startDate: '2026-09-02',
+    endDate: '2026-10-02',
+  }, NOW), '多日行程目前最多支持 30 天。')
+})
+
+test('hidden planning window defaults to 08:30-21:00 and skips elapsed time', () => {
+  assert.deepEqual(defaultPlanningTimeWindow('2026-09-02', NOW), {
+    startTime: '08:30',
+    endTime: '21:00',
+  })
+  assert.deepEqual(defaultPlanningTimeWindow('2026-09-01', NOW), {
+    startTime: '14:45',
+    endTime: '21:00',
+  })
+  assert.equal(
+    defaultPlanningTimeWindow('2026-09-01', new Date(2026, 8, 1, 20, 59)),
+    null,
+  )
 })

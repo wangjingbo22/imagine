@@ -3,7 +3,6 @@ import {
   CalendarDays,
   BrainCircuit,
   Check,
-  ChevronRight,
   Compass,
   HeartHandshake,
   Route,
@@ -116,11 +115,11 @@ export function HomePage() {
             <p>不是生成一段文字，而是理解、验证、执行与调整组成的完整闭环。</p>
           </div>
           <div className="mode-grid">
-            <Link className="mode-card mode-card--active" data-reveal="card" to="/parent-trips/new">
+            <article className="mode-card" data-reveal="card">
               <div className="mode-card__visual multiday-visual"><CalendarDays size={42} /><span className="day-sheet day-sheet--one">D1</span><span className="day-sheet day-sheet--two">D2</span><span className="day-sheet day-sheet--three">D3</span></div>
-              <div className="mode-card__content"><span className="mode-tag">Sprint 3</span><h3>同城多日行程</h3><p>创建 2–30 天父行程，逐日进入成熟的单日规划并汇总预算。</p><span className="mode-link">创建多日行程 <ChevronRight size={17}/></span></div>
-            </Link>
-            <Link className="mode-card mode-card--active" data-reveal="card" to="/plan">
+              <div className="mode-card__content"><span className="mode-tag">Sprint 3</span><h3>同城多日行程</h3><p>创建 2–30 天父行程，逐日进入成熟的单日规划并汇总预算。</p></div>
+            </article>
+            <article className="mode-card" data-reveal="card">
               <div className="mode-card__visual solo-visual">
                 <Compass size={42} />
                 <span className="route-dash route-dash--a" />
@@ -130,10 +129,9 @@ export function HomePage() {
                 <span className="mode-tag">推荐体验</span>
                 <h3>一个人出发</h3>
                 <p>告诉 Agent 预算、时间与偏好，得到一份经过硬约束校验的专属计划。</p>
-                <span className="mode-link">立即开始 <ChevronRight size={17} /></span>
               </div>
-            </Link>
-            <Link className="mode-card mode-card--active" data-reveal="card" to="/plan?mode=group">
+            </article>
+            <article className="mode-card" data-reveal="card">
               <div className="mode-card__visual group-visual">
                 <Users size={42} />
                 <span className="avatar-bubble avatar-bubble--a" />
@@ -144,9 +142,8 @@ export function HomePage() {
                 <span className="mode-tag mode-tag--neutral">Sprint 2</span>
                 <h3>和朋友一起</h3>
                 <p>协调最多 20 人的兴趣、预算与体力差异，让每一次妥协都有清晰理由。</p>
-                <span className="mode-link">创建多人行程 <ChevronRight size={17} /></span>
               </div>
-            </Link>
+            </article>
           </div>
         </section>
       </main>
