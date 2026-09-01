@@ -77,3 +77,16 @@ export function readParentMemberSession(parentTripId: string): string | null {
 export function clearParentMemberSession(parentTripId: string): void {
   window.sessionStorage.removeItem(parentTripMemberSessionKey(parentTripId))
 }
+
+export function clearAccountBoundParentTripMemberSessions(): void {
+  try {
+    for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.sessionStorage.key(index)
+      if (key?.startsWith('parent-trip-member-session:')) {
+        window.sessionStorage.removeItem(key)
+      }
+    }
+  } catch {
+    // Storage may be disabled or unavailable in the current browser context.
+  }
+}

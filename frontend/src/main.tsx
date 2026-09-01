@@ -5,12 +5,16 @@ import './index.css'
 import './styles/premium.css'
 import './styles/white-web.css'
 import './styles/motion.css'
+import './styles/future-system.css'
 import App from './App.tsx'
+import { AccountSessionProvider } from './session/AccountSessionProvider.tsx'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <App />
+      <AccountSessionProvider>
+        <App />
+      </AccountSessionProvider>
     </BrowserRouter>
   </StrictMode>,
 )

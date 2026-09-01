@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
+from app.api.model_access import require_account_model_credentials
 from app.api.planning_access import build_planning_access
 from app.application.collaboration_ports import PlanningOperation
 from app.application.recommendation_service import (
@@ -298,6 +299,7 @@ async def recommend_unique_plan(
     service: RecommendationOrchestrationService = Depends(
         get_recommendation_service
     ),
+    _: tuple[str, str, str] = Depends(require_account_model_credentials),
 ) -> ApiResponse[RecommendationOrchestrationResult]:
     access = build_planning_access(
         http_request, trip_id, PlanningOperation.RECOMMENDATION
@@ -318,7 +320,11 @@ async def recommend_unique_plan(
 
 
 @router.get("/api/v2/trips/{trip_id}/recommendations")
-async def recommendations(trip_id: UUID, request: Request) -> ApiResponse:
+async def recommendations(
+    trip_id: UUID,
+    request: Request,
+    _: tuple[str, str, str] = Depends(require_account_model_credentials),
+) -> ApiResponse:
     """Build recommendations only from the guarded current revision."""
     organizer_token = request.headers.get("X-Organizer-Token")
     access = build_planning_access(

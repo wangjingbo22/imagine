@@ -12,6 +12,8 @@ from app.core.errors import AppError
 from app.domain.collaboration import (
     InvitationCreateRequest,
     InvitationRedeemRequest,
+    MemberChangeProposalCreateRequest,
+    MemberChangeProposalReviewRequest,
     OrganizerConversationCreated,
     OrganizerConversationRequest,
     ParticipantConversationRequest,
@@ -160,6 +162,21 @@ async def confirm_member(
     ))
 
 
+@router.post("/member-session/change-proposals")
+async def create_member_change_proposal(
+    payload: MemberChangeProposalCreateRequest,
+    request: Request,
+    response: Response,
+    current: CollaborationService = Depends(service),
+) -> ApiResponse:
+    """成员只提交建议，不在该入口直接改写组织者确认的共享事实。"""
+    response.headers["Cache-Control"] = "no-store"
+    return ApiResponse(data=current.create_member_change_proposal(
+        session_token=require_member_session(request),
+        request=payload,
+    ))
+
+
 @router.post("/member-session/confirmation-items/{item_id}/resolve")
 async def resolve_member_issue(
     item_id: str,
@@ -205,6 +222,26 @@ async def state(
     return ApiResponse(data=current.organizer_state(
         trip_id,
         require_organizer_token(request),
+    ))
+
+
+@router.post("/trips/{trip_id}/change-proposals/{proposal_id}/review")
+async def review_member_change_proposal(
+    trip_id: UUID,
+    proposal_id: UUID,
+    payload: MemberChangeProposalReviewRequest,
+    request: Request,
+    response: Response,
+    current: CollaborationService = Depends(service),
+) -> ApiResponse:
+    """组织者批准后生成新修订；拒绝则完整保留当前计划。"""
+    response.headers["Cache-Control"] = "no-store"
+    return ApiResponse(data=current.review_member_change_proposal(
+        trip_id=trip_id,
+        proposal_id=proposal_id,
+        organizer_token=require_organizer_token(request),
+        request=payload,
+        idempotency_key=require_idempotency_key(request),
     ))
 
 

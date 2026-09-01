@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request
 from pydantic import ValidationError
 
+from app.api.model_access import require_account_model_credentials
 from app.api.planning_access import build_planning_access
 from app.application.collaboration_ports import PlanningOperation
 from app.application.planning_boundary_service import PlanningBoundaryService
@@ -43,6 +44,7 @@ async def get_planning_facts(
     trip_id: UUID,
     request: Request,
     service: PlanningBoundaryService = Depends(get_planning_boundary),
+    _: tuple[str, str, str] = Depends(require_account_model_credentials),
 ) -> ApiResponse:
     access = build_planning_access(request, trip_id, PlanningOperation.GENERATE_V1)
     return ApiResponse(data=service.get_planning_facts(trip_id, access=access))
@@ -60,6 +62,7 @@ async def generate_plan_v1(
     trip_id: UUID,
     request: Request,
     service: PlanningBoundaryService = Depends(get_planning_boundary),
+    _: tuple[str, str, str] = Depends(require_account_model_credentials),
 ) -> ApiResponse:
     access = build_planning_access(request, trip_id, PlanningOperation.GENERATE_V1)
     try:
@@ -133,6 +136,7 @@ async def generate_plan_v2(
     trip_id: UUID,
     request: Request,
     service: PlanningBoundaryService = Depends(get_planning_boundary),
+    _: tuple[str, str, str] = Depends(require_account_model_credentials),
 ) -> ApiResponse:
     access = build_planning_access(request, trip_id, PlanningOperation.GENERATE_V2)
     try:

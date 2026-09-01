@@ -42,6 +42,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 @media (max-width: 680px) { .ledger-page { width: min(100% - 32px, 1120px); padding-top: 20px; }.ledger-hero, .ledger-card__header { align-items: flex-start; flex-direction: column; }.ledger-total { width: 100%; }.ledger-summary { grid-template-columns: 1fr; }.ledger-card { padding: 19px; } }
 
 .app-shell { min-height: 100vh; overflow: hidden; }
+.app-shell__session-error { display: block; border-bottom: 1px solid #fecaca; color: #9f1239; background: #fff1f2; }
+.app-shell__session-error > div { width: min(1200px, calc(100% - 48px)); margin: 0 auto; padding: 10px 0; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
 .topbar { position: relative; z-index: 30; height: 74px; border-bottom: 1px solid rgba(23, 33, 29, 0.08); background: rgba(247, 249, 246, 0.78); backdrop-filter: blur(24px); }
 .topbar__inner { width: min(1200px, calc(100% - 48px)); height: 100%; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; }
 .topbar__nav, .topbar__back, .brand-mark, .topbar__status { display: flex; align-items: center; }
@@ -511,7 +513,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 }
 
 @media (max-width: 760px) {
-  .topbar { height: 64px; }.topbar__inner { width: calc(100% - 30px); }.topbar__status { display: none; }
+  .topbar { height: 64px; }.topbar__inner { width: calc(100% - 30px); }.topbar__status { display: none; }.app-shell__session-error > div { width: calc(100% - 30px); }
   .hero-section { min-height: auto; padding: 72px 20px 62px; gap: 24px; }
   .hero-content h1 { font-size: 43px; }.hero-copy { font-size: 15px; }.hero-actions { width: 100%; flex-direction: column; }.hero-actions .button { width: 100%; }
   .hero-proof { justify-content: center; }

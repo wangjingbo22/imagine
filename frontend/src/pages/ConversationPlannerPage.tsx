@@ -1,4 +1,4 @@
-import { ArrowRight, CalendarDays, Check, ChevronDown, Clock3, Copy, HeartHandshake, Link2, LockKeyhole, MapPin, Sparkles, UserRound, UsersRound, WalletCards } from 'lucide-react'
+import { ArrowRight, CalendarDays, Check, ChevronDown, Clock3, Copy, HeartHandshake, Link2, LockKeyhole, MapPin, RefreshCw, Sparkles, UserRound, UsersRound, WalletCards } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
@@ -9,6 +9,7 @@ import {
   isFixedQuestionFallback,
   newIdempotencyKey,
   resolveOrganizerConfirmationItem,
+  reviewMemberChangeProposal,
 } from '../api/collaborationApi'
 import { linkParentTripDay } from '../api/parentTripApi'
 import { ApiError } from '../api/client'
@@ -47,6 +48,21 @@ const questions = [
   ['assistance', '是否有预算上限、步行、换乘、休息或关怀需求？'],
   ['confirm', '请确认以上描述；还需要补充什么不可妥协的限制吗？'],
 ] as const
+
+// 确认页使用短标题代替“修改第 N 问”，让组织者一眼看出将返回哪类信息。
+const questionEditLabels = ['城市与时间', '同行成员', '起终点与预算', '兴趣与必去', '预算与关怀', '最终限制'] as const
+
+function collaborationStatusLabel(status: CollaborationAggregate['status']): string {
+  const labels: Record<CollaborationAggregate['status'], string> = {
+    MIGRATION_REQUIRED: '需要重新创建行程',
+    DRAFT_CONVERSATION: '正在整理资料',
+    INVITING: '正在邀请成员',
+    COLLECTING_MEMBERS: '等待成员确认',
+    CONFLICT_REVIEW: '需要处理确认项',
+    READY_TO_PLAN: '可以进入下一步',
+  }
+  return labels[status]
+}
 
 type EntryMode = 'single' | 'group'
 
@@ -110,6 +126,7 @@ export function ConversationPlannerPage() {
   const [inviteLink, setInviteLink] = useState('')
   const [step, setStep] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [refreshingCollaboration, setRefreshingCollaboration] = useState(false)
   const [result, setResult] = useState<OrganizerConversationCreated | null>(null)
   const [fallback, setFallback] = useState<FixedQuestionFallbackResponse | null>(null)
   const [reviewedFallbackAnswers, setReviewedFallbackAnswers] = useState<boolean[]>(Array(questions.length).fill(false))
@@ -162,7 +179,15 @@ export function ConversationPlannerPage() {
   const organizerConfirmed = collaboration?.participants.some((item) => item.role === 'ORGANIZER' && item.confirmationStatus === 'CONFIRMED') ?? false
   const memberParticipants = collaboration?.participants.filter((item) => item.role === 'MEMBER') ?? []
   const hasMemberParticipants = memberParticipants.length > 0
+  const allMembersConfirmed = hasMemberParticipants && memberParticipants.every((item) => item.confirmationStatus === 'CONFIRMED')
   const needsInvitations = collaboration?.participants.some((item) => item.role === 'MEMBER' && item.accessStatus === 'NOT_INVITED') ?? false
+  const organizerCanUnlockNextStep = Boolean(
+    collaboration
+    && !organizerConfirmed
+    && allMembersConfirmed
+    && !needsInvitations
+    && collaboration.progress.openIssueCount === 0,
+  )
   const reviewedFallbackCount = visibleQuestionIndexes.filter((index) => reviewedFallbackAnswers[index]).length
   const fallbackReviewComplete = reviewedFallbackCount === visibleQuestionCount
 
@@ -483,6 +508,10 @@ export function ConversationPlannerPage() {
       if (draft && canEnterRecommendation(current)) {
         setStoredPlanContext(revision.tripId, draft)
       }
+      // 如果当前只差组织者确认，确认成功后立即进入方案页，不再要求用户寻找第二个按钮。
+      if (canEnterRecommendation(current)) {
+        enterRecommendation(current, draft)
+      }
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === 'PARTICIPANT_CONFIRMATION_REQUIRED') {
         const missingQuestion = questionIndexForConfirmationDetails(caught.details)
@@ -502,6 +531,49 @@ export function ConversationPlannerPage() {
       setCollaboration(state)
       if (state.currentRevision !== revision?.revision) setPlanningDraft(null)
     } catch (caught) { setError(caught instanceof Error ? caught.message : '冲突处理失败。') }
+    finally { setLoading(false) }
+  }
+
+  function enterRecommendation(state: CollaborationAggregate, draft: TripDraftInput | null = planningDraft) {
+    // 规划页面以服务端 tripId 获取最新修订；本地草稿只在版本一致时作为补充上下文。
+    if (draft) setStoredPlanContext(state.tripId, draft)
+    // 保留远端新增的推荐会话清理逻辑，避免上一次行程的候选编辑状态串入新方案。
+    clearRecommendationSession(window.sessionStorage, state.tripId)
+    const parentQuery = parentTripId && Number.isInteger(parentDayIndex)
+      ? `?parentTripId=${encodeURIComponent(parentTripId)}&dayIndex=${parentDayIndex}`
+      : ''
+    navigate(`/recommendation/${state.tripId}${parentQuery}`)
+  }
+
+  async function refreshCollaborationNow() {
+    if (!revision || !organizerToken) return
+    setRefreshingCollaboration(true); setError('')
+    try {
+      // 手动刷新直接读取服务端权威状态，用于成员刚确认但轮询尚未到达的场景。
+      const state = await getOrganizerCollaboration(revision.tripId, organizerToken)
+      setCollaboration(state)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '刷新协作状态失败。')
+    } finally {
+      setRefreshingCollaboration(false)
+    }
+  }
+
+  async function reviewChangeProposal(proposalId: string, decision: 'APPROVE' | 'REJECT') {
+    if (!collaboration || !organizerToken) return
+    setLoading(true); setError('')
+    try {
+      // 接口返回的是审批后的完整协作快照。批准时 currentRevision 会增加，
+      // 因而旧的前端规划草稿必须清除，防止后续误用审批前的数据。
+      const state = await reviewMemberChangeProposal({
+        state: collaboration,
+        proposalId,
+        decision,
+        organizerToken,
+      })
+      setCollaboration(state)
+      if (state.currentRevision !== revision?.revision) setPlanningDraft(null)
+    } catch (caught) { setError(caught instanceof Error ? caught.message : '成员建议审批失败。') }
     finally { setLoading(false) }
   }
 
@@ -562,21 +634,15 @@ export function ConversationPlannerPage() {
         {parentTripId && <button className="parent-trip-return" type="button" onClick={() => navigate(`/parent-trips/${parentTripId}`)}>← 返回多日父行程</button>}
         {result && revision && <section className="confirmation-card"><div className="confirmation-card__head"><span><Check size={20} /></span><div><strong>{result.recognition.source === 'REVIEWED_FIXED_QUESTIONS' ? `已核对 ${visibleQuestionCount} 项回答草稿` : 'Agent 解析确认卡'}</strong><p>{result.recognition.source === 'REVIEWED_FIXED_QUESTIONS' ? `本次百炼未成功，草稿来自已核对的 ${visibleQuestionCount} 项回答（${result.recognition.degradedReason ?? '未知失败'}）。仍可继续确认资料。` : '请先确认组织者资料；多人行程随后按成员逐个生成可重复打开的邀请链接。'}</p></div></div>
           <ul className="confirmation-grid">{[['城市', preview?.cityName], ['日期', preview?.travelDate], ['时间', `${preview?.startTime ?? '未识别'} 至 ${preview?.endTime ?? '未识别'}`], ['起终点', `${preview?.startLocationText ?? '未识别'} → ${preview?.endLocationText ?? '未识别'}`], ['预算', preview?.budgetCents === null || preview?.budgetCents === undefined ? '未识别' : `¥${preview.budgetCents / 100}`], ['兴趣', previewParticipant?.interests.join('、') || '未识别']].map(([label, value]) => <li key={label}><strong>{label}</strong><span>{value}</span></li>)}</ul>
-          <div><strong>需要更正？</strong><p>{visibleQuestionIndexes.map((questionIndex, index) => <button className="button button--soft" type="button" key={questions[questionIndex][0]} onClick={() => editAnswer(questionIndex)}>修改第 {index + 1} 问</button>)}</p></div>
-          {collaboration && <div className="draft-confirmation"><div className="draft-confirmation__heading"><span><UsersRound size={18} /></span><div><strong>协作进度</strong><p role="status" aria-live="polite">{collaboration.progress.confirmedCount} / {collaboration.progress.expectedCount} 位成员已确认 · {collaboration.status}</p></div></div>
-            {(!organizerConfirmed || needsInvitations) && <button className="button button--primary" type="button" disabled={loading} onClick={() => void confirmAndPrepare()}>{organizerConfirmed ? '生成成员邀请链接' : hasMemberParticipants ? '确认组织者资料并生成成员邀请链接' : '确认组织者资料'} <ArrowRight size={18} /></button>}
+          <section className="confirmation-edit-panel"><div><strong>需要调整信息？</strong><p>选择对应内容返回修改，其他已填写信息会保留。</p></div><div className="confirmation-edit-grid">{visibleQuestionIndexes.map((questionIndex, index) => <button type="button" key={questions[questionIndex][0]} onClick={() => editAnswer(questionIndex)}><span>{index + 1}</span><strong>{questionEditLabels[questionIndex]}</strong><small>点击修改</small></button>)}</div></section>
+          {collaboration && <div className="draft-confirmation"><div className="draft-confirmation__heading draft-confirmation__heading--with-action"><span><UsersRound size={18} /></span><div><strong>协作进度</strong><p role="status" aria-live="polite">{collaboration.progress.confirmedCount} / {collaboration.progress.expectedCount} 位成员已确认 · {collaborationStatusLabel(collaboration.status)}</p></div><button className="collaboration-refresh-button" type="button" disabled={refreshingCollaboration} onClick={() => void refreshCollaborationNow()}><RefreshCw className={refreshingCollaboration ? 'is-spinning' : ''} size={16} />{refreshingCollaboration ? '正在刷新' : '刷新状态'}</button></div>
+            {(!organizerConfirmed || needsInvitations) && <button className="button button--primary" type="button" disabled={loading} onClick={() => void confirmAndPrepare()}>{organizerCanUnlockNextStep ? '确认最新安排并生成方案' : organizerConfirmed ? '生成成员邀请链接' : hasMemberParticipants ? needsInvitations ? '确认组织者资料并生成成员邀请链接' : '确认最新共同安排' : '确认组织者资料'} <ArrowRight size={18} /></button>}
+            {collaboration.changeProposals.length > 0 && <section className="organizer-proposal-card"><div className="organizer-proposal-card__head"><div><strong>成员修改建议</strong><p>批准后立即形成新的共同安排并要求全员重新确认；拒绝后继续执行原计划。</p></div><span>{collaboration.changeProposals.filter((item) => item.status === 'PENDING').length} 条待审核</span></div><ol className="organizer-proposal-list">{[...collaboration.changeProposals].reverse().map((item) => { const member = collaboration.participants.find((participant) => participant.participantId === item.participantId); const labels: Record<string, string> = { 'trip.cityName': '目的城市', 'trip.travelDate': '出行日期', 'trip.startTime': '开始时间', 'trip.endTime': '结束时间', 'trip.startLocationText': '出发地', 'trip.endLocationText': '结束地', 'trip.budgetCents': '同行行程总预算' }; const displayValue = item.fieldPath === 'trip.budgetCents' && typeof item.proposedValue === 'number' ? `¥${item.proposedValue / 100}` : String(item.proposedValue); return <li key={item.proposalId}><div className="organizer-proposal-list__content"><span>{member?.memberKey ?? '成员'} 建议修改“{labels[item.fieldPath] ?? item.fieldPath}”</span><strong>{displayValue}</strong><p>{item.reason}</p></div>{item.status === 'PENDING' ? <div className="organizer-proposal-list__actions"><button className="button button--soft" type="button" disabled={loading} onClick={() => void reviewChangeProposal(item.proposalId, 'REJECT')}>拒绝并保留原计划</button><button className="button button--primary" type="button" disabled={loading} onClick={() => void reviewChangeProposal(item.proposalId, 'APPROVE')}>批准并执行</button></div> : <em className={`proposal-status proposal-status--${item.status.toLowerCase()}`}>{item.status === 'APPROVED' ? '已批准并执行' : '已拒绝，原计划不变'}</em>}</li>})}</ol></section>}
             <ConflictReviewPanel state={collaboration} busy={loading} onResolve={(itemId, relaxationId) => void resolveConflict(itemId, relaxationId)} />
           </div>}
           {collaboration && hasMemberParticipants && links.length === 0 && <div className="invite-card invite-card--pending"><strong>成员邀请入口</strong><p>{!organizerConfirmed ? '点击上方“确认组织者资料并生成成员邀请链接”，生成后成员可直接打开或复制自己的专属链接。' : needsInvitations ? '点击上方“生成成员邀请链接”，生成后成员可直接打开或复制自己的专属链接。' : '邀请已创建，但当前标签页没有可展示的链接密钥。请返回创建页面重新发起一趟多人行程。'}</p></div>}
           {links.length > 0 && <div className="invite-card"><strong>成员邀请链接</strong><p>每个链接只对应一名成员，在该成员确认资料前可以重复打开。再次打开会生成新会话，并让该成员上一次打开的旧标签页失效。</p>{links.map((item, index) => <div className="invite-row" key={item.invitationId}><span>成员 {index + 1}</span><code>{item.link}</code><div className="invite-row__actions"><a className="button button--soft" href={item.link}><ArrowRight size={14} />进入成员页</a><button type="button" className="button button--soft" onClick={() => void navigator.clipboard.writeText(item.link)}><Copy size={14} />复制</button></div></div>)}</div>}
-          {collaboration && canEnterRecommendation(collaboration) && <button className="button button--primary" type="button" onClick={() => {
-            if (planningDraft) setStoredPlanContext(collaboration.tripId, planningDraft)
-            clearRecommendationSession(window.sessionStorage, collaboration.tripId)
-            const parentQuery = parentTripId && Number.isInteger(parentDayIndex)
-              ? `?parentTripId=${encodeURIComponent(parentTripId)}&dayIndex=${parentDayIndex}`
-              : ''
-            navigate(`/recommendation/${collaboration.tripId}${parentQuery}`)
-          }}>查看推荐方案 <ArrowRight size={18} /></button>}
+          {collaboration && canEnterRecommendation(collaboration) && <button className="button button--primary" type="button" onClick={() => enterRecommendation(collaboration)}>生成并查看推荐方案 <ArrowRight size={18} /></button>}
         </section>}
       </section>
     </main>

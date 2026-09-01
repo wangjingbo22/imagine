@@ -1,5 +1,9 @@
 from fastapi import APIRouter, Depends, Request
 
+from app.api.model_access import (
+    AccountModelCredentials,
+    require_account_model_credentials,
+)
 from app.application.trip_draft_service import TripDraftParserService
 from app.application.workflow_service import WorkflowService
 from app.domain.models import ApiResponse
@@ -27,8 +31,9 @@ async def parse_trip_draft(
     payload: TripDraftParseRequest,
     request: Request,
     service: TripDraftParserService = Depends(get_trip_draft_service),
+    credentials: AccountModelCredentials = Depends(require_account_model_credentials),
 ) -> ApiResponse:
-    return ApiResponse(data=await _parse_with_user_model(request, service, payload))
+    return ApiResponse(data=await _parse_with_user_model(request, service, payload, credentials))
 
 
 @router.post(
@@ -41,8 +46,9 @@ async def confirm_trip_draft(
     request: Request,
     service: TripDraftParserService = Depends(get_trip_draft_service),
     workflow: WorkflowService = Depends(get_workflow_service),
+    credentials: AccountModelCredentials = Depends(require_account_model_credentials),
 ) -> ApiResponse:
-    parsed = await _parse_with_user_model(request, service, payload)
+    parsed = await _parse_with_user_model(request, service, payload, credentials)
     confirmed = service.require_planning_ready(parsed)
     return ApiResponse(data=workflow.confirm_trip(confirmed))
 
@@ -51,14 +57,9 @@ async def _parse_with_user_model(
     request: Request,
     service: TripDraftParserService,
     payload: TripDraftParseRequest,
+    credentials: AccountModelCredentials,
 ):
-    """Only a configured account may invoke an LLM; no server-key fallback exists."""
-    token = request.cookies.get("account_session")
-    if not token:
-        return await _parse_without_llm(service, payload)
-    credentials = request.app.state.account_service.user_model_credentials(token)
-    if credentials is None:
-        return await _parse_without_llm(service, payload)
+    """Parse only with model credentials bound to the current account."""
     model, api_key, base_url = credentials
     settings = request.app.state.settings
     extractor = BailianTripDraftExtractor(
@@ -75,14 +76,3 @@ async def _parse_with_user_model(
         return await ephemeral_service.parse(payload)
     finally:
         await extractor.close()
-
-
-async def _parse_without_llm(
-    service: TripDraftParserService,
-    payload: TripDraftParseRequest,
-):
-    """Keep explicit-form parsing available while guaranteeing no model request."""
-    return await TripDraftParserService(
-        city_resolver=service._city_resolver,
-        llm_extractor=None,
-    ).parse(payload)

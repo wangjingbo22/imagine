@@ -55,7 +55,7 @@ class LogoutResult(AccountModel):
 
 
 class ModelSettingsUpdateRequest(AccountModel):
-    model: Annotated[str, Field(pattern=r"^qwen-(turbo|plus|max)$")]
+    model: Annotated[str, Field(min_length=1, max_length=120)]
     api_key: Annotated[str, Field(min_length=16, max_length=512)]
     base_url: Annotated[str, Field(min_length=12, max_length=300)]
 

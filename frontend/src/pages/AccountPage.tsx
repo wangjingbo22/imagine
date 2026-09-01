@@ -1,22 +1,19 @@
 import { Heart, LogIn, LogOut, MapPin, Save, UserRound } from 'lucide-react'
-import { useEffect, useState, type FormEvent } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useState, type FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
-  getCurrentUser,
   loginAccount,
-  logoutAccount,
   registerAccount,
   updateAccountProfile,
 } from '../api/accountApi'
-import { ApiError } from '../api/client'
 import { AppShell } from '../components/AppShell'
 import type { CurrentUser } from '../domain/account'
-import { safeReturnPath } from '../services/accountReturnPath'
+import { useAccountSession } from '../session/useAccountSession'
 
 type AccountMode = 'login' | 'register'
 
 function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof ApiError || error instanceof Error ? error.message : fallback
+  return error instanceof Error && error.message ? error.message : fallback
 }
 
 function interestsFromText(value: string): string[] {
@@ -26,7 +23,13 @@ function interestsFromText(value: string): string[] {
     .filter(Boolean)
 }
 
-function profileValues(user: CurrentUser) {
+type ProfileDraft = {
+  displayName: string
+  homeCity: string
+  interests: string
+}
+
+function profileValues(user: CurrentUser): ProfileDraft {
   return {
     displayName: user.displayName,
     homeCity: user.homeCity ?? '',
@@ -35,50 +38,18 @@ function profileValues(user: CurrentUser) {
 }
 
 export function AccountPage() {
-  const location = useLocation()
   const navigate = useNavigate()
-  const returnTo = safeReturnPath(location.search)
+  const { user, isInitializing, setCurrentUser, logout } = useAccountSession()
   const [mode, setMode] = useState<AccountMode>('login')
-  const [user, setUser] = useState<CurrentUser | null>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [displayName, setDisplayName] = useState('')
-  const [homeCity, setHomeCity] = useState('')
-  const [interests, setInterests] = useState('')
-  const [loading, setLoading] = useState(true)
+  const [registerDisplayName, setRegisterDisplayName] = useState('')
+  const [profileDraft, setProfileDraft] = useState<ProfileDraft | null>(null)
+  const [authenticating, setAuthenticating] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-
-  useEffect(() => {
-    let active = true
-    void getCurrentUser()
-      .then(({ data }) => {
-        if (!active) return
-        if (returnTo) {
-          navigate(returnTo, { replace: true })
-          return
-        }
-        setUser(data)
-        const values = profileValues(data)
-        setDisplayName(values.displayName)
-        setHomeCity(values.homeCity)
-        setInterests(values.interests)
-      })
-      .catch((caught) => {
-        if (!active) return
-        const isUnauthenticated = caught instanceof ApiError && (
-          caught.code === 'ACCOUNT_SESSION_REQUIRED' || caught.code === 401
-        )
-        if (!isUnauthenticated) {
-          setError(errorMessage(caught, '账户状态读取失败，请刷新重试'))
-        }
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-    return () => { active = false }
-  }, [navigate, returnTo])
+  const profile = user ? profileDraft ?? profileValues(user) : null
 
   function switchMode(nextMode: AccountMode) {
     setMode(nextMode)
@@ -86,36 +57,39 @@ export function AccountPage() {
     setNotice('')
   }
 
+  function updateProfileDraft(change: Partial<ProfileDraft>) {
+    if (!user) return
+    setProfileDraft((current) => ({
+      ...(current ?? profileValues(user)),
+      ...change,
+    }))
+  }
+
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setLoading(true)
+    setAuthenticating(true)
     setError('')
     setNotice('')
     try {
       const response = mode === 'login'
         ? await loginAccount({ email, password })
-        : await registerAccount({ email, password, displayName })
-      setUser(response.data)
-      const values = profileValues(response.data)
-      setDisplayName(values.displayName)
-      setHomeCity(values.homeCity)
-      setInterests(values.interests)
+        : await registerAccount({ email, password, displayName: registerDisplayName })
+      setCurrentUser(response.data)
+      setProfileDraft(null)
+      setRegisterDisplayName('')
       setPassword('')
-      if (returnTo) {
-        navigate(returnTo, { replace: true })
-        return
-      }
-      setNotice(mode === 'login' ? '已登录' : '账户已创建')
+      setNotice(mode === 'login' ? '已登录，请完成画像后继续绑定模型。' : '账户已创建，请完成画像后继续绑定模型。')
     } catch (caught) {
       setError(errorMessage(caught, '账户请求失败，请稍后重试'))
     } finally {
-      setLoading(false)
+      setAuthenticating(false)
     }
   }
 
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const interestValues = interestsFromText(interests)
+    if (!profile) return
+    const interestValues = interestsFromText(profile.interests)
     if (interestValues.length > 8) {
       setError('兴趣最多填写 8 项')
       setNotice('')
@@ -126,12 +100,13 @@ export function AccountPage() {
     setNotice('')
     try {
       const response = await updateAccountProfile({
-        displayName,
-        homeCity: homeCity.trim() || null,
+        displayName: profile.displayName,
+        homeCity: profile.homeCity.trim() || null,
         interests: interestValues,
       })
-      setUser(response.data)
-      setNotice('画像已更新')
+      setCurrentUser(response.data)
+      setProfileDraft(null)
+      navigate('/model-settings', { replace: true })
     } catch (caught) {
       setError(errorMessage(caught, '画像保存失败，请稍后重试'))
     } finally {
@@ -144,8 +119,11 @@ export function AccountPage() {
     setError('')
     setNotice('')
     try {
-      await logoutAccount()
-      setUser(null)
+      await logout()
+      setEmail('')
+      setPassword('')
+      setRegisterDisplayName('')
+      setProfileDraft(null)
       setMode('login')
       setNotice('已退出账户')
     } catch (caught) {
@@ -155,7 +133,7 @@ export function AccountPage() {
     }
   }
 
-  if (loading && !user) {
+  if (isInitializing && !user) {
     return (
       <AppShell compact>
         <main className="account-layout">
@@ -177,7 +155,7 @@ export function AccountPage() {
           <p>保存常用城市与兴趣，规划时可以少填一点，让行程更快进入真正重要的部分。</p>
         </section>
 
-        {user ? (
+        {user && profile ? (
           <section className="account-panel account-panel--profile">
             <div className="account-panel__heading">
               <div className="account-avatar"><UserRound size={22} /></div>
@@ -189,15 +167,15 @@ export function AccountPage() {
             <form className="account-form" onSubmit={(event) => void saveProfile(event)}>
               <label>
                 <span>显示名称</span>
-                <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={80} required />
+                <input value={profile.displayName} onChange={(event) => updateProfileDraft({ displayName: event.target.value })} maxLength={80} required />
               </label>
               <label>
                 <span><MapPin size={15} /> 常用城市</span>
-                <input value={homeCity} onChange={(event) => setHomeCity(event.target.value)} maxLength={80} placeholder="例如：北京" />
+                <input value={profile.homeCity} onChange={(event) => updateProfileDraft({ homeCity: event.target.value })} maxLength={80} placeholder="例如：北京" />
               </label>
               <label>
                 <span><Heart size={15} /> 兴趣</span>
-                <input value={interests} onChange={(event) => setInterests(event.target.value)} placeholder="用逗号分隔，最多 8 项" />
+                <input value={profile.interests} onChange={(event) => updateProfileDraft({ interests: event.target.value })} placeholder="用逗号分隔，最多 8 项" />
               </label>
               <div className="account-form__actions">
                 <button className="button button--primary" type="submit" disabled={saving}>
@@ -228,7 +206,7 @@ export function AccountPage() {
               {mode === 'register' && (
                 <label>
                   <span>显示名称</span>
-                  <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={80} required />
+                  <input value={registerDisplayName} onChange={(event) => setRegisterDisplayName(event.target.value)} maxLength={80} required />
                 </label>
               )}
               <label>
@@ -239,8 +217,8 @@ export function AccountPage() {
                 <span>密码</span>
                 <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={12} maxLength={128} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required />
               </label>
-              <button className="button button--primary button--block" type="submit" disabled={loading}>
-                <LogIn size={17} /> {loading ? '处理中' : mode === 'login' ? '登录账户' : '创建账户'}
+              <button className="button button--primary button--block" type="submit" disabled={authenticating}>
+                <LogIn size={17} /> {authenticating ? '处理中' : mode === 'login' ? '登录账户' : '创建账户'}
               </button>
             </form>
             {notice && <p className="account-notice" role="status">{notice}</p>}

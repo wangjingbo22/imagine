@@ -46,6 +46,24 @@ test('plain-text server errors become readable API errors', async () => {
   }
 })
 
+test('API errors retain an HTTP 401 status when the response has a distinct error code', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    code: 'UPSTREAM_AUTH_REQUIRED',
+    message: 'Authentication is required',
+  }), { status: 401 })
+  try {
+    await assert.rejects(request('/account/me'), (error: unknown) => {
+      assert.ok(error instanceof ApiError)
+      assert.equal(error.code, 'UPSTREAM_AUTH_REQUIRED')
+      assert.equal(error.status, 401)
+      return true
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('invalid successful responses are reported without JSON parser details', async () => {
   const originalFetch = globalThis.fetch
   globalThis.fetch = async () => new Response('not-json', { status: 200 })
