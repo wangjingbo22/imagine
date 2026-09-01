@@ -1,42 +1,170 @@
-import { CalendarDays, ChevronRight, RefreshCw, WalletCards } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import {
+  CalendarDays,
+  Check,
+  ChevronRight,
+  Copy,
+  RefreshCw,
+  UserPlus,
+  Users,
+  WalletCards,
+} from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { createParentTrip, getParentTrip } from '../api/parentTripApi'
+import {
+  createParentTrip,
+  createParentTripInvitation,
+  getParentTripSync,
+} from '../api/parentTripApi'
 import { AppShell } from '../components/AppShell'
-import type { ParentTrip } from '../domain/parentTrip'
+import type {
+  ParentTrip,
+  ParentTripInvitationCreated,
+  ParentTripMemberProfile,
+  ParentTripSyncView,
+} from '../domain/parentTrip'
+import {
+  createParentIdempotencyKey,
+  parentTripOrganizerTokenKey,
+  PARENT_TRIP_POLL_INTERVAL_MS,
+} from '../services/parentTripCollaboration'
 
 const cities = ['北京', '上海', '成都', '西安', '杭州']
 const yuan = (cents: number | null) => cents === null ? '尚未生成' : `¥${(cents / 100).toFixed(0)}`
-const parentTokenKey = (id: string) => `parent-trip-token:${id}`
+const accessLabel: Record<ParentTripMemberProfile['accessStatus'], string> = {
+  ORGANIZER_ACTIVE: '组织者',
+  INVITED: '等待加入',
+  MEMBER_ACTIVE: '已加入',
+}
 
 export function ParentTripPage() {
   const { parentTripId = '' } = useParams()
   const navigate = useNavigate()
   const [trip, setTrip] = useState<ParentTrip | null>(null)
+  const [syncView, setSyncView] = useState<ParentTripSyncView | null>(null)
+  const [invitation, setInvitation] = useState<ParentTripInvitationCreated | null>(null)
+  const [invitationUrl, setInvitationUrl] = useState('')
+  const [copyDone, setCopyDone] = useState(false)
   const [form, setForm] = useState({ title: '周末同城之旅', cityName: '北京', startDate: '2026-09-06', dayCount: 2, budgets: ['500', '500', '500'] })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [inviteBusy, setInviteBusy] = useState(false)
 
-  async function load(id: string) {
-    const token = window.sessionStorage.getItem(parentTokenKey(id))
-    if (!token) { setError('当前浏览器没有该父行程的组织者凭证。'); return }
-    setTrip(await getParentTrip(id, token))
-  }
-  useEffect(() => { if (parentTripId) void load(parentTripId).catch((e: Error) => setError(e.message)) }, [parentTripId])
+  const load = useCallback(async (id: string) => {
+    const token = window.sessionStorage.getItem(parentTripOrganizerTokenKey(id))
+    if (!token) throw new Error('当前浏览器没有该父行程的组织者凭证。')
+    const next = await getParentTripSync({ parentTripId: id, parentToken: token })
+    setSyncView(next)
+    setTrip(next.parentTrip)
+    if (
+      invitation &&
+      next.visibleProfiles.some(
+        (profile) => (
+          profile.participantId === invitation.participantId &&
+          profile.accessStatus === 'MEMBER_ACTIVE'
+        ),
+      )
+    ) {
+      setInvitation(null)
+      setInvitationUrl('')
+      setCopyDone(false)
+    }
+    setError('')
+  }, [invitation])
+
+  useEffect(() => {
+    if (!parentTripId) return
+    let active = true
+    let inFlight = false
+    const refresh = async () => {
+      if (inFlight) return
+      inFlight = true
+      try {
+        await load(parentTripId)
+      } catch (caught) {
+        if (active) setError(caught instanceof Error ? caught.message : '父行程同步失败。')
+      } finally {
+        inFlight = false
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(
+      () => void refresh(),
+      PARENT_TRIP_POLL_INTERVAL_MS,
+    )
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [load, parentTripId])
 
   async function create() {
-    setBusy(true); setError('')
+    setBusy(true)
+    setError('')
     try {
       const id = crypto.randomUUID()
       const token = `${crypto.randomUUID()}${crypto.randomUUID()}`
       const values = form.budgets.slice(0, form.dayCount).map((value) => Math.round(Number(value) * 100))
       if (values.some((value) => !Number.isFinite(value) || value < 0)) throw new Error('请填写有效的每日预算。')
-      window.sessionStorage.setItem(parentTokenKey(id), token)
-      const created = await createParentTrip({ parentTripId: id, title: form.title, cityName: form.cityName,
-        startDate: form.startDate, dayBudgetCents: values, parentToken: token })
-      setTrip(created); navigate(`/parent-trips/${id}`, { replace: true })
-    } catch (caught) { setError(caught instanceof Error ? caught.message : '父行程创建失败。') }
-    finally { setBusy(false) }
+      window.sessionStorage.setItem(parentTripOrganizerTokenKey(id), token)
+      const created = await createParentTrip({
+        parentTripId: id,
+        title: form.title,
+        cityName: form.cityName,
+        startDate: form.startDate,
+        dayBudgetCents: values,
+        parentToken: token,
+      })
+      setTrip(created)
+      navigate(`/parent-trips/${id}`, { replace: true })
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '父行程创建失败。')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function createInvitation() {
+    if (!trip || !syncView) return
+    const parentToken = window.sessionStorage.getItem(
+      parentTripOrganizerTokenKey(trip.parentTripId),
+    )
+    if (!parentToken) {
+      setError('当前浏览器没有该父行程的组织者凭证。')
+      return
+    }
+    setInviteBusy(true)
+    setCopyDone(false)
+    setError('')
+    try {
+      const created = await createParentTripInvitation({
+        parentTripId: trip.parentTripId,
+        parentToken,
+        expectedSyncVersion: syncView.syncVersion,
+        idempotencyKey: createParentIdempotencyKey('invite'),
+      })
+      if (!created.linkAvailable || !created.invitationUrl) {
+        throw new Error('邀请链接不可用，请刷新成员状态。')
+      }
+      setInvitation(created)
+      setInvitationUrl(new URL(created.invitationUrl, window.location.origin).toString())
+      await load(trip.parentTripId)
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : '邀请创建失败。'
+      await load(trip.parentTripId).catch(() => undefined)
+      setError(message)
+    } finally {
+      setInviteBusy(false)
+    }
+  }
+
+  async function copyInvitation() {
+    if (!invitationUrl) return
+    try {
+      await navigator.clipboard.writeText(invitationUrl)
+      setCopyDone(true)
+    } catch {
+      setError('邀请链接复制失败，请手动选择链接。')
+    }
   }
 
   function enterDay(dayIndex: number) {
@@ -49,18 +177,26 @@ export function ParentTripPage() {
     navigate(`/plan?parentTripId=${trip.parentTripId}&dayIndex=${day.dayIndex}&city=${encodeURIComponent(trip.cityName)}&date=${day.date}&budget=${day.budgetCents}`)
   }
 
+  const memberLimitReached = (syncView?.visibleProfiles.length ?? 1) >= 3
+
   return <AppShell><main className="parent-trip-page">
-    {!trip ? <section className="parent-trip-card"><p className="eyebrow">SPRINT 3 · T012</p><h1>创建 2–3 天同城父行程</h1>
-      <p>父行程只负责逐日入口和预算汇总；每天仍使用已有的单日行程流程。</p>
-      <label>行程名称<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
-      <div className="parent-trip-grid"><label>城市<select value={form.cityName} onChange={(e) => setForm({ ...form, cityName: e.target.value })}>{cities.map((city) => <option key={city}>{city}</option>)}</select></label>
-      <label>开始日期<input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} /></label>
-      <label>天数<select value={form.dayCount} onChange={(e) => setForm({ ...form, dayCount: Number(e.target.value) })}><option value={2}>2 天</option><option value={3}>3 天</option></select></label></div>
-      <div className="parent-trip-budget-inputs">{form.budgets.slice(0, form.dayCount).map((value, index) => <label key={index}>第 {index + 1} 天预算（元）<input type="number" min="0" value={value} onChange={(e) => setForm({ ...form, budgets: form.budgets.map((v, i) => i === index ? e.target.value : v) })} /></label>)}</div>
+    {!trip ? <section className="parent-trip-card"><p className="eyebrow">多日同行</p><h1>创建 2–3 天同城父行程</h1>
+      <label>行程名称<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
+      <div className="parent-trip-grid"><label>城市<select value={form.cityName} onChange={(event) => setForm({ ...form, cityName: event.target.value })}>{cities.map((city) => <option key={city}>{city}</option>)}</select></label>
+      <label>开始日期<input type="date" value={form.startDate} onChange={(event) => setForm({ ...form, startDate: event.target.value })} /></label>
+      <label>天数<select value={form.dayCount} onChange={(event) => setForm({ ...form, dayCount: Number(event.target.value) })}><option value={2}>2 天</option><option value={3}>3 天</option></select></label></div>
+      <div className="parent-trip-budget-inputs">{form.budgets.slice(0, form.dayCount).map((value, index) => <label key={index}>第 {index + 1} 天预算（元）<input type="number" min="0" value={value} onChange={(event) => setForm({ ...form, budgets: form.budgets.map((current, currentIndex) => currentIndex === index ? event.target.value : current) })} /></label>)}</div>
       <button className="button button--primary" disabled={busy} onClick={() => void create()}>创建父行程 <ChevronRight size={18} /></button>
     </section> : <><section className="parent-trip-hero"><div><p className="eyebrow">同城 {trip.days.length} 天父行程</p><h1>{trip.title}</h1><p>{trip.cityName} · {trip.startDate} 至 {trip.endDate}</p></div>
-      <button className="button button--soft" onClick={() => void load(trip.parentTripId)}><RefreshCw size={17} />刷新</button></section>
+      <div className="parent-trip-sync-state"><span>{syncView ? `${syncView.visibleProfiles.length}/3 人` : '同步中'}</span><button className="icon-button" type="button" title="立即刷新" aria-label="立即刷新" onClick={() => void load(trip.parentTripId).catch((caught: Error) => setError(caught.message))}><RefreshCw size={18} /></button></div></section>
       <section className="parent-budget-summary"><div><WalletCards/><span>分配总预算</span><strong>{yuan(trip.totalBudgetCents)}</strong></div><div><span>已生成计划合计</span><strong>{yuan(trip.plannedCostCents)}</strong></div><div><span>已记录支出合计</span><strong>{yuan(trip.actualSpentCents)}</strong></div></section>
+
+      <section className="parent-collaboration" aria-label="同行成员">
+        <header><div><Users size={22} /><h2>同行成员</h2></div><button className="button button--soft" type="button" disabled={!syncView || memberLimitReached || inviteBusy} onClick={() => void createInvitation()}><UserPlus size={17} />{inviteBusy ? '生成中' : '生成成员邀请'}</button></header>
+        {invitationUrl && <div className="parent-invitation"><div><span>邀请链接</span>{invitation && <small>有效期至 {new Date(invitation.expiresAt).toLocaleString('zh-CN')}</small>}</div><div><input aria-label="成员邀请链接" readOnly value={invitationUrl} /><button className="icon-button" type="button" title="复制邀请链接" aria-label="复制邀请链接" onClick={() => void copyInvitation()}>{copyDone ? <Check size={18} /> : <Copy size={18} />}</button></div></div>}
+        <div className="parent-participant-list">{syncView?.visibleProfiles.map((profile) => <article key={profile.participantId}><div className={`parent-participant-avatar parent-participant-avatar--${profile.accessStatus.toLowerCase()}`}>{profile.nickname.slice(0, 1)}</div><div><strong>{profile.nickname}</strong><span>{accessLabel[profile.accessStatus]}</span></div><div className="parent-participant-details"><span>{profile.interests.length ? profile.interests.join(' · ') : '兴趣待填写'}</span><b>{profile.budgetCapCents === null ? '预算待填写' : `个人上限 ${yuan(profile.budgetCapCents)}`}</b></div></article>)}</div>
+      </section>
+
       <section className="parent-days">{trip.days.map((day) => <article key={day.dayIndex} className="parent-day-card"><div className="parent-day-date"><CalendarDays/><div><b>第 {day.dayIndex + 1} 天</b><span>{day.date}</span></div></div>
         <dl><div><dt>当日预算</dt><dd>{yuan(day.budgetCents)}</dd></div><div><dt>计划费用</dt><dd>{yuan(day.plannedCostCents)}</dd></div><div><dt>实际支出</dt><dd>{yuan(day.actualSpentCents)}</dd></div></dl>
         <p className={`parent-day-status parent-day-status--${day.costStatus.toLowerCase()}`}>{day.childTripId ? `单日 Trip · ${day.childStatus}` : '尚未创建单日 Trip'}</p>

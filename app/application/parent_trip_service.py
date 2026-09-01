@@ -1,32 +1,75 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+import json
+from datetime import date, datetime, timedelta
 from uuid import UUID
 
 from app.application.collaboration_service import CollaborationService
 from app.application.plan_service import PlanVersionService
 from app.core.errors import AppError
-from app.domain.parent_trip import ParentTrip, ParentTripCreateRequest, ParentTripDay
-from app.infrastructure.parent_trip_store import ParentTripStoreError, SqliteParentTripRepository
-from app.infrastructure.trip_draft_revision_store import TripDraftRevisionStoreError, SqliteTripDraftRevisionRepository
+from app.domain.parent_trip import (
+    ParentTrip,
+    ParentTripCreateRequest,
+    ParentTripDay,
+    ParentTripInvitationCreated,
+    ParentTripInvitationRedeemed,
+    ParentTripMemberProfile,
+    ParentTripMemberProfileUpdate,
+    ParentTripSyncView,
+)
+from app.infrastructure.parent_trip_store import (
+    ParentTripActor,
+    ParentTripStoreError,
+    SqliteParentTripRepository,
+)
+from app.infrastructure.trip_draft_revision_store import (
+    SqliteTripDraftRevisionRepository,
+)
 
 
 class ParentTripService:
-    def __init__(self, repository: SqliteParentTripRepository,
-                 revisions: SqliteTripDraftRevisionRepository,
-                 collaboration: CollaborationService, plans: PlanVersionService) -> None:
-        self.repository, self.revisions = repository, revisions
-        self.collaboration, self.plans = collaboration, plans
+    def __init__(
+        self,
+        repository: SqliteParentTripRepository,
+        revisions: SqliteTripDraftRevisionRepository,
+        collaboration: CollaborationService,
+        plans: PlanVersionService,
+    ) -> None:
+        self.repository = repository
+        self.revisions = revisions
+        self.collaboration = collaboration
+        self.plans = plans
 
     @staticmethod
     def _error(error: Exception) -> AppError:
         code = str(error)
-        status = 404 if code.endswith("NOT_FOUND") else 403 if "PERMISSION" in code else 409
+        status = {
+            "PARENT_TRIP_NOT_FOUND": 404,
+            "PARENT_TRIP_DAY_NOT_FOUND": 404,
+            "PARENT_INVITATION_UNAVAILABLE": 404,
+            "PARENT_INVITATION_EXPIRED": 410,
+            "PARENT_TRIP_PERMISSION_REQUIRED": 403,
+            "PARENT_MEMBER_PERMISSION_REQUIRED": 403,
+            "PARENT_MEMBER_SESSION_REQUIRED": 401,
+            "PARENT_MEMBER_SESSION_INVALID": 401,
+            "PARENT_MEMBER_SESSION_EXPIRED": 401,
+        }.get(code, 409)
         messages = {
             "PARENT_TRIP_NOT_FOUND": "未找到父行程。",
             "PARENT_TRIP_PERMISSION_REQUIRED": "缺少有效的父行程组织者凭证。",
+            "PARENT_TRIP_DAY_NOT_FOUND": "未找到父行程中的对应日期。",
             "PARENT_TRIP_DAY_IMMUTABLE": "该日期已经绑定子行程，不能覆盖。",
             "CHILD_TRIP_ALREADY_LINKED": "该单日行程已经绑定到其他日期。",
+            "PARENT_TRIP_VERSION_CONFLICT": "父行程协作版本已更新，请刷新后重试。",
+            "PARENT_TRIP_MEMBER_LIMIT": "父行程最多包含组织者和两名成员。",
+            "PARENT_IDEMPOTENCY_KEY_REUSED": "幂等键已用于不同的父行程邀请请求。",
+            "PARENT_INVITATION_UNAVAILABLE": "父行程邀请不存在或已失效。",
+            "PARENT_INVITATION_EXPIRED": "父行程邀请已过期。",
+            "PARENT_INVITATION_ALREADY_REDEEMED": "父行程邀请已经被其他会话使用。",
+            "PARENT_MEMBER_SESSION_REQUIRED": "缺少父行程成员会话凭证。",
+            "PARENT_MEMBER_SESSION_INVALID": "父行程成员会话无效。",
+            "PARENT_MEMBER_SESSION_EXPIRED": "父行程成员会话已过期。",
+            "PARENT_MEMBER_PERMISSION_REQUIRED": "当前成员只能修改自己的资料。",
         }
         return AppError(code, messages.get(code, "父行程操作无法完成。"), status, False)
 
@@ -36,9 +79,14 @@ class ParentTripService:
             return self.get(request.parent_trip_id, token)
         except ParentTripStoreError as error:
             raise self._error(error) from error
-
-    def link_day(self, parent_id: UUID, day_index: int, child_id: UUID,
-                 parent_token: str, child_token: str) -> ParentTrip:
+    def link_day(
+        self,
+        parent_id: UUID,
+        day_index: int,
+        child_id: UUID,
+        parent_token: str,
+        child_token: str,
+    ) -> ParentTrip:
         try:
             parent, days = self.repository.authorized_rows(parent_id, parent_token)
             if day_index < 0 or day_index >= len(days):
@@ -48,11 +96,19 @@ class ParentTripService:
             trip = revision.understanding.trip
             expected = date.fromisoformat(days[day_index]["travel_date"])
             if trip.city_name != parent["city_name"] or trip.travel_date != expected:
-                raise AppError("PARENT_CHILD_SCOPE_MISMATCH",
-                    "子行程必须与父行程同城，并对应所选日期。", 422, False)
+                raise AppError(
+                    "PARENT_CHILD_SCOPE_MISMATCH",
+                    "子行程必须与父行程同城，并对应所选日期。",
+                    422,
+                    False,
+                )
             if trip.budget_cents is None or trip.budget_cents > days[day_index]["budget_cents"]:
-                raise AppError("PARENT_CHILD_BUDGET_EXCEEDED",
-                    "子行程预算不能超过该日分配预算。", 422, False)
+                raise AppError(
+                    "PARENT_CHILD_BUDGET_EXCEEDED",
+                    "子行程预算不能超过该日分配预算。",
+                    422,
+                    False,
+                )
             self.repository.link(parent_id, day_index, child_id, parent_token)
             return self.get(parent_id, parent_token)
         except ParentTripStoreError as error:
@@ -87,47 +143,217 @@ class ParentTripService:
                     names.append(name)
         return tuple(names)
 
-    def get(self, parent_id: UUID, token: str) -> ParentTrip:
-        try:
-            parent, rows = self.repository.authorized_rows(parent_id, token)
-        except ParentTripStoreError as error:
-            raise self._error(error) from error
-        output, planned_values, actual_values = [], [], []
+    def _build_parent(
+        self,
+        parent_id: UUID,
+        parent: dict[str, object],
+        rows: list[dict[str, object]],
+    ) -> ParentTrip:
+        output: list[ParentTripDay] = []
+        planned_values: list[int] = []
+        actual_values: list[int] = []
         for row in rows:
-            child_id = UUID(row["child_trip_id"]) if row["child_trip_id"] else None
-            values = dict(child_budget_cents=None, planned_cost_cents=None,
-                          actual_spent_cents=None, remaining_budget_cents=None,
-                          child_status="NOT_CREATED", cost_status="NOT_AVAILABLE")
+            child_id = UUID(str(row["child_trip_id"])) if row["child_trip_id"] else None
+            values: dict[str, object] = {
+                "child_budget_cents": None,
+                "planned_cost_cents": None,
+                "actual_spent_cents": None,
+                "remaining_budget_cents": None,
+                "child_status": "NOT_CREATED",
+                "cost_status": "NOT_AVAILABLE",
+            }
             if child_id:
                 revision = self.revisions.get_current(child_id)
                 child_trip = revision.understanding.trip
-                expected_date = date.fromisoformat(row["travel_date"])
+                expected_date = date.fromisoformat(str(row["travel_date"]))
                 if child_trip.city_name != parent["city_name"] or child_trip.travel_date != expected_date:
-                    raise AppError("PARENT_CHILD_SCOPE_DRIFT",
-                        "已绑定的子行程城市或日期已偏离父行程，已停止汇总。", 409, False)
+                    raise AppError(
+                        "PARENT_CHILD_SCOPE_DRIFT",
+                        "已绑定的子行程城市或日期已偏离父行程，已停止汇总。",
+                        409,
+                        False,
+                    )
                 if child_trip.budget_cents is None or child_trip.budget_cents > row["budget_cents"]:
-                    raise AppError("PARENT_CHILD_BUDGET_DRIFT",
-                        "已绑定的子行程预算已超过该日分配预算，已停止汇总。", 409, False)
+                    raise AppError(
+                        "PARENT_CHILD_BUDGET_DRIFT",
+                        "已绑定的子行程预算已超过该日分配预算，已停止汇总。",
+                        409,
+                        False,
+                    )
                 values["child_budget_cents"] = child_trip.budget_cents
                 try:
                     state = self.plans.get_trip_state(child_id)
                     values["child_status"] = state.trip_status.value
                     if state.current_plan:
-                        values["planned_cost_cents"] = state.current_plan.metrics.total_cost_cents
-                        planned_values.append(values["planned_cost_cents"])
+                        planned_cost = state.current_plan.metrics.total_cost_cents
+                        values["planned_cost_cents"] = planned_cost
+                        planned_values.append(planned_cost)
                         values["cost_status"] = "PLANNED"
                     if state.actual_budget and state.actual_budget.expense_event_count > 0:
-                        values["actual_spent_cents"] = state.actual_budget.actual_spent_cents
-                        actual_values.append(values["actual_spent_cents"])
-                        values["remaining_budget_cents"] = row["budget_cents"] - values["actual_spent_cents"]
+                        actual_spent = state.actual_budget.actual_spent_cents
+                        values["actual_spent_cents"] = actual_spent
+                        actual_values.append(actual_spent)
+                        values["remaining_budget_cents"] = int(row["budget_cents"]) - actual_spent
                         values["cost_status"] = "ACTUAL_RECORDED"
                 except AppError as error:
-                    if error.code != "TRIP_NOT_FOUND": raise
-            output.append(ParentTripDay(day_index=row["day_index"], date=row["travel_date"],
-                budget_cents=row["budget_cents"], child_trip_id=child_id, **values))
-        start = date.fromisoformat(parent["start_date"])
-        return ParentTrip(parent_trip_id=parent_id, title=parent["title"], city_name=parent["city_name"],
-            start_date=start, end_date=start + timedelta(days=len(rows)-1),
-            total_budget_cents=sum(row["budget_cents"] for row in rows),
-            planned_cost_cents=sum(planned_values) if planned_values else None,
-            actual_spent_cents=sum(actual_values) if actual_values else None, days=output)
+                    if error.code != "TRIP_NOT_FOUND":
+                        raise
+            output.append(ParentTripDay(
+                dayIndex=row["day_index"],
+                date=row["travel_date"],
+                budgetCents=row["budget_cents"],
+                childTripId=child_id,
+                **values,
+            ))
+        start = date.fromisoformat(str(parent["start_date"]))
+        return ParentTrip(
+            parentTripId=parent_id,
+            title=parent["title"],
+            cityName=parent["city_name"],
+            startDate=start,
+            endDate=start + timedelta(days=len(rows) - 1),
+            totalBudgetCents=sum(int(row["budget_cents"]) for row in rows),
+            plannedCostCents=sum(planned_values) if planned_values else None,
+            actualSpentCents=sum(actual_values) if actual_values else None,
+            days=output,
+        )
+
+    def get(self, parent_id: UUID, token: str) -> ParentTrip:
+        try:
+            parent, rows = self.repository.authorized_rows(parent_id, token)
+            return self._build_parent(parent_id, parent, rows)
+        except ParentTripStoreError as error:
+            raise self._error(error) from error
+
+    @staticmethod
+    def _profile(row: dict[str, object]) -> ParentTripMemberProfile:
+        interests = json.loads(str(row["interests_json"]))
+        if not isinstance(interests, list) or any(not isinstance(item, str) for item in interests):
+            raise AppError(
+                "PARENT_MEMBER_PROFILE_CORRUPT",
+                "成员资料无法读取，已停止同步。",
+                500,
+                False,
+            )
+        return ParentTripMemberProfile(
+            participantId=row["participant_id"],
+            role=row["role"],
+            accessStatus=row["access_status"],
+            nickname=row["nickname"],
+            interests=interests,
+            budgetCapCents=row["budget_cap_cents"],
+            profileVersion=row["profile_version"],
+            updatedAt=datetime.fromisoformat(str(row["updated_at"])),
+        )
+
+    def _sync_from_rows(
+        self,
+        parent_id: UUID,
+        parent: dict[str, object],
+        rows: list[dict[str, object]],
+        actor: ParentTripActor,
+        sync: dict[str, object],
+        profiles: list[dict[str, object]],
+    ) -> ParentTripSyncView:
+        return ParentTripSyncView(
+            parentTrip=self._build_parent(parent_id, parent, rows),
+            syncVersion=sync["version"],
+            viewerRole=actor.role,
+            viewerParticipantId=actor.participant_id,
+            visibleProfiles=[self._profile(row) for row in profiles],
+            changedAt=datetime.fromisoformat(str(sync["updated_at"])),
+        )
+
+    def sync(
+        self,
+        parent_id: UUID,
+        *,
+        organizer_token: str | None = None,
+        member_session_token: str | None = None,
+    ) -> ParentTripSyncView:
+        try:
+            return self._sync_from_rows(
+                parent_id,
+                *self.repository.collaboration_rows(
+                    parent_id,
+                    organizer_token=organizer_token,
+                    member_session_token=member_session_token,
+                ),
+            )
+        except ParentTripStoreError as error:
+            raise self._error(error) from error
+
+    def create_invitation(
+        self,
+        parent_id: UUID,
+        *,
+        organizer_token: str,
+        expected_sync_version: int,
+        expires_in_hours: int,
+        idempotency_key: str,
+    ) -> ParentTripInvitationCreated:
+        try:
+            row, secret = self.repository.create_invitation(
+                parent_trip_id=parent_id,
+                organizer_token=organizer_token,
+                expected_sync_version=expected_sync_version,
+                expires_in_hours=expires_in_hours,
+                idempotency_key=idempotency_key,
+            )
+        except ParentTripStoreError as error:
+            raise self._error(error) from error
+        return ParentTripInvitationCreated(
+            invitationId=row["invitation_id"],
+            parentTripId=row["parent_trip_id"],
+            participantId=row["participant_id"],
+            invitationUrl=f"/parent-join/{secret}" if secret else None,
+            expiresAt=datetime.fromisoformat(str(row["expires_at"])),
+            linkAvailable=secret is not None,
+            syncVersion=row["sync_version"],
+        )
+
+    def redeem_invitation(
+        self,
+        *,
+        token: str,
+        idempotency_key: str,
+    ) -> ParentTripInvitationRedeemed:
+        try:
+            row, session_secret = self.repository.redeem_invitation(
+                token=token,
+                idempotency_key=idempotency_key,
+            )
+        except ParentTripStoreError as error:
+            raise self._error(error) from error
+        return ParentTripInvitationRedeemed(
+            sessionId=row["session_id"],
+            parentTripId=row["parent_trip_id"],
+            participantId=row["participant_id"],
+            memberSessionToken=session_secret,
+            expiresAt=datetime.fromisoformat(str(row["expires_at"])),
+            sessionTokenAvailable=True,
+            syncVersion=row["sync_version"],
+        )
+
+    def update_member_profile(
+        self,
+        parent_id: UUID,
+        *,
+        member_session_token: str,
+        request: ParentTripMemberProfileUpdate,
+    ) -> ParentTripSyncView:
+        try:
+            self.repository.update_member_profile(
+                parent_id,
+                member_session_token=member_session_token,
+                expected_sync_version=request.expected_sync_version,
+                nickname=request.nickname,
+                interests=request.interests,
+                budget_cap_cents=request.budget_cap_cents,
+            )
+            return self.sync(
+                parent_id,
+                member_session_token=member_session_token,
+            )
+        except ParentTripStoreError as error:
+            raise self._error(error) from error

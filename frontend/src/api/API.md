@@ -348,3 +348,14 @@ src/api/tripContract.ts
 - 视频上传
 
 视频当前仅保存在浏览器本地；团队若需要跨设备同步，必须先补充 URL、请求 DTO、响应 DTO、状态转换和错误码，不得伪造上传成功。
+
+## 16. 父行程邀请、成员资料与短轮询
+
+- `createParentTripInvitation()` → `POST /api/v3/parent-trips/{parentTripId}/invitations`；组织者携带父行程 capability、当前 `expectedSyncVersion` 和稳定幂等键创建一个成员席位。
+- `redeemParentTripInvitation()` → `POST /api/v3/parent-trip-invitations/redeem`；成员邀请只兑换一次，同一幂等键可恢复同一会话。
+- `getParentTripSync()` → `GET /api/v3/parent-trips/{parentTripId}/sync`；组织者使用 `X-Parent-Trip-Token`，成员使用 `X-Parent-Member-Session`，两者不能同时发送。
+- `updateParentTripMemberProfile()` → `PUT /api/v3/parent-trips/{parentTripId}/member-profile`；成员提交当前同步版本，只更新自己的昵称、兴趣和预算上限。
+
+组织者页和成员页固定每 5000 ms 读取一次 `ParentTripSyncView`，不使用 WebSocket、SSE、聊天或投票。成员响应只含自己的 `visibleProfiles`；组织者响应可见最多三人。同步快照同时展示父行程预算和每日子 Trip 状态。
+
+父行程 capability 只进入当前标签页的 `sessionStorage`，禁止写入 `localStorage`。成员页先把邀请 token 从地址栏替换掉，再发起兑换；兑换成功后删除临时邀请，只保留父行程维度的成员 session。页面刷新只能从服务端同步快照恢复，不能用浏览器固定数据伪造成员、预算或子 Trip 状态。

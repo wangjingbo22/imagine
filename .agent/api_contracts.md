@@ -326,3 +326,22 @@ Schema 校验失败沿用人工确认结构：
 - 成功响应沿用 `{ "code": 200, "message": "success", "data": ... }`；照片对象字段为 `mediaId/taskId/dataUrl/mimeType/byteSize/createdAt`。
 - `TRIP_MEDIA_LIMIT_REACHED` 为 HTTP 409 且不可重试；`TASK_MEDIA_NOT_FOUND` 为 HTTP 404 且不可重试；`MEDIA_STORAGE_UNAVAILABLE` 为 HTTP 503 且可重试。
 - `MEDIA_STORAGE_UNAVAILABLE` 覆盖媒体 SQLite 初始化、读取、替换和删除故障；替换必须保持单事务语义，写入失败时旧照片仍可读，重试成功后才完成替换。
+
+## 16. PBI-18-B 父行程邀请、独立成员资料与短轮询（S3-T010）
+
+### 16.1 身份与接口
+
+- `POST /api/v3/parent-trips/{parentTripId}/invitations`：携带 `X-Parent-Trip-Token` 和 `Idempotency-Key`，请求为 `schemaVersion/expectedSyncVersion/expiresInHours`；父行程最多包含组织者和两名成员。
+- `POST /api/v3/parent-trip-invitations/redeem`：携带 `Idempotency-Key`，请求为 `schemaVersion/token`；邀请只允许一个成员会话兑换，同键重试恢复同一会话。
+- `GET /api/v3/parent-trips/{parentTripId}/sync`：必须且只能携带 `X-Parent-Trip-Token` 或 `X-Parent-Member-Session` 之一。
+- `PUT /api/v3/parent-trips/{parentTripId}/member-profile`：携带 `X-Parent-Member-Session`，请求为 `schemaVersion/expectedSyncVersion/nickname/interests/budgetCapCents`。
+
+邀请 token 和成员 session 是独立 bearer capability。SQLite 仅保存其 SHA-256 哈希；所有 `/api/v3/parent-trip*` 响应使用 `Cache-Control: no-store`。当前账号模块尚未进入 `main`，后续 S3-T009 只能在该成员 session 边界绑定账号身份，不得放宽本节权限。
+
+### 16.2 同步与隔离
+
+`ParentTripSyncView` 返回 `parentTrip/syncVersion/viewerRole/viewerParticipantId/visibleProfiles/pollAfterSeconds/changedAt`。其中 `pollAfterSeconds` 固定为 5；`parentTrip` 包含总预算、计划/实际汇总及每日子 Trip 的 `childStatus`。
+
+组织者可见本父行程全部资料；成员只可见自己的资料行。同步响应禁止返回组织者 token、邀请 token 或成员 session。邀请创建、成员兑换、资料更新和子 Trip 绑定都会推进全局 `syncVersion`；旧 `expectedSyncVersion` 返回 `PARENT_TRIP_VERSION_CONFLICT`（HTTP 409），客户端刷新后才能重试。
+
+固定错误包括：`PARENT_TRIP_MEMBER_LIMIT`、`PARENT_INVITATION_UNAVAILABLE`、`PARENT_INVITATION_EXPIRED`、`PARENT_INVITATION_ALREADY_REDEEMED`、`PARENT_MEMBER_SESSION_REQUIRED`、`PARENT_MEMBER_SESSION_INVALID`、`PARENT_MEMBER_SESSION_EXPIRED` 和 `PARENT_AUTH_CONTEXT_INVALID`。本范围不包含聊天、WebSocket、SSE 或投票。

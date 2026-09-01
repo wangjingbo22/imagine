@@ -1133,22 +1133,428 @@ body,
   margin-top: 14px;
 }
 
-.parent-trip-page { width:min(1180px,calc(100% - 40px)); margin:42px auto 80px; color:#162136; }
-.parent-trip-card,.parent-trip-hero,.parent-budget-summary,.parent-day-card { background:#fff; border:1px solid #dce6e2; border-radius:26px; box-shadow:0 16px 44px rgba(33,61,83,.08); }
-.parent-trip-card { max-width:800px; margin:auto; padding:42px; display:grid; gap:20px; }
-.parent-trip-card label,.parent-trip-budget-inputs label,.parent-trip-grid label { display:grid; gap:8px; font-weight:700; }
-.parent-trip-card input,.parent-trip-card select { min-height:48px; border:1px solid #ccd9e6; border-radius:12px; padding:0 14px; background:#fff; font:inherit; }
-.parent-trip-grid,.parent-trip-budget-inputs { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
-.parent-trip-hero { padding:32px 38px; display:flex; align-items:center; justify-content:space-between; }
-.parent-trip-hero h1 { font-size:36px; margin:8px 0; }
-.parent-budget-summary { margin:20px 0; padding:25px 30px; display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
-.parent-budget-summary>div { display:grid; gap:6px; }.parent-budget-summary strong { font-size:25px; color:#176846; }
-.parent-days { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }.parent-day-card { padding:26px; display:grid; gap:20px; }
-.parent-day-date { display:flex; gap:12px; align-items:center; color:#176846; }.parent-day-date div { display:grid; gap:3px; }.parent-day-date b{font-size:21px}.parent-day-date span{color:#687a74}
-.parent-day-card dl { margin:0; display:grid; gap:10px; }.parent-day-card dl div{display:flex;justify-content:space-between}.parent-day-card dt{color:#71807b}.parent-day-card dd{font-weight:800;margin:0}
-.parent-day-status { color:#687a74; min-height:24px; }.parent-day-status--actual_recorded{color:#16805a}
-.parent-trip-return { margin:18px 4%; border:0; background:transparent; color:#1765e8; font-weight:800; cursor:pointer; }.parent-trip-scope { text-align:center; color:#78847f; margin-top:28px; }
-@media(max-width:800px){.parent-trip-grid,.parent-trip-budget-inputs,.parent-budget-summary,.parent-days{grid-template-columns:1fr}.parent-trip-page{width:min(100% - 24px,1180px)}.parent-trip-card{padding:24px}.parent-trip-hero{align-items:flex-start;gap:16px}.parent-trip-hero h1{font-size:28px}}
+.parent-trip-page,
+.parent-member-page {
+  width: min(1180px, calc(100% - 40px));
+  margin: 42px auto 80px;
+  color: #162136;
+}
+
+.parent-trip-card,
+.parent-day-card,
+.parent-member-profile,
+.parent-member-state {
+  border: 1px solid #dce6e2;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(33, 61, 83, 0.07);
+}
+
+.parent-trip-card {
+  display: grid;
+  max-width: 800px;
+  margin: auto;
+  padding: 42px;
+  gap: 20px;
+}
+
+.parent-trip-card label,
+.parent-trip-budget-inputs label,
+.parent-trip-grid label {
+  display: grid;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.parent-trip-card input,
+.parent-trip-card select,
+.parent-member-profile input {
+  min-width: 0;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid #ccd9e6;
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+}
+
+.parent-trip-grid,
+.parent-trip-budget-inputs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.parent-trip-hero,
+.parent-member-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 4px 28px;
+  border-bottom: 1px solid #dce6e2;
+}
+
+.parent-trip-hero h1,
+.parent-member-header h1 {
+  margin: 8px 0;
+  font-size: 36px;
+  overflow-wrap: anywhere;
+}
+
+.parent-trip-sync-state,
+.parent-member-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #687a74;
+  white-space: nowrap;
+}
+
+.parent-trip-sync-state .icon-button,
+.parent-member-actions .icon-button,
+.parent-invitation .icon-button {
+  flex: 0 0 44px;
+  border: 1px solid #d4dfdc;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.parent-budget-summary,
+.parent-member-budget {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  margin: 20px 0 30px;
+  padding: 22px 4px;
+  border-bottom: 1px solid #dce6e2;
+}
+
+.parent-budget-summary > div,
+.parent-member-budget > div {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.parent-budget-summary strong,
+.parent-member-budget strong {
+  color: #176846;
+  font-size: 25px;
+  overflow-wrap: anywhere;
+}
+
+.parent-collaboration {
+  margin: 0 0 30px;
+  padding: 0 4px 30px;
+  border-bottom: 1px solid #dce6e2;
+}
+
+.parent-collaboration > header,
+.parent-member-days > header,
+.parent-member-profile > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.parent-collaboration > header > div,
+.parent-member-days > header,
+.parent-member-profile > header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.parent-collaboration h2,
+.parent-member-days h2,
+.parent-member-profile h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.parent-invitation {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.35fr) minmax(0, 1fr);
+  align-items: end;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid #cddbd7;
+  border-radius: 6px;
+  background: #f7faf9;
+}
+
+.parent-invitation > div {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.parent-invitation > div:last-child {
+  grid-template-columns: minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+}
+
+.parent-invitation input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #c7d4df;
+  border-radius: 5px;
+  background: #fff;
+  font: inherit;
+}
+
+.parent-invitation small {
+  color: #687a74;
+}
+
+.parent-participant-list {
+  border-top: 1px solid #e1e9e6;
+}
+
+.parent-participant-list article {
+  display: grid;
+  grid-template-columns: 42px minmax(120px, 0.45fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  min-height: 72px;
+  padding: 10px 4px;
+  border-bottom: 1px solid #e1e9e6;
+}
+
+.parent-participant-avatar {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: #317260;
+  font-weight: 800;
+}
+
+.parent-participant-avatar--invited {
+  color: #775b15;
+  background: #f5d77f;
+}
+
+.parent-participant-list article > div:nth-child(2),
+.parent-participant-details {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.parent-participant-list span {
+  color: #687a74;
+  overflow-wrap: anywhere;
+}
+
+.parent-participant-details {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+}
+
+.parent-participant-details b {
+  color: #285a83;
+  font-size: 14px;
+}
+
+.parent-days {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.parent-day-card {
+  display: grid;
+  padding: 26px;
+  gap: 20px;
+}
+
+.parent-day-date {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #176846;
+}
+
+.parent-day-date div {
+  display: grid;
+  gap: 3px;
+}
+
+.parent-day-date b { font-size: 21px; }
+.parent-day-date span { color: #687a74; }
+.parent-day-card dl { display: grid; margin: 0; gap: 10px; }
+.parent-day-card dl div { display: flex; justify-content: space-between; gap: 10px; }
+.parent-day-card dt { color: #71807b; }
+.parent-day-card dd { margin: 0; font-weight: 800; overflow-wrap: anywhere; }
+.parent-day-status { min-height: 24px; color: #687a74; }
+.parent-day-status--actual_recorded { color: #16805a; }
+.parent-trip-return { margin: 18px 4%; border: 0; background: transparent; color: #1765e8; font-weight: 800; cursor: pointer; }
+.parent-trip-scope { margin-top: 28px; color: #78847f; text-align: center; }
+
+.parent-member-state {
+  display: grid;
+  max-width: 560px;
+  min-height: 260px;
+  margin: 80px auto;
+  padding: 36px;
+  place-items: center;
+  align-content: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.is-spinning { animation: spin 1s linear infinite; }
+
+.parent-member-budget {
+  grid-template-columns: 40px repeat(3, minmax(0, 1fr));
+  align-items: center;
+}
+
+.parent-member-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1.28fr);
+  align-items: start;
+  gap: 26px;
+}
+
+.parent-member-profile {
+  display: grid;
+  padding: 24px;
+  gap: 10px;
+}
+
+.parent-member-profile > header {
+  align-items: center;
+  gap: 10px;
+}
+
+.parent-member-profile > header div {
+  display: grid;
+  gap: 2px;
+}
+
+.parent-member-profile > header span,
+.parent-member-profile label {
+  color: #687a74;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.parent-member-profile .button {
+  min-height: 44px;
+  margin-top: 10px;
+}
+
+.parent-member-days {
+  min-width: 0;
+}
+
+.parent-member-day {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 76px;
+  padding: 12px 4px;
+  border-top: 1px solid #dce6e2;
+}
+
+.parent-member-day:last-child {
+  border-bottom: 1px solid #dce6e2;
+}
+
+.parent-member-day > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.parent-member-day > div:last-child {
+  justify-items: end;
+}
+
+.parent-member-day span {
+  color: #687a74;
+  overflow-wrap: anywhere;
+}
+
+.parent-member-day b {
+  color: #285a83;
+}
+
+.parent-member-error {
+  margin-top: 20px;
+}
+
+@media (max-width: 800px) {
+  .parent-trip-grid,
+  .parent-trip-budget-inputs,
+  .parent-budget-summary,
+  .parent-days,
+  .parent-member-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .parent-trip-page,
+  .parent-member-page {
+    width: min(calc(100% - 24px), 1180px);
+  }
+
+  .parent-trip-card { padding: 24px; }
+
+  .parent-trip-hero,
+  .parent-member-header,
+  .parent-collaboration > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .parent-trip-hero h1,
+  .parent-member-header h1 { font-size: 28px; }
+
+  .parent-member-budget {
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+
+  .parent-member-budget > div {
+    grid-column: 2;
+  }
+
+  .parent-invitation,
+  .parent-participant-list article,
+  .parent-participant-details {
+    grid-template-columns: 1fr;
+  }
+
+  .parent-participant-list article {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .parent-participant-details {
+    grid-column: 2;
+    gap: 5px;
+  }
+
+  .parent-member-day {
+    grid-template-columns: 1fr;
+  }
+
+  .parent-member-day > div:last-child {
+    justify-items: start;
+  }
+}
 
 .evidence-review-progress {
   height: 7px;

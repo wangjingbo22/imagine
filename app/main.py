@@ -98,6 +98,7 @@ def _requires_no_store(request: Request) -> bool:
     return (
         path == "/api/v1/account"
         or path.startswith("/api/v1/account/")
+        or path.startswith("/api/v3/parent-trip")
         or path in {
             "/api/v2/trips/conversations",
             "/api/v2/member-session/conversation",
@@ -467,6 +468,8 @@ def create_app(
             "Content-Type",
             "X-Organizer-Token",
             "X-Participant-Session",
+            "X-Parent-Trip-Token",
+            "X-Parent-Member-Session",
             "Idempotency-Key",
         ],
         expose_headers=[

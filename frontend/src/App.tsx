@@ -9,6 +9,7 @@ import { RecommendationPage } from './pages/RecommendationPage'
 import { WorkspacePage } from './pages/WorkspacePage'
 import { ParentTripPage } from './pages/ParentTripPage'
 import { AccountPage } from './pages/AccountPage'
+import { ParentTripMemberPage } from './pages/ParentTripMemberPage'
 
 function MotionController() {
   const location = useLocation()
@@ -76,6 +77,9 @@ function App() {
         <Route path="/generating" element={<AgentProcessPage />} />
         <Route path="/workspace" element={<WorkspacePage />} />
         <Route path="/parent-trips/new" element={<ParentTripPage />} />
+        <Route path="/parent-join" element={<ParentTripMemberPage />} />
+        <Route path="/parent-join/:token" element={<ParentTripMemberPage />} />
+        <Route path="/parent-trips/:parentTripId/member" element={<ParentTripMemberPage />} />
         <Route path="/parent-trips/:parentTripId" element={<ParentTripPage />} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
