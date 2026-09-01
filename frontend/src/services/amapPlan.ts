@@ -670,16 +670,75 @@ export function candidatePlanningIssue(error: unknown): PlanningIssue | null {
   }
 }
 
+export function candidatePreviewIssue(preview: CandidatePlanPreview): PlanningIssue | null {
+  if (preview.validationStatus !== 'FAIL') {
+    return null
+  }
+  const suggestions = preview.constraintResults
+    .filter((result) => result.status === 'FAIL')
+    .map((result) => result.suggestion?.trim())
+    .filter((suggestion): suggestion is string => Boolean(suggestion))
+  return {
+    code: 'CANDIDATE_PREVIEW_REJECTED',
+    message: suggestions.length > 0
+      ? suggestions.join(' ')
+      : '候选路线未通过服务端预览校验。',
+    review: null,
+  }
+}
+
+export function canAcceptCurrentCandidate({
+  hasCandidateRequest,
+  validationStatus,
+  hasPlanningIssue,
+  hasLocalSegmentFailure,
+  pendingSegmentIndex,
+}: {
+  hasCandidateRequest: boolean
+  validationStatus: PlanSnapshot['validationStatus']
+  hasPlanningIssue: boolean
+  hasLocalSegmentFailure: boolean
+  pendingSegmentIndex: number | null
+}) {
+  return hasCandidateRequest &&
+    !hasPlanningIssue &&
+    !hasLocalSegmentFailure &&
+    pendingSegmentIndex === null &&
+    (validationStatus === 'PASS' || validationStatus === 'NEEDS_CONFIRMATION')
+}
+
+export function canReplaceCandidateSegment({
+  hasTripId,
+  hasCandidateRequest,
+  pendingSegmentIndex,
+  hasExecutingPlanV1,
+  isConfirmingPlan,
+}: {
+  hasTripId: boolean
+  hasCandidateRequest: boolean
+  pendingSegmentIndex: number | null
+  hasExecutingPlanV1: boolean
+  isConfirmingPlan: boolean
+}) {
+  return hasTripId &&
+    hasCandidateRequest &&
+    pendingSegmentIndex === null &&
+    !hasExecutingPlanV1 &&
+    !isConfirmingPlan
+}
+
 export async function acceptInitialCandidatePlan({
   validationStatus,
   persistedPlanId,
   issuePlan,
+  onPlanIssued,
   confirmPlan,
   startExecution,
 }: {
   validationStatus: PlanSnapshot['validationStatus']
   persistedPlanId: string | null
   issuePlan: () => Promise<StoredPlanVersion>
+  onPlanIssued?: (planId: string) => void
   confirmPlan: (planId: string) => Promise<unknown>
   startExecution: () => Promise<unknown>
 }): Promise<
@@ -693,6 +752,7 @@ export async function acceptInitialCandidatePlan({
   if (!planId) {
     try {
       planId = (await issuePlan()).planId
+      onPlanIssued?.(planId)
     } catch (error) {
       const planningIssue = candidatePlanningIssue(error)
       if (planningIssue?.code === 'CANDIDATE_CONFIRMATION_REQUIRED') {
@@ -819,7 +879,7 @@ async function createAmapPlan(
     plan,
     candidateRequest,
     registeredPlan: null,
-    planningIssue: null,
+    planningIssue: candidatePreviewIssue(candidatePreview),
     knownCostCents: plan.totalCostCents,
     unknownPriceCount,
     recommendationTrace: selection ?? null,

@@ -24,6 +24,7 @@ import {
   replaceAmapPlanSegment,
   requestDefaultAmapRoute,
 } from '../src/services/amapPlan.ts'
+import * as amapPlan from '../src/services/amapPlan.ts'
 import { buildCandidateRequestFromConfirmedTrip } from '../src/services/candidateRequestBuilder.ts'
 
 const workspaceSource = readFileSync(
@@ -206,6 +207,29 @@ const passingPreview: CandidatePlanPreview = {
   warnings: [],
 }
 
+const failingPreview: CandidatePlanPreview = {
+  ...passingPreview,
+  validationStatus: 'FAIL',
+  metrics: null,
+  constraintResults: [{
+    ruleId: 'time.window',
+    scope: 'TRIP',
+    hardness: 'HARD',
+    status: 'FAIL',
+    referenceId: null,
+    observed: {},
+    suggestion: '行程超过确认的时间窗。',
+  }, {
+    ruleId: 'budget.total',
+    scope: 'TRIP',
+    hardness: 'HARD',
+    status: 'FAIL',
+    referenceId: null,
+    observed: {},
+    suggestion: '行程超过确认的预算。',
+  }],
+}
+
 function planSnapshotFor(base: CandidatePlanRequest): PlanSnapshot {
   return {
     id: 'candidate-plan',
@@ -246,6 +270,7 @@ test('initial planning previews exactly one candidate without issuing V1', async
   const { base, city } = fixture()
   const calls: Array<{ url: string; init: RequestInit }> = []
   const nearbyPlaces = base.taskFacts.slice(0, 3).map((fact) => fact.place)
+  let previewResponse = passingPreview
   globalThis.fetch = (async (input, init = {}) => {
     const url = String(input)
     calls.push({ url, init })
@@ -273,8 +298,8 @@ test('initial planning previews exactly one candidate without issuing V1', async
         provenance,
       })
     }
-    if (url.endsWith(`/api/v1/trips/${base.trip.tripId}/plan-previews/validate`)) {
-      return ok(passingPreview)
+    if (url.includes('/plan-previews/validate')) {
+      return ok(previewResponse)
     }
     if (url.includes('/plan-versions/generate')) {
       throw new Error('initial planning must not issue Plan V1')
@@ -309,6 +334,31 @@ test('initial planning previews exactly one candidate without issuing V1', async
   assert.deepEqual(JSON.parse(String(previews[0].init.body)), result.candidateRequest)
   assert.equal(result.registeredPlan, null)
   assert.equal(result.plan.validationStatus, 'PASS')
+
+  const failedTrip = structuredClone(base.trip)
+  failedTrip.tripId = '11111111-1111-4111-8111-111111111112'
+  previewResponse = failingPreview
+  const failedResult = await loadAmapPlan(failedTrip.tripId, {
+    schemaVersion: '1.0',
+    cityName: failedTrip.cityContext.cityName,
+    travelDate: failedTrip.days[0].date,
+    startTime: '09:00',
+    endTime: '20:00',
+    startLocationText: failedTrip.days[0].startLocationText,
+    endLocationText: failedTrip.days[0].endLocationText,
+    budgetCents: failedTrip.totalBudgetCents,
+    interests: [],
+    mustVisit: ['fixture'],
+    avoidPlaces: [],
+    assistanceMode: 'standard',
+    assistanceProfile: { maxSegmentWalkMeters: null, maxTransfers: null, restIntervalMinutes: null },
+    naturalLanguageRequest: 'fixture failure',
+  }, undefined, { confirmedTrip: failedTrip, organizerToken: 'organizer-token' })
+  assert.equal(failedResult.registeredPlan, null)
+  assert.equal(failedResult.plan.validationStatus, 'FAIL')
+  assert.equal(failedResult.planningIssue?.code, 'CANDIDATE_PREVIEW_REJECTED')
+  assert.match(failedResult.planningIssue?.message ?? '', /时间窗/)
+  assert.equal(failedResult.planningIssue?.review, null)
 })
 
 test('initial planning defers V1 issuance to the workspace acceptance action', () => {
@@ -349,6 +399,135 @@ test('final acceptance issues a previewed candidate then confirms and starts its
   })
   assert.deepEqual(result, { kind: 'STARTED', planId: 'issued-v1' })
   assert.deepEqual(calls, ['issue', 'confirm:issued-v1', 'start'])
+})
+
+test('final acceptance records an issued V1 before a failed confirm retry', async () => {
+  const calls: string[] = []
+  let persistedPlanId: string | null = null
+  const issuePlan = async () => {
+    calls.push('issue')
+    return { planId: 'issued-v1' } as StoredPlanVersion
+  }
+  const onPlanIssued = (planId: string) => {
+    calls.push(`record:${planId}`)
+    persistedPlanId = planId
+  }
+  await assert.rejects(
+    acceptInitialCandidatePlan({
+      validationStatus: 'PASS',
+      persistedPlanId,
+      issuePlan,
+      onPlanIssued,
+      confirmPlan: async (planId) => {
+        calls.push(`confirm:${planId}`)
+        throw new Error('confirm unavailable')
+      },
+      startExecution: async () => { calls.push('start') },
+    } as Parameters<typeof acceptInitialCandidatePlan>[0] & { onPlanIssued: (planId: string) => void }),
+    /confirm unavailable/,
+  )
+  assert.equal(persistedPlanId, 'issued-v1')
+  const retried = await acceptInitialCandidatePlan({
+    validationStatus: 'PASS',
+    persistedPlanId,
+    issuePlan,
+    onPlanIssued,
+    confirmPlan: async (planId) => { calls.push(`confirm:${planId}`) },
+    startExecution: async () => { calls.push('start') },
+  } as Parameters<typeof acceptInitialCandidatePlan>[0] & { onPlanIssued: (planId: string) => void })
+  assert.deepEqual(retried, { kind: 'STARTED', planId: 'issued-v1' })
+  assert.deepEqual(calls, [
+    'issue', 'record:issued-v1', 'confirm:issued-v1', 'confirm:issued-v1', 'start',
+  ])
+})
+
+test('workspace interaction predicates block acceptance during route replacement and replacement during acceptance', () => {
+  const predicates = amapPlan as typeof amapPlan & {
+    canAcceptCurrentCandidate: (input: {
+      hasCandidateRequest: boolean
+      validationStatus: PlanSnapshot['validationStatus']
+      hasPlanningIssue: boolean
+      hasLocalSegmentFailure: boolean
+      pendingSegmentIndex: number | null
+    }) => boolean
+    canReplaceCandidateSegment: (input: {
+      hasTripId: boolean
+      hasCandidateRequest: boolean
+      pendingSegmentIndex: number | null
+      hasExecutingPlanV1: boolean
+      isConfirmingPlan: boolean
+    }) => boolean
+  }
+  assert.equal(predicates.canAcceptCurrentCandidate({
+    hasCandidateRequest: true,
+    validationStatus: 'PASS',
+    hasPlanningIssue: false,
+    hasLocalSegmentFailure: false,
+    pendingSegmentIndex: 1,
+  }), false)
+  assert.equal(predicates.canReplaceCandidateSegment({
+    hasTripId: true,
+    hasCandidateRequest: true,
+    pendingSegmentIndex: null,
+    hasExecutingPlanV1: false,
+    isConfirmingPlan: true,
+  }), false)
+})
+
+test('a hard server preview failure retains rebuilt facts and route evidence until a later PASS replacement', async () => {
+  const transitionModule = await import(pathToFileURL(stateTransitionPath).href)
+  const applyResult = transitionModule.applySegmentReplacementResult
+  const { base } = fixture()
+  const replacement = route(
+    'route-preview-fail',
+    base.taskFacts[0].place.location,
+    base.taskFacts[1].place.location,
+    'DRIVING',
+    1_800,
+    4_000,
+  )
+  const candidate = structuredClone(base)
+  candidate.taskFacts[1].route = replacement
+  const initial = {
+    candidateRequest: base,
+    providerPlan: planSnapshotFor(base),
+    locationEvidence: {
+      city: { cityContext: base.trip.cityContext, provenance },
+      places: base.taskFacts.map((fact) => fact.place),
+      routes: base.taskFacts.map((fact) => fact.route),
+      queries: ['fixture'],
+    },
+    persistedPlanId: null,
+    restoredPlan: null,
+    planningIssue: null,
+    localFailure: null,
+  }
+  const failed = applyResult(initial, {
+    evidence: { segmentIndex: 1, route: replacement },
+    candidateRequest: candidate,
+    preview: failingPreview,
+  })
+  assert.equal(failed.kind, 'SUCCESS')
+  assert.equal(failed.state.candidateRequest, candidate)
+  assert.equal(failed.state.locationEvidence.routes[1], replacement)
+  assert.equal(failed.state.providerPlan.validationStatus, 'FAIL')
+  assert.equal(failed.state.planningIssue?.code, 'CANDIDATE_PREVIEW_REJECTED')
+  assert.match(failed.state.planningIssue?.message ?? '', /时间窗/)
+  assert.equal(failed.state.planningIssue?.review, null)
+  assert.equal(failed.state.localFailure, null)
+  assert.equal(
+    failed.state.providerPlan.tasks[1].timeRange,
+    `${candidate.taskFacts[1].startAt.slice(0, 5)}—${candidate.taskFacts[1].endAt.slice(0, 5)}`,
+  )
+
+  const recovered = applyResult(failed.state, {
+    evidence: { segmentIndex: 1, route: replacement },
+    candidateRequest: candidate,
+    preview: passingPreview,
+  })
+  assert.equal(recovered.state.planningIssue, null)
+  assert.equal(recovered.state.providerPlan.validationStatus, 'PASS')
+  assert.equal(recovered.state.candidateRequest, candidate)
 })
 
 test('final acceptance opens server fact review without confirming or starting an issued candidate', async () => {

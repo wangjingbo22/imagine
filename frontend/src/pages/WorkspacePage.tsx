@@ -59,6 +59,8 @@ import type {
 } from '../domain/executionAdjustment'
 import {
   acceptInitialCandidatePlan,
+  canAcceptCurrentCandidate,
+  canReplaceCandidateSegment,
   loadAmapPlan,
   replaceAmapPlanSegment,
   type AmapPlanResult,
@@ -609,10 +611,13 @@ export function WorkspacePage() {
   const serverPlanReady = Boolean(persistedPlanId) &&
     activePlan.validationStatus === 'PASS' &&
     !planningIssue
-  const candidateReadyForAcceptance = Boolean(candidateRequest) &&
-    !planningIssue &&
-    !localSegmentFailure &&
-    (activePlan.validationStatus === 'PASS' || activePlan.validationStatus === 'NEEDS_CONFIRMATION')
+  const candidateReadyForAcceptance = canAcceptCurrentCandidate({
+    hasCandidateRequest: Boolean(candidateRequest),
+    validationStatus: activePlan.validationStatus,
+    hasPlanningIssue: Boolean(planningIssue),
+    hasLocalSegmentFailure: Boolean(localSegmentFailure),
+    pendingSegmentIndex,
+  })
   const hasIssuedPassPlan = serverPlanReady
   const remainingBudgetCents = Math.max(0, budgetCents - activePlan.totalCostCents)
   const budgetUsagePercent = budgetCents > 0
@@ -755,7 +760,13 @@ export function WorkspacePage() {
   }
 
   async function replaceSegment(index: number, mode: TravelMode) {
-    if (!tripId || !candidateRequest || pendingSegmentIndex !== null || hasExecutingPlanV1) {
+    if (!tripId || !candidateRequest || !canReplaceCandidateSegment({
+      hasTripId: Boolean(tripId),
+      hasCandidateRequest: Boolean(candidateRequest),
+      pendingSegmentIndex,
+      hasExecutingPlanV1,
+      isConfirmingPlan,
+    })) {
       return
     }
     setPendingSegmentIndex(index)
@@ -946,6 +957,9 @@ export function WorkspacePage() {
     setIsConfirmingPlan(true)
     setPlanLifecycleError('')
     try {
+      if (pendingSegmentIndex !== null) {
+        throw new Error('路线更新尚未完成，请等待候选事实重新校验。')
+      }
       if (!candidateRequest) {
         throw new Error('当前候选事实不可用，请重新生成计划。')
       }
@@ -956,6 +970,7 @@ export function WorkspacePage() {
         validationStatus: activePlan.validationStatus,
         persistedPlanId,
         issuePlan: async () => (await tripApi.generatePlanVersion(tripId, candidateRequest, organizerToken)).data,
+        onPlanIssued: setPersistedPlanId,
         confirmPlan: (planId) => tripApi.confirmPlan(tripId, planId, organizerToken),
         startExecution: () => tripApi.startExecution(tripId),
       })
@@ -1747,7 +1762,13 @@ export function WorkspacePage() {
                           </small>
                         </span>
                         <SegmentRouteModePicker
-                          disabled={hasExecutingPlanV1}
+                          disabled={!canReplaceCandidateSegment({
+                            hasTripId: Boolean(tripId),
+                            hasCandidateRequest: Boolean(candidateRequest),
+                            pendingSegmentIndex,
+                            hasExecutingPlanV1,
+                            isConfirmingPlan,
+                          })}
                           error={segmentErrors[index]?.message ?? ''}
                           notice={localSegmentFailure?.segmentIndex === index
                             ? localSegmentFailure.message
@@ -1826,6 +1847,9 @@ export function WorkspacePage() {
                 </section>
               ) : (
                 <div className="plan-decision-actions">
+                  {planningIssue && !candidateReview && (
+                    <p aria-live="polite" className="media-error">{planningIssue.message}</p>
+                  )}
                   <button className="button button--ghost" onClick={() => setIsFeedbackOpen(true)} type="button">
                     <MessageSquareText size={17} /> 不满意，重新推荐
                   </button>

@@ -104,6 +104,23 @@ function localFailureMessage(preview: CandidatePlanPreview) {
     .find((item): item is string => Boolean(item)) ?? '路线变更未通过计划校验。'
 }
 
+function candidatePreviewIssue(preview: CandidatePlanPreview): PlanningIssue | null {
+  if (preview.validationStatus !== 'FAIL') {
+    return null
+  }
+  const suggestions = preview.constraintResults
+    .filter((result) => result.status === 'FAIL')
+    .map((result) => result.suggestion?.trim())
+    .filter((suggestion): suggestion is string => Boolean(suggestion))
+  return {
+    code: 'CANDIDATE_PREVIEW_REJECTED',
+    message: suggestions.length > 0
+      ? suggestions.join(' ')
+      : '候选路线未通过服务端预览校验。',
+    review: null,
+  }
+}
+
 export function applySegmentReplacementResult(
   current: SegmentRouteReplacementDisplayState,
   result: AmapSegmentReplacementResult,
@@ -123,7 +140,7 @@ export function applySegmentReplacementResult(
         locationEvidence,
         persistedPlanId: null,
         restoredPlan: null,
-        planningIssue: null,
+        planningIssue: candidatePreviewIssue(result.preview),
         localFailure: null,
       },
     }

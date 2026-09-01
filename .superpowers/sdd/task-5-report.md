@@ -20,3 +20,20 @@
 - `npm.cmd --prefix frontend run lint`: passed with four pre-existing warnings outside Task 5 files.
 - `npm.cmd --prefix frontend run build`: passed.
 - `git diff --check`: passed.
+
+## Review Fixes
+
+- Added a V1 issuance checkpoint before confirm/start so retries reuse the issued ID.
+- Added shared acceptance and segment-replacement race predicates for pending route updates and V1 confirmation.
+- Preserved server preview FAIL explanations for initial plans and rebuilt route candidates; the Workspace renders non-review issues with `aria-live`.
+- Kept local unschedulable segment behavior unchanged.
+
+## Review-Fix Verification
+
+- RED command: `npm.cmd --prefix frontend test`
+- RED result: 4 failures covering missing preview issues, issuance checkpoint, race predicates, and retained rebuilt candidate state.
+- GREEN command: `npm.cmd --prefix frontend test`
+- GREEN result: 135 passed, 0 failed.
+- `npm.cmd --prefix frontend run lint`: passed with the same four pre-existing warnings outside Task 5 files.
+- `npm.cmd --prefix frontend run build`: passed.
+- `git diff --check`: passed.
