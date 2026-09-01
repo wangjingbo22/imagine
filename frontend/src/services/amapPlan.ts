@@ -357,10 +357,10 @@ async function collectConfirmedRecommendationPlaces(
   organizerToken: string | null | undefined,
 ) {
   if (!organizerToken) {
-    throw new Error('组织者凭证缺失，不能核验已确认的 FactRef 推荐。')
+    throw new Error('组织者凭证缺失，不能核验已确认的推荐地点。')
   }
   if (selection.tripId !== tripId) {
-    throw new Error('已确认推荐不属于当前 Trip，请刷新后重新确认。')
+    throw new Error('已确认推荐不属于当前行程，请刷新后重新确认。')
   }
   const factSet = (
     await tripApi.getProviderFactSetPlaces(
@@ -428,7 +428,7 @@ async function resolveConfirmedEndpoints(
   organizerToken?: string | null,
 ) {
   if (trip.tripId !== tripId) {
-    throw new Error('已确认 Trip 与当前 tripId 不一致，必须重新确认行程。')
+    throw new Error('已确认行程与当前页面不一致，必须重新确认行程。')
   }
   const day = trip.days[0]
   const start = (await providerCall(() => tripApi.forwardGeocode(
@@ -449,7 +449,7 @@ async function resolveConfirmedEndpoints(
     start.cityCode !== trip.cityContext.cityCode ||
     end.cityCode !== trip.cityContext.cityCode
   ) {
-    throw new Error('已确认起终点无法解析到 Trip 的同一城市，必须重新确认行程。')
+    throw new Error('已确认的起终点不在同一城市，必须重新确认行程。')
   }
   return {
     startLocation: endpointFact(day.startLocationText, start),
@@ -995,17 +995,17 @@ async function createAmapPlan(
 ): Promise<AmapPlanResult> {
   const confirmedTrip = options.confirmedTrip
   if (!confirmedTrip) {
-    throw new Error('缺少 T004 已确认 Trip，不能在客户端猜测起点、终点或参与者。')
+    throw new Error('缺少已确认的行程信息，不能推测起点、终点或参与者。')
   }
   if (confirmedTrip.tripId !== tripId) {
-    throw new Error('T004 已确认 Trip 与当前 tripId 不一致，请重新确认行程。')
+    throw new Error('已确认行程与当前页面不一致，请重新确认行程。')
   }
   onPhase?.('CITY', `正在通过高德解析“${confirmedTrip.cityContext.cityName}”及已确认起终点`)
   const providerCity = (await providerCall(
     () => tripApi.resolveCity(confirmedTrip.cityContext.cityName),
   )).data
   if (providerCity.cityContext.cityCode !== confirmedTrip.cityContext.cityCode) {
-    throw new Error('Provider 城市解析与 T004 已确认 Trip 不一致，请重新确认行程。')
+    throw new Error('地点服务解析出的城市与已确认行程不一致，请重新确认行程。')
   }
   const city: CityResolution = {
     ...providerCity,
@@ -1020,8 +1020,8 @@ async function createAmapPlan(
   onPhase?.(
     'PLACES',
     selection
-      ? `正在核验已确认 FactRef 集合 ${selection.factSetId}`
-      : `已解析 cityCode ${city.cityContext.cityCode}，正在检索同城地点并保留返程任务`,
+      ? '正在核验已确认的推荐地点'
+      : '城市已确认，正在检索同城地点并保留返程任务',
   )
   const collected = selection
     ? await collectConfirmedRecommendationPlaces(
@@ -1127,7 +1127,7 @@ export async function buildAmapReplanCandidate(
   options: AmapReplanOptions,
 ): Promise<AmapReplanCandidateResult> {
   if (baseRequest.trip.tripId !== tripId) {
-    throw new Error('原始候选事实与当前 tripId 不一致，不能生成 Plan V2。')
+    throw new Error('原始方案与当前行程不一致，不能生成调整方案。')
   }
   const baseFacts = baseRequest.taskFacts
   const confirmedCare = planningCareFromConstraints(
@@ -1146,7 +1146,7 @@ export async function buildAmapReplanCandidate(
     () => tripApi.resolveCity(baseRequest.trip.cityContext.cityName),
   )).data
   if (resolvedCity.cityContext.cityCode !== baseRequest.trip.cityContext.cityCode) {
-    throw new Error('重规划城市与不可变 Trip 快照不一致。')
+    throw new Error('重新规划的城市与已确认行程不一致。')
   }
   const city: CityResolution = {
     ...resolvedCity,
@@ -1187,7 +1187,7 @@ export async function buildAmapReplanCandidate(
     }
   }
 
-  onPhase?.('PLACES', '正在检索替代地点，并固定复用 Plan V1 的最终目的地')
+  onPhase?.('PLACES', '正在检索替代地点，并保留当前方案的最终目的地')
   const previousFact = prefixLength > 0 ? baseFacts[prefixLength - 1] : null
   const collected = await collectPlaces(
     tripId,
@@ -1209,7 +1209,7 @@ export async function buildAmapReplanCandidate(
   )
     .slice(0, replaceableCount)
   if (replacementPlaces.length < replaceableCount) {
-    throw new Error('高德没有返回足够的新地点，未生成 Plan V2。')
+    throw new Error('高德没有返回足够的新地点，暂时无法生成调整方案。')
   }
   const suffixPlaces = [...replacementPlaces, finalFact.place]
   let origin = previousFact?.place.location ?? baseRequest.startLocation.location
@@ -1270,7 +1270,7 @@ export async function buildAmapReplanCandidate(
     taskFacts,
   }
   const plan = previewFromCandidate(candidateRequest, 2)
-  onPhase?.('PLAN', '候选事实已完成，等待服务端 T011 与 T018 选择')
+  onPhase?.('PLAN', '候选地点与路线已完成，正在生成最终方案')
   return {
     evidence: {
       city,

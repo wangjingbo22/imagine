@@ -29,6 +29,13 @@ _KIND_ORDER = {
     MemoryTimelineItemKind.PHOTO: 6,
 }
 
+_PLAN_STATUS_LABELS = {
+    PlanVersionStatus.PROPOSED: "待确认",
+    PlanVersionStatus.CURRENT: "当前使用",
+    PlanVersionStatus.REJECTED: "已拒绝",
+    PlanVersionStatus.SUPERSEDED: "历史版本",
+}
+
 
 class MemoryTimelineService:
     def __init__(
@@ -62,7 +69,7 @@ class MemoryTimelineService:
                     item_id=f"plan:{plan.plan_id}",
                     kind=MemoryTimelineItemKind.PLAN_VERSION,
                     occurred_at=plan.confirmed_at or plan.created_at,
-                    title=f"行程方案 V{plan.version}：{plan.status.value}",
+                    title=f"行程方案 V{plan.version}：{_PLAN_STATUS_LABELS[plan.status]}",
                     plan_version_id=plan.plan_id,
                     plan_version=plan.version,
                     plan_status=plan.status,

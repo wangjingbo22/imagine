@@ -57,8 +57,7 @@ test('account API uses the session cookie and the account contract paths', async
 test('model settings show the server error instead of masking failed API Key storage', async () => {
   const page = await readFile(new URL('../src/pages/ModelSettingsPage.tsx', import.meta.url), 'utf8')
 
-  assert.match(page, /import \{ ApiError \} from '\.\.\/api\/client'/)
-  assert.match(page, /error instanceof ApiError\) return error\.message/)
+  assert.match(page, /userFacingErrorMessage\(error, '保存失败，请检查网络连接后重试。'\)/)
   assert.match(page, /保存失败：\$\{saveErrorMessage\(error\)\}/)
   assert.match(page, /await saveModelSettings[\s\S]*navigate\('\/', \{ replace: true \}\)/)
 })
@@ -67,7 +66,7 @@ test('recommendation loading presents staged analysis instead of an empty status
   const page = await readFile(new URL('../src/pages/RecommendationPage.tsx', import.meta.url), 'utf8')
   const styles = await readFile(new URL('../src/styles/future-system.css', import.meta.url), 'utf8')
 
-  assert.match(page, /LIVE ANALYSIS/)
+  assert.match(page, /正在分析/)
   assert.match(page, /正在编排行程候选/)
   assert.match(page, /恢复已确认的出行事实/)
   assert.match(page, /计算路线与预算可行性/)

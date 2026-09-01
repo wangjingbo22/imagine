@@ -31,7 +31,7 @@ export function HomePage() {
           <div className="hero-content" data-reveal="hero-copy">
             <div className="eyebrow">
               <Sparkles size={15} />
-              预算约束与关怀出行 AI Agent
+              预算约束与关怀出行智能助手
             </div>
             <h1>
               旅途不该只是攻略，
@@ -64,16 +64,16 @@ export function HomePage() {
             <article className="floating-card floating-card--plan glass-card">
               <div className="floating-card__top">
                 <span className="mini-label">真实数据生成流程</span>
-                <span className="pass-chip"><ShieldCheck size={13} /> 高德 Web 服务</span>
+                <span className="pass-chip"><ShieldCheck size={13} /> 高德地图服务</span>
               </div>
               <div className="route-preview">
                 <span className="route-preview__line" />
-                {['解析目标城市', '检索同城 POI', '规划逐段路线'].map((place, index) => (
+                {['解析目标城市', '检索同城地点', '规划逐段路线'].map((place, index) => (
                   <div className="route-preview__stop" key={place}>
                     <span>{index + 1}</span>
                     <div>
                       <strong>{place}</strong>
-                      <small>{['cityCode', 'ONLINE', 'fetchedAt'][index]}</small>
+                      <small>{['城市已确认', '在线获取', '刚刚更新'][index]}</small>
                     </div>
                   </div>
                 ))}
@@ -87,7 +87,7 @@ export function HomePage() {
             <article className="floating-card floating-card--agent glass-card">
               <span className="agent-orb"><BrainCircuit size={23} /></span>
               <div>
-                <small>Agent 正在检查</small>
+                <small>智能助手正在检查</small>
                 <strong>老人步行上限</strong>
               </div>
               <span className="loading-bars"><i /><i /><i /></span>
@@ -110,14 +110,14 @@ export function HomePage() {
 
         <section className="experience-section">
           <div className="section-heading" data-reveal="fade">
-            <span>ONE INTELLIGENT JOURNEY</span>
+            <span>一段更懂你的旅程</span>
             <h2>从一句话，到真正走得通的一天</h2>
             <p>不是生成一段文字，而是理解、验证、执行与调整组成的完整闭环。</p>
           </div>
           <div className="mode-grid">
             <article className="mode-card" data-reveal="card">
               <div className="mode-card__visual multiday-visual"><CalendarDays size={42} /><span className="day-sheet day-sheet--one">D1</span><span className="day-sheet day-sheet--two">D2</span><span className="day-sheet day-sheet--three">D3</span></div>
-              <div className="mode-card__content"><span className="mode-tag">Sprint 3</span><h3>同城多日行程</h3><p>创建 2–30 天父行程，逐日进入成熟的单日规划并汇总预算。</p></div>
+              <div className="mode-card__content"><span className="mode-tag">多日规划</span><h3>同城多日行程</h3><p>创建 2–30 天父行程，逐日进入成熟的单日规划并汇总预算。</p></div>
             </article>
             <article className="mode-card" data-reveal="card">
               <div className="mode-card__visual solo-visual">
@@ -128,7 +128,7 @@ export function HomePage() {
               <div className="mode-card__content">
                 <span className="mode-tag">推荐体验</span>
                 <h3>一个人出发</h3>
-                <p>告诉 Agent 预算、时间与偏好，得到一份经过硬约束校验的专属计划。</p>
+                <p>告诉智能助手预算、时间与偏好，得到一份经过硬性限制校验的专属计划。</p>
               </div>
             </article>
             <article className="mode-card" data-reveal="card">
@@ -139,7 +139,7 @@ export function HomePage() {
                 <span className="avatar-bubble avatar-bubble--c" />
               </div>
               <div className="mode-card__content">
-                <span className="mode-tag mode-tag--neutral">Sprint 2</span>
+                <span className="mode-tag mode-tag--neutral">多人协作</span>
                 <h3>和朋友一起</h3>
                 <p>协调最多 20 人的兴趣、预算与体力差异，让每一次妥协都有清晰理由。</p>
               </div>

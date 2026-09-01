@@ -49,10 +49,10 @@ function attractionDurationPreference(place: Place): RestClockTaskPreference {
 }
 
 function taskNote(place: Place, priceKnown: boolean, feedback = '') {
-  const address = place.address ? `地址：${place.address}` : '地址由高德地点 ID 核验'
+  const address = place.address ? `地址：${place.address}` : '地址已通过高德地点信息核验'
   const priceNote = priceKnown
-    ? '地点与交通参考价格均由 Provider 返回'
-    : '仅累计 Provider 已返回的金额，未知价格仍需确认'
+    ? '地点与交通参考价格已取得'
+    : '仅累计已有价格，未知价格仍需确认'
   const feedbackNote = feedback ? `；调整依据：${feedback}` : ''
   return `${address}；${priceNote}${feedbackNote}`.slice(0, 500)
 }
@@ -119,13 +119,13 @@ function validateCandidateFactChain(
     normalizedText(startLocation.locationText) !== normalizedText(day.startLocationText) ||
     normalizedText(endLocation.locationText) !== normalizedText(day.endLocationText)
   ) {
-    throw new Error('候选起终点必须复用 T004 已确认 Trip 的文本。')
+    throw new Error('候选起终点必须与已确认行程一致。')
   }
   if (
     startLocation.cityCode !== trip.cityContext.cityCode ||
     endLocation.cityCode !== trip.cityContext.cityCode
   ) {
-    throw new Error('候选起终点必须位于 T004 已确认 Trip 的城市。')
+    throw new Error('候选起终点必须位于已确认的行程城市。')
   }
   let expectedOrigin = startLocation.location
   places.forEach((place, index) => {
@@ -147,7 +147,7 @@ function validateCandidateFactChain(
     !returnRoute ||
     !samePoint(returnRoute.destination, endLocation.location)
   ) {
-    throw new Error('末项必须是返回 T004 已确认终点的独立任务。')
+    throw new Error('末项必须是返回已确认终点的独立任务。')
   }
   const lodgingTask = places.slice(0, -1).find((place) =>
     isLodgingPlaceLike(place.name, place.category),

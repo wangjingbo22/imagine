@@ -99,7 +99,7 @@ export async function decideAndContinueExecution<
 
   const restoredState = await actions.restoreTrip()
   if (!restoredState.currentPlan) {
-    throw new Error('决策完成后未找到 CURRENT 版本。')
+    throw new Error('决策完成后未找到当前使用的方案。')
   }
   actions.applyRestoredState(restoredState)
   const nextTaskIndex = await continueExecutionFromRestoredState(

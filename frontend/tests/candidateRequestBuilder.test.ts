@@ -205,7 +205,7 @@ test('candidate builder rejects a fake final place or a route that misses the en
       wrongPlace.places,
       wrongPlace.routes,
     ),
-    /末项必须是返回 T004 已确认终点/,
+    /末项必须是返回已确认终点/,
   )
 
   const wrongRoute = fixture()

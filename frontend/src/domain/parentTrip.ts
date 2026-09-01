@@ -5,6 +5,22 @@ export type ParentTripDay = {
   childStatus: string; costStatus: 'NOT_AVAILABLE' | 'PLANNED' | 'ACTUAL_RECORDED'
 }
 
+const parentTripChildStatusLabels: Record<string, string> = {
+  NOT_CREATED: '尚未创建',
+  DRAFT: '草稿整理中',
+  CONSTRAINT_CONFIRMED: '行程信息已确认',
+  PLANNING: '正在生成方案',
+  PLAN_REVIEW: '方案待确认',
+  CONFIRMED: '行程已确认',
+  EXECUTING: '行程进行中',
+  REPLAN_REVIEW: '调整方案待确认',
+  COMPLETED: '已完成',
+}
+
+export function parentTripChildStatusLabel(status: string): string {
+  return parentTripChildStatusLabels[status] ?? '状态待确认'
+}
+
 export type ParentTripPlaceMemoryItem = {
   dayIndex: number
   date: string

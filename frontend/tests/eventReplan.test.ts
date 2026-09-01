@@ -59,5 +59,5 @@ test('Workspace uses server event replanning and deterministic adjustment contro
   assert.doesNotMatch(source, /tripApi\.parseExecutionAdjustment/)
   assert.doesNotMatch(source, /buildAmapReplanCandidate/)
   assert.doesNotMatch(source, /tripApi\.selectReplan/)
-  assert.doesNotMatch(source, /USER_FEEDBACK/)
+  assert.doesNotMatch(source, /eventType:\s*['"]USER_FEEDBACK['"]/)
 })

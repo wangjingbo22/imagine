@@ -2,6 +2,7 @@ import { ArrowLeft, SlidersHorizontal, UserRound } from 'lucide-react'
 import type { PropsWithChildren } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAccountSession } from '../session/useAccountSession'
+import { userFacingErrorMessage } from '../utils/userFacingError'
 import { BrandMark } from './BrandMark'
 
 interface AppShellProps extends PropsWithChildren {
@@ -72,7 +73,7 @@ export function AppShell({
       </header>
       {sessionError && (
         <div className="app-shell__session-error" role="alert">
-          <div>{sessionError}</div>
+          <div>{userFacingErrorMessage(sessionError, '账户状态读取失败，请刷新重试。')}</div>
         </div>
       )}
       {children}

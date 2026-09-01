@@ -48,6 +48,7 @@ import {
   validateTripSchedule,
 } from '../services/tripTimeConstraints'
 import { useAccountSession } from '../session/useAccountSession'
+import { userFacingErrorMessage } from '../utils/userFacingError'
 
 // 20 人是当前协作会话、邀请链接和公平评分共同支持的安全上限。
 // 前端校验与服务端模型使用同一上限，避免界面可填但提交后被拒绝。
@@ -77,6 +78,11 @@ function collaborationStatusLabel(status: CollaborationAggregate['status']): str
   return labels[status]
 }
 
+function memberLabel(memberKey: string | null | undefined): string {
+  const sequence = Number(memberKey?.split('-')[1])
+  return Number.isInteger(sequence) && sequence > 1 ? `成员 ${sequence - 1}` : '成员'
+}
+
 type EntryMode = 'single' | 'group'
 type TripFields = { city: string; startDate: string; endDate: string }
 
@@ -89,12 +95,30 @@ function tripAnswer(fields: TripFields, window: PlanningTimeWindow): string {
 const groupQuestionIndexes: readonly number[] = [0, 1, 2, 3, 4, 5]
 const singleQuestionIndexes: readonly number[] = [0, 2, 3, 4, 5]
 
-function questionLabel(questionIndex: number, entryMode: EntryMode | null): string {
+const assistanceModeLabels: Record<string, string> = {
+  ORDINARY: '普通出行（无额外关怀限制）',
+  PARENT_CHILD: '亲子出行',
+  LOW_STAMINA: '低体力出行',
+  MOBILITY_ASSISTANCE_BETA: '行动辅助',
+}
+
+function organizerAssistanceAnswer(mode: string, budget: string): string {
+  return `组织者个人预算上限：${budget}元；关怀模式：${mode}（${assistanceModeLabels[mode]}）。`
+}
+
+function questionLabel(
+  questionIndex: number,
+  entryMode: EntryMode | null,
+  usesInheritedDailyBudget = false,
+): string {
   if (entryMode === 'single' && questionIndex === 2) {
     return '从哪里出发、最终回到哪里？'
   }
   if (entryMode === 'single' && questionIndex === 3) {
     return '喜欢什么、必去哪里、希望避开什么？'
+  }
+  if (entryMode === 'single' && usesInheritedDailyBudget && questionIndex === 4) {
+    return '是否有步行、换乘、休息或关怀需求？'
   }
   return questions[questionIndex]?.[1] ?? ''
 }
@@ -128,7 +152,11 @@ export function ConversationPlannerPage() {
     : null
   const parentCity = searchParams.get('city') ?? ''
   const parentDate = searchParams.get('date') ?? ''
-  const parentBudgetCents = Number(searchParams.get('budget'))
+  const parentBudgetParam = searchParams.get('budget')
+  const parentBudgetCents = parentBudgetParam === null ? Number.NaN : Number(parentBudgetParam)
+  const inheritedDailyBudget = Number.isFinite(parentBudgetCents) && parentBudgetCents >= 0
+    ? String(parentBudgetCents / 100)
+    : ''
   const isParentDay = Boolean(parentTripId && parentDayIndex !== null)
   const plannerDraftScope = plannerLocalDraftScope(
     isParentDay ? parentTripId : null,
@@ -144,6 +172,9 @@ export function ConversationPlannerPage() {
     const initial = Array<string>(questions.length).fill('')
     if (initialEntryMode === 'group') initial[1] = '2个人出行；组织者昵称：'
     if (initialEntryMode === 'single') initial[1] = '1个人出行；组织者昵称：旅行者'
+    if (isParentDay && initialEntryMode === 'single' && inheritedDailyBudget) {
+      initial[4] = organizerAssistanceAnswer('ORDINARY', inheritedDailyBudget)
+    }
     return initial
   })
   const [tripFields, setTripFields] = useState<TripFields>(() => ({
@@ -157,10 +188,10 @@ export function ConversationPlannerPage() {
     endTime: DEFAULT_PLANNING_END_TIME,
   })
   const [timeEditorOpen, setTimeEditorOpen] = useState(false)
-  const [routeFields, setRouteFields] = useState({ start: '', end: '', budget: Number.isFinite(parentBudgetCents) ? String(parentBudgetCents / 100) : '' })
+  const [routeFields, setRouteFields] = useState({ start: '', end: '', budget: inheritedDailyBudget })
   const [organizerNickname, setOrganizerNickname] = useState(initialEntryMode === 'single' ? '旅行者' : '')
   const [partyCount, setPartyCount] = useState(initialEntryMode === 'group' ? 2 : 1)
-  const [personalBudget, setPersonalBudget] = useState('')
+  const [personalBudget, setPersonalBudget] = useState(isParentDay && initialEntryMode === 'single' ? inheritedDailyBudget : '')
   const [assistanceMode, setAssistanceMode] = useState('ORDINARY')
   const [entryMode, setEntryMode] = useState<EntryMode | null>(initialEntryMode)
   const [questionnaireStarted, setQuestionnaireStarted] = useState(false)
@@ -207,10 +238,11 @@ export function ConversationPlannerPage() {
   const visibleQuestionIndexes = isParentDay
     ? modeQuestionIndexes.filter((questionIndex) => questionIndex !== 0)
     : modeQuestionIndexes
+  const usesInheritedDailyBudget = isParentDay && entryMode === 'single' && Boolean(inheritedDailyBudget)
   const visibleStepIndex = Math.max(visibleQuestionIndexes.indexOf(step), 0)
   const visibleQuestionCount = visibleQuestionIndexes.length
   const isLastQuestion = visibleStepIndex === visibleQuestionCount - 1
-  const currentQuestionLabel = questionLabel(step, entryMode)
+  const currentQuestionLabel = questionLabel(step, entryMode, usesInheritedDailyBudget)
   const cardAnswersReady = Boolean(
     tripFields.city.trim()
     && tripFields.startDate.trim()
@@ -493,14 +525,13 @@ export function ConversationPlannerPage() {
   function updateAssistance(mode: string, budget = personalBudget) {
     answersChanged()
     setAssistanceMode(mode)
-    const labels: Record<string, string> = { ORDINARY: '普通出行（无额外关怀限制）', PARENT_CHILD: '亲子出行', LOW_STAMINA: '低体力出行', MOBILITY_ASSISTANCE_BETA: '行动辅助' }
     setAnswers((items) => items.map((answer, index) => {
       if (index === 2 && entryMode === 'single') {
         const tripBudget = parentTripId && routeFields.budget.trim() ? routeFields.budget : budget
         return `从${routeFields.start}出发；结束地：${routeFields.end}；本次行程总预算：${tripBudget}`
       }
       return index === 4
-        ? `组织者个人预算上限：${budget}元；关怀模式：${mode}（${labels[mode]}）。`
+        ? organizerAssistanceAnswer(mode, budget)
         : answer
     }))
   }
@@ -629,7 +660,7 @@ export function ConversationPlannerPage() {
         }
         setFallback(created)
         if (preserveReviewedFallback) {
-          setFallbackReviewNotice(`智能整理服务暂不可用（${created.recognition.failureCode}），本次已自动尝试 ${created.recognition.callCount} 次。已保留 ${visibleQuestionCount} / ${visibleQuestionCount} 核对结果，请稍后再次尝试。`)
+          setFallbackReviewNotice(`智能整理服务暂不可用，本次已自动尝试 ${created.recognition.callCount} 次。已保留 ${visibleQuestionCount} / ${visibleQuestionCount} 核对结果，请稍后再次尝试。`)
         } else {
           setReviewedFallbackAnswers(Array(questions.length).fill(false))
           setFallbackReviewNotice('')
@@ -725,7 +756,7 @@ export function ConversationPlannerPage() {
         })
         expectedVersion = invitation.collaborationVersion
         if (!invitation.linkAvailable || !invitation.invitationUrl) {
-          throw new Error(`成员 ${participant.memberKey} 的邀请密钥未生成，请重新创建邀请。`)
+          throw new Error('成员邀请凭证未生成，请重新创建邀请。')
         }
         const link = new URL(invitation.invitationUrl, window.location.origin).toString()
         setLinks((current) => {
@@ -837,33 +868,33 @@ export function ConversationPlannerPage() {
   return <AppShell compact>
     <main className="planner-layout">
       <aside className="planner-sidebar">
-        <div><span className="eyebrow">S2 · 对话建行程</span><h1>把旅行，<br />说给我听。</h1><p>我们会用 {visibleQuestionCount} 个小问题收集完整信息，再一次性整理为可确认的行程需求。</p></div>
+        <div><span className="eyebrow">对话创建行程</span><h1>把旅行，<br />说给我听。</h1><p>我们会用 {visibleQuestionCount} 个小问题收集完整信息，再一次性整理为可确认的行程需求。</p></div>
         <ol className="step-list">{visibleQuestionIndexes.map((questionIndex, index) => {
-          const label = questionLabel(questionIndex, entryMode)
+          const label = questionLabel(questionIndex, entryMode, usesInheritedDailyBudget)
           return <li key={questions[questionIndex][0]} aria-current={!hasOutcome && questionnaireStarted && questionIndex === step ? 'step' : undefined} className={index < visibleStepIndex || hasOutcome ? 'is-complete' : questionnaireStarted && questionIndex === step ? 'is-current' : ''}><span>{index < visibleStepIndex || hasOutcome ? <Check size={14} /> : index + 1}</span><div><strong>问题 {index + 1}</strong><small>{label.slice(0, 16)}…</small></div></li>
         })}</ol>
         <div className="privacy-note"><LockKeyhole size={17} /><span>{entryMode === 'group' ? '你的回答仅用于整理行程偏好。成员资料各自独立确认。' : '你的回答仅用于整理本次行程偏好。'}</span></div>
       </aside>
       <section className="planner-panel conversation-panel" data-reveal="panel">
-        <header className="planner-panel__header"><div><span className="section-kicker">CONVERSATIONAL TRIP</span><h2>{hasOutcome ? '确认你的旅行需求' : isParentDay ? '从今天的期待开始' : '从一句期待开始'}</h2></div><span className="save-state"><span className="status-dot" /> {localDraftStatus === 'saved' ? '本地草稿已保存' : localDraftStatus === 'unavailable' ? '本地草稿未保存' : '填写后自动保存'}</span></header>
-        {!hasOutcome && entryMode === null && <section className="entry-mode-card"><div><span className="section-kicker">CHOOSE YOUR WAY</span><h3>这次，怎么出发？</h3><p>单人行程直接开始；多人由组织者创建后发送邀请链接，成员各自填写自己的资料。</p></div><div className="entry-mode-grid"><button type="button" onClick={() => begin('single')}><UserRound size={21} /><strong>单人创建</strong><small>我自己规划一趟行程</small><ArrowRight size={17} /></button><button type="button" onClick={() => begin('group')}><UsersRound size={21} /><strong>多人创建</strong><small>我是组织者，邀请同行成员</small><ArrowRight size={17} /></button></div><div className="join-entry"><span><Link2 size={16} />已有多人邀请？</span><input value={inviteLink} onChange={(event) => setInviteLink(event.target.value)} placeholder="粘贴邀请链接" /><button className="button button--soft" type="button" onClick={joinExistingTrip}>加入行程</button></div></section>}
+        <header className="planner-panel__header"><div><span className="section-kicker">行程问答</span><h2>{hasOutcome ? '确认你的旅行需求' : isParentDay ? '从今天的期待开始' : '从一句期待开始'}</h2></div><span className="save-state"><span className="status-dot" /> {localDraftStatus === 'saved' ? '本地草稿已保存' : localDraftStatus === 'unavailable' ? '本地草稿未保存' : '填写后自动保存'}</span></header>
+        {!hasOutcome && entryMode === null && <section className="entry-mode-card"><div><span className="section-kicker">出行方式</span><h3>这次，怎么出发？</h3><p>单人行程直接开始；多人由组织者创建后发送邀请链接，成员各自填写自己的资料。</p></div><div className="entry-mode-grid"><button type="button" onClick={() => begin('single')}><UserRound size={21} /><strong>单人创建</strong><small>我自己规划一趟行程</small><ArrowRight size={17} /></button><button type="button" onClick={() => begin('group')}><UsersRound size={21} /><strong>多人创建</strong><small>我是组织者，邀请同行成员</small><ArrowRight size={17} /></button></div><div className="join-entry"><span><Link2 size={16} />已有多人邀请？</span><input value={inviteLink} onChange={(event) => setInviteLink(event.target.value)} placeholder="粘贴邀请链接" /><button className="button button--soft" type="button" onClick={joinExistingTrip}>加入行程</button></div></section>}
         {!hasOutcome && entryMode !== null && <section className="conversation-card"><div className="conversation-intro"><span><Sparkles size={18} /></span><div><strong>{questionnaireStarted ? isParentDay ? '今天的期待' : '总体期待' : isParentDay ? '先填写今天的期待' : '先填写总体期待'}</strong><p>{questionnaireStarted ? `这段${isParentDay ? '今天的' : ''}期待会和全部回答一起整理，你仍可以继续修改。` : `填写后才能开始回答 ${visibleQuestionCount} 个问题。`}</p></div></div>
           <label className="field-label" htmlFor="goal">{isParentDay ? '今天，你最希望得到什么？' : '这趟旅行，你最希望得到什么？'}</label>
           <textarea id="goal" className="conversation-textarea" required value={description} onChange={(event) => { answersChanged(); setDescription(event.target.value) }} placeholder={isParentDay ? '例如：今天想轻松逛历史景点，也想吃一顿当地特色。' : '例如：和朋友去驻马店玩一天，想轻松一点，也想吃当地特色。'} />
           {!questionnaireStarted && <div className="goal-start-actions"><span className={description.trim() ? 'is-ready' : ''} role="status">{description.trim() ? `${isParentDay ? '今天的' : '总体'}期待已填写，可以开始。` : `请先填写${isParentDay ? '今天的期待' : '总体期待'}。`}</span><button aria-controls="trip-questionnaire" className="button button--primary" disabled={!description.trim()} type="button" onClick={startQuestionnaire}>开始回答 {visibleQuestionCount} 个问题 <ArrowRight size={18} /></button></div>}
           {questionnaireStarted && <section className="question-bubble" id="trip-questionnaire"><div className="question-bubble__meta"><span>问题 {visibleStepIndex + 1} / {visibleQuestionCount}</span><span>{Math.round(((visibleStepIndex + 1) / visibleQuestionCount) * 100)}%</span></div><h3>{currentQuestionLabel}</h3>
-            {step === 0 ? <><div className="question-field-cards question-field-cards--trip"><label><span><MapPin size={16} />目的城市</span><input value={tripFields.city} onChange={(event) => updateTripField('city', event.target.value)} /></label><label><span><CalendarDays size={16} />出发日期</span><input aria-invalid={Boolean(scheduleError)} disabled={Boolean(parentTripId)} min={today} type="date" value={tripFields.startDate} onFocus={() => setTemporalNow(new Date())} onChange={(event) => updateTripField('startDate', event.target.value)} />{parentTripId && <small>由多日行程统一设置</small>}</label><label><span><CalendarDays size={16} />结束日期</span><input aria-invalid={Boolean(scheduleError)} disabled={Boolean(parentTripId)} min={tripFields.startDate || today} type="date" value={tripFields.endDate} onFocus={() => setTemporalNow(new Date())} onChange={(event) => updateTripField('endDate', event.target.value)} />{parentTripId && <small>当前为单日子行程</small>}</label></div><p className="default-planning-window"><Clock3 size={16} /><span>{canContinueAsMultiDay ? `共 ${dayCount} 天，将进入多日行程并逐日规划。` : planningTimeWindow ? `系统默认按 ${planningTimeWindow.startTime}–${planningTimeWindow.endTime} 规划，整理完成后仍可调整。` : '今天的默认规划时间已经结束。'}</span></p>{scheduleError && <p className="form-error" role="alert">{scheduleError}</p>}</> : step === 1 ? <div className="question-field-cards"><label><span>组织者昵称</span><input value={organizerNickname} onChange={(event) => updateOrganizerName(event.target.value)} placeholder="例如：小明" /></label><label><span>同行人数</span><input type="number" min="2" max={MAX_PARTICIPANT_COUNT} step="1" inputMode="numeric" value={partyCount} onChange={(event) => updateParty(Number(event.target.value))} /><small>自定义填写，支持 2–20 人</small></label></div> : step === 2 ? <div className="question-field-cards question-field-cards--route"><label><span><MapPin size={16} />出发地</span><input value={routeFields.start} onChange={(event) => updateRouteField('start', event.target.value)} /></label><label><span><MapPin size={16} />结束地</span><input value={routeFields.end} onChange={(event) => updateRouteField('end', event.target.value)} /></label>{(entryMode === 'group' || Boolean(parentTripId)) && <label><span><WalletCards size={16} />{parentTripId ? '当日预算（多日行程已分配）' : '同行行程总预算'}</span><input type="number" min="0" inputMode="decimal" value={routeFields.budget} readOnly={Boolean(parentTripId)} onChange={(event) => updateRouteField('budget', event.target.value)} />{parentTripId && <small>自动沿用多日行程预算，无需重复填写</small>}</label>}</div> : step === 4 ? <div className="question-field-cards question-field-cards--assistance"><label><span><WalletCards size={16} />个人预算上限（元）</span><input inputMode="numeric" value={personalBudget} onChange={(event) => { setPersonalBudget(event.target.value); updateAssistance(assistanceMode, event.target.value) }} placeholder="例如：500" /></label><label className="care-mode-field"><span><HeartHandshake size={16} />关怀模式</span><div className="care-mode-select"><select value={assistanceMode} onChange={(event) => updateAssistance(event.target.value)}><option value="ORDINARY">普通出行</option><option value="PARENT_CHILD">亲子出行</option><option value="LOW_STAMINA">低体力出行</option><option value="MOBILITY_ASSISTANCE_BETA">行动辅助</option></select><ChevronDown aria-hidden="true" size={18} /></div></label></div> : <textarea className="conversation-textarea conversation-textarea--answer" value={answers[step]} onChange={(event) => updateAnswer(event.target.value)} placeholder="用自然语言回答即可，不用填表。" />}
+            {step === 0 ? <><div className="question-field-cards question-field-cards--trip"><label><span><MapPin size={16} />目的城市</span><input value={tripFields.city} onChange={(event) => updateTripField('city', event.target.value)} /></label><label><span><CalendarDays size={16} />出发日期</span><input aria-invalid={Boolean(scheduleError)} disabled={Boolean(parentTripId)} min={today} type="date" value={tripFields.startDate} onFocus={() => setTemporalNow(new Date())} onChange={(event) => updateTripField('startDate', event.target.value)} />{parentTripId && <small>由多日行程统一设置</small>}</label><label><span><CalendarDays size={16} />结束日期</span><input aria-invalid={Boolean(scheduleError)} disabled={Boolean(parentTripId)} min={tripFields.startDate || today} type="date" value={tripFields.endDate} onFocus={() => setTemporalNow(new Date())} onChange={(event) => updateTripField('endDate', event.target.value)} />{parentTripId && <small>当前为单日子行程</small>}</label></div><p className="default-planning-window"><Clock3 size={16} /><span>{canContinueAsMultiDay ? `共 ${dayCount} 天，将进入多日行程并逐日规划。` : planningTimeWindow ? `系统默认按 ${planningTimeWindow.startTime}–${planningTimeWindow.endTime} 规划，整理完成后仍可调整。` : '今天的默认规划时间已经结束。'}</span></p>{scheduleError && <p className="form-error" role="alert">{scheduleError}</p>}</> : step === 1 ? <div className="question-field-cards"><label><span>组织者昵称</span><input value={organizerNickname} onChange={(event) => updateOrganizerName(event.target.value)} placeholder="例如：小明" /></label><label><span>同行人数</span><input type="number" min="2" max={MAX_PARTICIPANT_COUNT} step="1" inputMode="numeric" value={partyCount} onChange={(event) => updateParty(Number(event.target.value))} /><small>自定义填写，支持 2–20 人</small></label></div> : step === 2 ? <div className="question-field-cards question-field-cards--route"><label><span><MapPin size={16} />出发地</span><input value={routeFields.start} onChange={(event) => updateRouteField('start', event.target.value)} /></label><label><span><MapPin size={16} />结束地</span><input value={routeFields.end} onChange={(event) => updateRouteField('end', event.target.value)} /></label>{(entryMode === 'group' || Boolean(parentTripId)) && <label><span><WalletCards size={16} />{parentTripId ? '当日预算（多日行程已分配）' : '同行行程总预算'}</span><input type="number" min="0" inputMode="decimal" value={routeFields.budget} readOnly={Boolean(parentTripId)} onChange={(event) => updateRouteField('budget', event.target.value)} />{parentTripId && <small>自动沿用多日行程预算，无需重复填写</small>}</label>}</div> : step === 4 ? <div className={`question-field-cards question-field-cards--assistance${usesInheritedDailyBudget ? ' question-field-cards--single-field' : ''}`}>{!usesInheritedDailyBudget && <label className="budget-limit-field"><span><WalletCards size={16} />个人预算上限（元）</span><input inputMode="numeric" value={personalBudget} onChange={(event) => { setPersonalBudget(event.target.value); updateAssistance(assistanceMode, event.target.value) }} placeholder="例如：500" /></label>}<label className="care-mode-field"><span><HeartHandshake size={16} />关怀模式</span><div className="care-mode-select"><select value={assistanceMode} onChange={(event) => updateAssistance(event.target.value)}><option value="ORDINARY">普通出行</option><option value="PARENT_CHILD">亲子出行</option><option value="LOW_STAMINA">低体力出行</option><option value="MOBILITY_ASSISTANCE_BETA">行动辅助</option></select><ChevronDown aria-hidden="true" size={18} /></div></label></div> : <textarea className="conversation-textarea conversation-textarea--answer" value={answers[step]} onChange={(event) => updateAnswer(event.target.value)} placeholder="用自然语言回答即可，不用填表。" />}
             <div className="planner-actions"><button className="button button--ghost" type="button" disabled={visibleStepIndex === 0} onClick={() => moveQuestion(-1)}>上一个问题</button>{!isLastQuestion ? <button className="button button--primary" type="button" disabled={!currentStepReady} onClick={() => moveQuestion(1)}>{step === 0 && canContinueAsMultiDay ? '继续创建多日行程' : '下一个问题'} <ArrowRight size={18} /></button> : <button className="button button--primary" type="button" disabled={!isReady || loading} onClick={() => void analyze()}>{loading ? '正在整理需求…' : '完成问答并智能整理'} <ArrowRight size={18} /></button>}</div>
           </section>}
         </section>}
-        {error && <p className="form-error" role="alert">{error}</p>}
+        {error && <p className="form-error" role="alert">{userFacingErrorMessage(error, '当前操作失败，请稍后重试。')}</p>}
         {fallback && <section ref={outcomeRef} className="confirmation-card fallback-review-card">
-          <div className="confirmation-card__head"><span><Sparkles size={20} /></span><div><strong>逐项核对 {visibleQuestionCount} 个回答</strong><p>本次模型服务不可用（{fallback.recognition.failureCode}），服务端没有创建 Trip。请确认每项内容准确；需要更正就返回对应问题，全部核对后可重新智能整理。</p></div></div>
+          <div className="confirmation-card__head"><span><Sparkles size={20} /></span><div><strong>逐项核对 {visibleQuestionCount} 个回答</strong></div></div>
           <ol className="fallback-review-list">
             {visibleQuestionIndexes.map((questionIndex, index) => {
               const item = fallback.fallback.items[questionIndex]
               return <li key={item.questionId} className={reviewedFallbackAnswers[questionIndex] ? 'is-reviewed' : ''}>
-              <div className="fallback-review-item__content"><span>问题 {index + 1}</span><strong>{questionLabel(questionIndex, entryMode)}</strong><p>{item.answer}</p></div>
+              <div className="fallback-review-item__content"><span>问题 {index + 1}</span><strong>{questionLabel(questionIndex, entryMode, usesInheritedDailyBudget)}</strong><p>{item.answer}</p></div>
               <div className="fallback-review-item__actions">
                 <button className="button button--soft" type="button" onClick={() => editAnswer(questionIndex)}>修改此项</button>
                 <label><input type="checkbox" checked={reviewedFallbackAnswers[questionIndex] ?? false} onChange={() => toggleFallbackReview(questionIndex)} /><span><Check size={15} />答案准确</span></label>
@@ -871,7 +902,7 @@ export function ConversationPlannerPage() {
             </li>})}
           </ol>
           <div className="fallback-review-footer">
-            <div><p role="status" aria-live="polite">已核对 {reviewedFallbackCount} / {visibleQuestionCount} 项。重新整理成功后会显示整理结果，在确认资料前仍不会调用 Provider 或规划。</p>{fallbackReviewNotice && <p className="fallback-review-notice" role="alert">{fallbackReviewNotice}</p>}</div>
+            <div><p role="status" aria-live="polite">已核对 {reviewedFallbackCount} / {visibleQuestionCount} 项。重新整理成功后会显示结果，确认资料前不会生成路线方案。</p>{fallbackReviewNotice && <p className="fallback-review-notice" role="alert">{userFacingErrorMessage(fallbackReviewNotice, '智能整理暂不可用，请稍后重试。')}</p>}</div>
             <button className="button button--primary" type="button" disabled={loading} onClick={() => void retryAfterFallbackReview()}>{loading ? '正在重新整理…' : fallbackReviewComplete ? fallbackReviewNotice ? '再次尝试智能整理' : '全部已核对，重新智能整理' : `先勾选剩余 ${visibleQuestionCount - reviewedFallbackCount} 项`} <ArrowRight size={18} /></button>
           </div>
         </section>}
@@ -881,13 +912,13 @@ export function ConversationPlannerPage() {
           {!collaboration && <button className="button button--primary confirmation-primary-action" type="button" disabled={refreshingCollaboration} onClick={() => void refreshCollaborationNow()}>{refreshingCollaboration ? '正在准备下一步…' : '继续准备推荐方案'} <RefreshCw className={refreshingCollaboration ? 'is-spinning' : ''} size={17} /></button>}
           <ul className="confirmation-grid">{[['城市', preview?.cityName], ['日期', preview?.travelDate], ['时间', `${preview?.startTime ?? '未识别'} 至 ${preview?.endTime ?? '未识别'}`], ['起终点', `${preview?.startLocationText ?? '未识别'} → ${preview?.endLocationText ?? '未识别'}`], ['预算', preview?.budgetCents === null || preview?.budgetCents === undefined ? '未识别' : `¥${preview.budgetCents / 100}`], ['兴趣', previewParticipant?.interests.join('、') || '未识别']].map(([label, value]) => <li key={label}><strong>{label}</strong><span>{value}</span></li>)}</ul>
           {!organizerConfirmed && <section className="planning-time-editor" aria-labelledby="planning-time-editor-title"><div className="planning-time-editor__summary"><span><Clock3 size={18} /></span><div><strong id="planning-time-editor-title">每日规划时间</strong><p>默认按 08:30–21:00 安排；当天临时创建时会避开已经过去的时间。</p></div>{!timeEditorOpen && <button className="button button--soft" type="button" disabled={loading} onClick={openTimeEditor}>调整时间</button>}</div>{timeEditorOpen && <div className="planning-time-editor__form"><label>开始时间<input aria-invalid={Boolean(timeDraftError)} type="time" value={timeDraft.startTime} onFocus={() => setTemporalNow(new Date())} onChange={(event) => setTimeDraft((current) => ({ ...current, startTime: event.target.value }))} /></label><span>至</span><label>结束时间<input aria-invalid={Boolean(timeDraftError)} min={timeDraft.startTime} type="time" value={timeDraft.endTime} onFocus={() => setTemporalNow(new Date())} onChange={(event) => setTimeDraft((current) => ({ ...current, endTime: event.target.value }))} /></label><div><button className="button button--ghost" type="button" disabled={loading} onClick={() => setTimeEditorOpen(false)}>取消</button><button className="button button--primary" type="button" disabled={loading || Boolean(timeDraftError)} onClick={() => void applyAdjustedTime()}>{loading ? '正在重新整理…' : '应用并重新整理'}</button></div>{timeDraftError && <p className="form-error" role="alert">{timeDraftError}</p>}</div>}</section>}
-          {!organizerConfirmed && <section className="confirmation-edit-panel"><div><strong>需要调整信息？</strong><p>选择对应内容返回修改，其他已填写信息会保留。</p></div><div className="confirmation-edit-grid">{visibleQuestionIndexes.map((questionIndex, index) => <button type="button" key={questions[questionIndex][0]} onClick={() => editAnswer(questionIndex)}><span>{index + 1}</span><strong>{questionEditLabels[questionIndex]}</strong><small>点击修改</small></button>)}</div></section>}
+          {!organizerConfirmed && <section className="confirmation-edit-panel"><div><strong>需要调整信息？</strong><p>选择对应内容返回修改，其他已填写信息会保留。</p></div><div className="confirmation-edit-grid">{visibleQuestionIndexes.map((questionIndex, index) => <button type="button" key={questions[questionIndex][0]} onClick={() => editAnswer(questionIndex)}><span>{index + 1}</span><strong>{usesInheritedDailyBudget && questionIndex === 4 ? '关怀需求' : questionEditLabels[questionIndex]}</strong><small>点击修改</small></button>)}</div></section>}
           {collaboration && <div className="draft-confirmation"><div className="draft-confirmation__heading draft-confirmation__heading--with-action"><span>{hasMemberParticipants ? <UsersRound size={18} /> : <Check size={18} />}</span><div><strong>{hasMemberParticipants ? '协作进度' : '确认进度'}</strong><p role="status" aria-live="polite">{collaboration.progress.confirmedCount} / {collaboration.progress.expectedCount} 位成员已确认 · {collaborationStatusLabel(collaboration.status)}</p></div><button className="collaboration-refresh-button" type="button" disabled={refreshingCollaboration} onClick={() => void refreshCollaborationNow()}><RefreshCw className={refreshingCollaboration ? 'is-spinning' : ''} size={16} />{refreshingCollaboration ? '正在刷新' : '刷新状态'}</button></div>
-            {collaboration.changeProposals.length > 0 && <section className="organizer-proposal-card"><div className="organizer-proposal-card__head"><div><strong>成员修改建议</strong><p>批准后立即形成新的共同安排并要求全员重新确认；拒绝后继续执行原计划。</p></div><span>{collaboration.changeProposals.filter((item) => item.status === 'PENDING').length} 条待审核</span></div><ol className="organizer-proposal-list">{[...collaboration.changeProposals].reverse().map((item) => { const member = collaboration.participants.find((participant) => participant.participantId === item.participantId); const labels: Record<string, string> = { 'trip.cityName': '目的城市', 'trip.travelDate': '出行日期', 'trip.startTime': '开始时间', 'trip.endTime': '结束时间', 'trip.startLocationText': '出发地', 'trip.endLocationText': '结束地', 'trip.budgetCents': '同行行程总预算' }; const displayValue = item.fieldPath === 'trip.budgetCents' && typeof item.proposedValue === 'number' ? `¥${item.proposedValue / 100}` : String(item.proposedValue); return <li key={item.proposalId}><div className="organizer-proposal-list__content"><span>{member?.memberKey ?? '成员'} 建议修改“{labels[item.fieldPath] ?? item.fieldPath}”</span><strong>{displayValue}</strong><p>{item.reason}</p></div>{item.status === 'PENDING' ? <div className="organizer-proposal-list__actions"><button className="button button--soft" type="button" disabled={loading} onClick={() => void reviewChangeProposal(item.proposalId, 'REJECT')}>拒绝并保留原计划</button><button className="button button--primary" type="button" disabled={loading} onClick={() => void reviewChangeProposal(item.proposalId, 'APPROVE')}>批准并执行</button></div> : <em className={`proposal-status proposal-status--${item.status.toLowerCase()}`}>{item.status === 'APPROVED' ? '已批准并执行' : '已拒绝，原计划不变'}</em>}</li>})}</ol></section>}
+          {collaboration.changeProposals.length > 0 && <section className="organizer-proposal-card"><div className="organizer-proposal-card__head"><div><strong>成员修改建议</strong><p>批准后立即形成新的共同安排并要求全员重新确认；拒绝后继续执行原计划。</p></div><span>{collaboration.changeProposals.filter((item) => item.status === 'PENDING').length} 条待审核</span></div><ol className="organizer-proposal-list">{[...collaboration.changeProposals].reverse().map((item) => { const member = collaboration.participants.find((participant) => participant.participantId === item.participantId); const labels: Record<string, string> = { 'trip.cityName': '目的城市', 'trip.travelDate': '出行日期', 'trip.startTime': '开始时间', 'trip.endTime': '结束时间', 'trip.startLocationText': '出发地', 'trip.endLocationText': '结束地', 'trip.budgetCents': '同行行程总预算' }; const displayValue = item.fieldPath === 'trip.budgetCents' && typeof item.proposedValue === 'number' ? `¥${item.proposedValue / 100}` : String(item.proposedValue); return <li key={item.proposalId}><div className="organizer-proposal-list__content"><span>{memberLabel(member?.memberKey)} 建议修改“{labels[item.fieldPath] ?? '共同安排信息'}”</span><strong>{displayValue}</strong><p>{item.reason}</p></div>{item.status === 'PENDING' ? <div className="organizer-proposal-list__actions"><button className="button button--soft" type="button" disabled={loading} onClick={() => void reviewChangeProposal(item.proposalId, 'REJECT')}>拒绝并保留原计划</button><button className="button button--primary" type="button" disabled={loading} onClick={() => void reviewChangeProposal(item.proposalId, 'APPROVE')}>批准并执行</button></div> : <em className={`proposal-status proposal-status--${item.status.toLowerCase()}`}>{item.status === 'APPROVED' ? '已批准并执行' : '已拒绝，原计划不变'}</em>}</li>})}</ol></section>}
             <ConflictReviewPanel state={collaboration} busy={loading} onResolve={(itemId, relaxationId) => void resolveConflict(itemId, relaxationId)} />
           </div>}
           {collaboration && hasMemberParticipants && links.length === 0 && <div className="invite-card invite-card--pending"><strong>成员邀请入口</strong><p>{!organizerConfirmed ? '点击上方“确认组织者资料并生成成员邀请链接”，生成后成员可直接打开或复制自己的专属链接。' : needsInvitations ? '点击上方“生成成员邀请链接”，生成后成员可直接打开或复制自己的专属链接。' : '邀请已创建，但当前标签页没有可展示的链接密钥。请返回创建页面重新发起一趟多人行程。'}</p></div>}
-          {links.length > 0 && <div className="invite-card"><strong>成员邀请链接</strong><p>每个链接只对应一名成员，在该成员确认资料前可以重复打开。再次打开会生成新会话，并让该成员上一次打开的旧标签页失效。</p>{links.map((item, index) => <div className="invite-row" key={item.invitationId}><span>成员 {index + 1}</span><code>{item.link}</code><div className="invite-row__actions"><a className="button button--soft" href={item.link}><ArrowRight size={14} />进入成员页</a><button type="button" className="button button--soft" onClick={() => void navigator.clipboard.writeText(item.link)}><Copy size={14} />复制</button></div></div>)}</div>}
+          {links.length > 0 && <div className="invite-card"><strong>成员邀请链接</strong><p>每个链接只对应一名成员，在该成员确认资料前可以重复打开。再次打开会生成新会话，并让该成员上一次打开的旧标签页失效。</p>{links.map((item, index) => <div className="invite-row" key={item.invitationId}><span>成员 {index + 1}</span><code>{item.link}</code><div className="invite-row__actions"><button type="button" className="button button--soft" onClick={() => void navigator.clipboard.writeText(item.link)}><Copy size={14} />复制</button></div></div>)}</div>}
           {collaboration && canEnterRecommendation(collaboration) && <button className="button button--primary" type="button" onClick={() => enterRecommendation(collaboration)}>生成并查看推荐方案 <ArrowRight size={18} /></button>}
         </section>}
       </section>

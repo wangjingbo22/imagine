@@ -236,8 +236,8 @@ test('Workspace uses direct deterministic Plan V2 controls and blocks an empty s
     'utf8',
   )
 
-  assert.match(source, /selectExecutionAdjustment\('LATE', minutes\)/)
-  assert.match(source, /selectExecutionAdjustment\('FATIGUE', level\)/)
+  assert.match(source, /selectLateAdjustment\(minutes\)/)
+  assert.doesNotMatch(source, /selectExecutionAdjustment|疲劳程度|>疲劳<\/button>/)
   assert.match(source, /aria-label="自定义迟到分钟数"/)
   assert.doesNotMatch(source, /tripApi\.parseExecutionAdjustment/)
   assert.doesNotMatch(source, /识别自定义描述/)

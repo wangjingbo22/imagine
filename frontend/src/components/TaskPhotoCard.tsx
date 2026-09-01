@@ -1,6 +1,7 @@
 import { Camera, ImagePlus, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { request } from '../api/client'
+import { userFacingErrorMessage } from '../utils/userFacingError'
 
 type Media = { mediaId: string; taskId: string; dataUrl: string; mimeType: string; byteSize: number; createdAt: string }
 
@@ -22,5 +23,5 @@ export function TaskPhotoCard({ tripId, taskId }: { tripId: string; taskId: stri
   useEffect(() => { void request<Media | null>(`/api/v2/trips/${tripId}/tasks/${taskId}/media`).then((item) => setMedia(item.data)).catch(() => undefined) }, [taskId, tripId])
   async function select(file?: File) { if (!file) return; setBusy(true); setError(''); try { const photo = await reencode(file); const result = await request<Media>(`/api/v2/trips/${tripId}/tasks/${taskId}/media`, { method: 'POST', body: JSON.stringify(photo) }); setMedia(result.data) } catch (caught) { setError(caught instanceof Error ? caught.message : '照片处理失败，不影响完成任务。') } finally { setBusy(false) } }
   async function remove() { setBusy(true); try { await request(`/api/v2/trips/${tripId}/tasks/${taskId}/media`, { method: 'DELETE' }); setMedia(null) } catch (caught) { setError(caught instanceof Error ? caught.message : '删除失败。') } finally { setBusy(false) } }
-  return <section className="task-photo-card"><div><Camera size={18} /><span><strong>这一站留张照片</strong><small>将压缩至 1.5MB 以下并移除 EXIF；每站仅保留一张。</small></span></div>{media ? <figure><img src={media.dataUrl} alt="当前任务照片" /><figcaption>{Math.ceil(media.byteSize / 1024)} KB <button type="button" disabled={busy} onClick={() => void remove()}><Trash2 size={14} />删除</button></figcaption></figure> : <button className="button button--soft" type="button" disabled={busy} onClick={() => input.current?.click()}><ImagePlus size={16} />{busy ? '正在处理…' : '选择照片'}</button>}<input ref={input} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void select(event.target.files?.[0])} />{error && <p className="media-error">{error}</p>}</section>
+  return <section className="task-photo-card"><div><Camera size={18} /><span><strong>这一站留张照片</strong><small>将压缩至 1.5MB 以下并移除 EXIF；每站仅保留一张。</small></span></div>{media ? <figure><img src={media.dataUrl} alt="当前任务照片" /><figcaption>{Math.ceil(media.byteSize / 1024)} KB <button type="button" disabled={busy} onClick={() => void remove()}><Trash2 size={14} />删除</button></figcaption></figure> : <button className="button button--soft" type="button" disabled={busy} onClick={() => input.current?.click()}><ImagePlus size={16} />{busy ? '正在处理…' : '选择照片'}</button>}<input ref={input} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void select(event.target.files?.[0])} />{error && <p className="media-error">{userFacingErrorMessage(error, '照片操作失败，请稍后重试。')}</p>}</section>
 }

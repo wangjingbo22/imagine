@@ -8,11 +8,12 @@ import {
 import { AppShell } from '../components/AppShell'
 import { safeReturnPath } from '../services/accountReturnPath'
 import { useAccountSession } from '../session/useAccountSession'
+import { userFacingErrorMessage } from '../utils/userFacingError'
 
 type AccountMode = 'login' | 'register'
 
 function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback
+  return userFacingErrorMessage(error, fallback)
 }
 
 export function AccountPage() {
@@ -85,7 +86,7 @@ export function AccountPage() {
     <AppShell compact>
       <main className="account-layout">
         <section className="account-intro">
-          <p className="section-kicker">YOUR JOURNEY</p>
+          <p className="section-kicker">你的旅程</p>
           <h1>{user ? '账户已登录。' : '登录后开始规划你的旅程。'}</h1>
           <p>登录后绑定模型与 API Key，即可开始创建你的行程。</p>
         </section>
@@ -95,7 +96,7 @@ export function AccountPage() {
             <div className="account-panel__heading">
               <div className="account-avatar"><UserRound size={22} /></div>
               <div>
-                <p className="section-kicker">SIGNED IN</p>
+                <p className="section-kicker">已登录</p>
                 <h2>{user.email}</h2>
               </div>
             </div>

@@ -206,8 +206,8 @@ export function confirmRecommendationSelection(
   bundle: RecommendationBundle,
   selectedTasks?: readonly RecommendationCandidate[],
 ): ConfirmedRecommendationSelection {
-  const normalizedTripId = requireOpaqueId(tripId, 'tripId')
-  const factSetId = requireOpaqueId(bundle.factSetId, 'factSetId')
+  const normalizedTripId = requireOpaqueId(tripId, '行程信息')
+  const factSetId = requireOpaqueId(bundle.factSetId, '推荐核验信息')
   const providerFactDigest = requireDigest(bundle.providerFactDigest)
   const plan = bundle.trustedPlan
   if (!plan) throw new Error('服务端尚未生成推荐方案，不能进入路线规划。')
@@ -225,8 +225,8 @@ export function confirmRecommendationSelection(
   const seenFactRefs = new Set<string>()
   const seenPlaceIds = new Set<string>()
   const selectedPlaces = tasks.map((task) => {
-    const factRefId = requireOpaqueId(task.factRefId, 'FactRef')
-    const placeId = requireOpaqueId(task.placeId, 'Provider 地点 ID')
+    const factRefId = requireOpaqueId(task.factRefId, '推荐地点信息')
+    const placeId = requireOpaqueId(task.placeId, '地点信息')
     if (seenFactRefs.has(factRefId) || seenPlaceIds.has(placeId)) {
       throw new Error('推荐方案包含重复地点，请更换后再确认。')
     }
@@ -294,7 +294,7 @@ export function assertProviderFactSetMatchesSelection(
     summary.factSetId !== selection.factSetId ||
     summary.providerFactDigest !== selection.providerFactDigest
   ) {
-    throw new Error('已确认推荐与服务端 FactRef 快照不一致，请刷新后重新确认。')
+    throw new Error('已确认推荐与最新地点信息不一致，请刷新后重新确认。')
   }
   const references = new Map(summary.references.map((item) => [item.factRefId, item]))
   for (const selected of selection.selectedPlaces) {
@@ -306,7 +306,7 @@ export function assertProviderFactSetMatchesSelection(
       !trustedSourceStatuses.has(reference.sourceStatus) ||
       reference.isStale
     ) {
-      throw new Error(`FactRef ${selected.factRefId} 已失效，请刷新后重新确认。`)
+      throw new Error('某个推荐地点的信息已失效，请刷新后重新确认。')
     }
   }
 }
@@ -322,7 +322,7 @@ export function selectedPlacesFromSignedFactSet(
     factSet.factSetId !== selection.factSetId ||
     factSet.providerFactDigest !== selection.providerFactDigest
   ) {
-    throw new Error('已确认推荐与服务端 FactRef 地点快照不一致，请刷新后重新确认。')
+    throw new Error('已确认推荐与最新地点信息不一致，请刷新后重新确认。')
   }
   const payloadByFactRef = new Map(
     factSet.places.map((item) => [item.factRefId, item]),
@@ -337,7 +337,7 @@ export function selectedPlacesFromSignedFactSet(
       !trustedSourceStatuses.has(payload.place.provenance.sourceStatus) ||
       payload.place.provenance.isStale
     ) {
-      throw new Error(`FactRef ${selected.factRefId} 的签发地点已失效，请刷新后重新确认。`)
+      throw new Error('某个推荐地点的信息已失效，请刷新后重新确认。')
     }
     return payload.place
   })

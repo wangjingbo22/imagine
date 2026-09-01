@@ -2,9 +2,9 @@ import { AlertTriangle, CheckCircle2, ShieldCheck, UserRound } from 'lucide-reac
 import type { CollaborationAggregate, CollaborationIssue } from '../domain/collaboration'
 import {
   organizerRelaxations,
-  participantIdsForIssue,
   participantRelaxations,
 } from '../domain/collaboration'
+import { userFacingErrorMessage } from '../utils/userFacingError'
 
 type ConflictReviewPanelProps = {
   state: CollaborationAggregate
@@ -25,7 +25,6 @@ function IssueCard({
 }) {
   const organizerOptions = organizerRelaxations(issue)
   const memberOptions = participantRelaxations(issue)
-  const participantIds = participantIdsForIssue(issue)
   const sharedBudgetOption = issue.ruleId === SHARED_BUDGET_CONFLICT_RULE
     ? organizerOptions[0]
     : undefined
@@ -45,16 +44,9 @@ function IssueCard({
     <header>
       <span className="conflict-review__icon" aria-hidden="true"><AlertTriangle size={18} /></span>
       <div>
-        <h4 id={`issue-${issue.itemId}`}>{issue.reason}</h4>
-        <code>{issue.ruleId}</code>
+        <h4 id={`issue-${issue.itemId}`}>{userFacingErrorMessage(issue.reason, '此项资料存在冲突，请选择一种处理方式。')}</h4>
       </div>
     </header>
-    <dl className="conflict-review__facts">
-      <div><dt>涉及成员 participantId</dt><dd>{participantIds.length > 0
-        ? participantIds.map((participantId) => <code key={participantId}>{participantId}</code>)
-        : <span>共享行程字段（由组织者处理）</span>}</dd></div>
-      <div><dt>字段</dt><dd><code>{issue.fieldPath}</code></dd></div>
-    </dl>
     <div className="conflict-review__actions" aria-label="允许的放宽方式">
       {organizerOptions.map((option) => <button
         className="button button--soft"

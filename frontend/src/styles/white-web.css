@@ -3660,21 +3660,15 @@ select:focus-visible {
   font-weight: 800;
 }
 
-.adjustment-segmented,
 .adjustment-choice-grid {
   display: grid;
   gap: 7px;
-}
-
-.adjustment-segmented {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .adjustment-choice-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.adjustment-segmented button,
 .adjustment-choice-grid button {
   min-width: 0;
   min-height: 44px;
@@ -3692,13 +3686,11 @@ select:focus-visible {
   transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
 }
 
-.adjustment-segmented button:hover:not(:disabled),
 .adjustment-choice-grid button:hover:not(:disabled) {
   border-color: #7ca5ef;
   background: #f3f7ff;
 }
 
-.adjustment-segmented button.is-selected,
 .adjustment-choice-grid button.is-selected {
   color: #174ca8;
   border-color: #6f9cf0;
@@ -3706,14 +3698,12 @@ select:focus-visible {
   box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.12);
 }
 
-.adjustment-segmented button:focus-visible,
 .adjustment-choice-grid button:focus-visible,
 .adjustment-number-entry input:focus-visible {
   outline: 3px solid rgba(37, 99, 235, 0.18);
   outline-offset: 2px;
 }
 
-.adjustment-segmented button:disabled,
 .adjustment-choice-grid button:disabled {
   cursor: wait;
   opacity: 0.62;
