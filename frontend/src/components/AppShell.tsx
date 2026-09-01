@@ -1,4 +1,4 @@
-import { ArrowLeft, CircleHelp, Sparkles } from 'lucide-react'
+import { ArrowLeft, CircleHelp, UserRound } from 'lucide-react'
 import type { PropsWithChildren } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { BrandMark } from './BrandMark'
@@ -31,9 +31,9 @@ export function AppShell({ children, compact = false }: AppShellProps) {
             <button className="icon-button" type="button" aria-label="帮助">
               <CircleHelp size={19} />
             </button>
-            <span className="avatar">
-              <Sparkles size={15} />
-            </span>
+            <Link className="avatar" to="/account" aria-label="账户" title="账户">
+              <UserRound size={16} />
+            </Link>
           </nav>
         </div>
       </header>

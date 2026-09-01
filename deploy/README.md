@@ -27,9 +27,10 @@ Render 会为两个服务自动签发 HTTPS 证书，并为每个服务提供 `o
    `BAILIAN_API_KEY`，保存并手动重新部署 API。
 4. 打开 Web 服务的 `https://<web-service-name>.onrender.com` 地址。
 
-Render 的临时文件系统会在重新部署或实例替换时丢失 SQLite 数据。需要保留行程、
-执行记录和高德缓存时，请在 API 服务添加一个挂载到 `/app/data` 的 Persistent Disk；
-然后保持 `PLAN_VERSION_DB_PATH` 与 `AMAP_CACHE_DB_PATH` 的默认配置不变。
+Render 的临时文件系统会在重新部署或实例替换时丢失 SQLite 数据。仓库的 Render Blueprint
+已为 API 服务声明一个挂载到 `/app/data` 的 1 GB Persistent Disk；账户库路径明确为
+`/app/data/account.sqlite3`，行程库与高德缓存也使用同一持久目录。创建 Blueprint 时无需
+再手动补挂载，但应确认 Render 服务仍保留该磁盘配置。
 
 S2-T032 当前仍为 `LOCAL_AUTOMATION_PASS / PUBLIC_UAT_NOT_RUN`。真实高德/百炼、三浏览器成员会话、GPS/相机权限和 375px/768px 公网连续链路，必须按仓库中的专项验收文档单独留证。
 

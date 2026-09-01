@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from app.api.arrival_decision_routes import router as arrival_decision_router
 from app.api.arrival_evidence_routes import router as arrival_evidence_router
 from app.api.arrival_execution_routes import router as arrival_execution_router
+from app.api.account_routes import router as account_router
 from app.api.routes import router
 from app.api.execution_adjustment_routes import router as execution_adjustment_router
 from app.api.execution_replan_routes import router as execution_replan_router
@@ -25,6 +26,7 @@ from app.api.parent_trip_routes import router as parent_trip_router
 from app.application.arrival_decision_service import ArrivalDecisionService
 from app.application.arrival_evidence_service import ArrivalEvidenceService
 from app.application.arrival_execution_service import ArrivalExecutionService
+from app.application.account_service import AccountService
 from app.application.collaboration_service import CollaborationService
 from app.application.collaboration_planning_bridge import (
     CollaborationPlanningBridge,
@@ -60,6 +62,7 @@ from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.domain.models import ErrorResponse
 from app.infrastructure.amap import AmapClient
+from app.infrastructure.account_store import SqliteAccountRepository
 from app.infrastructure.arrival_evidence_store import (
     SqliteArrivalEvidenceRepository,
 )
@@ -92,11 +95,16 @@ from app.services.replanning import SuffixPlanner
 
 def _requires_no_store(request: Request) -> bool:
     path = request.url.path
-    return path in {
-        "/api/v2/trips/conversations",
-        "/api/v2/member-session/conversation",
-        "/api/v2/member-session/confirm",
-    } or (path.startswith("/api/v2/trips/") and path.endswith("/confirm"))
+    return (
+        path == "/api/v1/account"
+        or path.startswith("/api/v1/account/")
+        or path in {
+            "/api/v2/trips/conversations",
+            "/api/v2/member-session/conversation",
+            "/api/v2/member-session/confirm",
+        }
+        or (path.startswith("/api/v2/trips/") and path.endswith("/confirm"))
+    )
 
 
 SWAGGER_CHINESE_SCRIPT = """
@@ -201,8 +209,13 @@ def create_app(
     trip_understanding_gateway: TripUnderstandingGateway | None = None,
     collaboration_repository: SqliteCollaborationRepository | None = None,
     collaboration_readiness_guard: CollaborationReadinessGuard | None = None,
+    account_service: AccountService | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
+    resolved_account_service = account_service or AccountService(
+        SqliteAccountRepository(resolved_settings.account_session_db_path),
+        session_ttl_days=resolved_settings.account_session_ttl_days,
+    )
     managed_client: AmapClient | None = None
     managed_bailian_extractor: BailianTripDraftExtractor | None = None
     managed_candidate_selection_client: (
@@ -448,7 +461,7 @@ def create_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins=resolved_settings.cors_origins,
-        allow_credentials=False,
+        allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=[
             "Content-Type",
@@ -464,6 +477,7 @@ def create_app(
     )
     app.state.location_service = service
     app.state.settings = resolved_settings
+    app.state.account_service = resolved_account_service
     app.state.natural_language_parser = (
         "BAILIAN_CONFIGURED"
         if managed_bailian_extractor is not None
@@ -529,6 +543,7 @@ def create_app(
     app.include_router(arrival_decision_router)
     app.include_router(arrival_evidence_router)
     app.include_router(arrival_execution_router)
+    app.include_router(account_router)
     app.include_router(router)
     app.include_router(execution_adjustment_router)
     app.include_router(execution_replan_router)

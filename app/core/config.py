@@ -1,7 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,6 +44,10 @@ class Settings(BaseSettings):
         le=10,
     )
     plan_version_db_path: Path = Path("data/plan_versions.sqlite3")
+    account_session_db_path: Path = Path("data/account.sqlite3")
+    account_session_ttl_days: int = Field(default=14, ge=1, le=14)
+    app_environment: Literal["development", "test", "production"] = "development"
+    auth_cookie_secure: bool = False
     build_sha: str | None = Field(
         default=None,
         validation_alias=AliasChoices("BUILD_SHA", "RENDER_GIT_COMMIT"),
@@ -51,6 +56,12 @@ class Settings(BaseSettings):
         "http://localhost:5173,http://127.0.0.1:5173,"
         "http://localhost:5174,http://127.0.0.1:5174"
     )
+
+    @model_validator(mode="after")
+    def validate_production_cookie_security(self) -> "Settings":
+        if self.app_environment == "production" and not self.auth_cookie_secure:
+            raise ValueError("AUTH_COOKIE_SECURE must be true in production")
+        return self
 
     @property
     def cors_origins(self) -> list[str]:
