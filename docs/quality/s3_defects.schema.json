@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xingzhi.example/schemas/s3-defects.schema.json",
+  "title": "Sprint 3 defect register",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sprint", "updatedAt", "defects"],
+  "properties": {
+    "schemaVersion": {"const": "1.0"},
+    "sprint": {"const": "Sprint3"},
+    "updatedAt": {"type": "string", "format": "date"},
+    "defects": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/defect"}
+    }
+  },
+  "$defs": {
+    "defect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "severity", "status", "owner", "sourceTask", "evidence"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^S3-DEF-[0-9]{3,}$"},
+        "title": {"type": "string", "minLength": 1},
+        "severity": {"enum": ["P0", "P1", "P2", "P3"]},
+        "status": {"enum": ["OPEN", "IN_PROGRESS", "BLOCKED", "RESOLVED", "CLOSED"]},
+        "owner": {"type": "string", "minLength": 1},
+        "sourceTask": {"type": "string", "minLength": 1},
+        "evidence": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "CLOSED"}}},
+          "then": {"properties": {"evidence": {"minItems": 1}}}
+        }
+      ]
+    }
+  }
+}

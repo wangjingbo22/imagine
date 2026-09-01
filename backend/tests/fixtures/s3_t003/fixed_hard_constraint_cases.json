@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "1.0",
+  "sourceFixture": "../s2_t003/cases.json",
+  "fixedCaseNames": [
+    "one-person-ready",
+    "three-person-ready"
+  ]
+}

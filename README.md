@@ -190,11 +190,13 @@ VITE_USE_WORKFLOW_API=true
 
 ## 测试与质量
 
-在仓库根目录完成后端测试：
+在仓库根目录运行 S3-T003 后端质量门禁：
 
 ```powershell
-python -m pytest
+python tools/s3_t003_quality_gate.py
 ```
+
+该命令运行后端全量测试，检查固定硬约束样例零违规、规划/关怀/校验/预算/重规划五域覆盖率均不低于 75%，并阻断未关闭的 P0/P1。机器可读结果写入 `.quality-reports/s3-t003/`；日常聚焦调试仍可直接使用 `python -m pytest <test-path>`。
 
 再进入 `frontend`，运行前端测试、静态检查和生产构建：
 
@@ -249,7 +251,8 @@ T032 专项范围和验收边界见 [多人本地/公网验收说明](docs/testi
 - [ ] 故障降级与三城完整链、两城烟测
 - [ ] 多日 Schema
 - [x] 后端测试、前端 lint/build 基础 CI 配置
-- [ ] Sprint 2 自动化门禁、部署版本同步与答辩证据补齐
+- [x] S3-T003 后端全量测试、五域覆盖率、零硬冲突与 P0/P1 自动化门禁
+- [ ] 部署版本同步与答辩证据补齐
 
 ## 团队成员与迭代协作
 
@@ -280,6 +283,7 @@ T032 专项范围和验收边界见 [多人本地/公网验收说明](docs/testi
 - [S2-T032 多人公网闭环验收说明](docs/testing/s2_t032_multiplayer_public_acceptance.md)
 - [S2-T032 验收证据目录](docs/testing/evidence/s2_t032/README.md)
 - [迟到/疲劳重规划规则](docs/rules/s2_t021_t022_execution_replanning.md)
+- [S3-T003 质量门禁与 T002 接入说明](docs/quality/README.md)
 - [AI 使用说明](doc/ai_usage.md)
 
 ## 已知限制、安全说明与明确不做事项

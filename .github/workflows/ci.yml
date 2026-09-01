@@ -1,4 +1,4 @@
-name: Sprint 1 quality gate
+name: Sprint 3 quality gate
 
 on:
   push:
@@ -18,7 +18,17 @@ jobs:
           cache: pip
 
       - run: pip install -e ".[dev]"
-      - run: pytest
+      - name: Run S3-T003 backend quality gate
+        run: python tools/s3_t003_quality_gate.py
+
+      - name: Upload S3-T003 quality reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-t003-quality-reports
+          path: .quality-reports/s3-t003/
+          if-no-files-found: warn
+          retention-days: 14
 
       - uses: actions/setup-node@v4
         with:
