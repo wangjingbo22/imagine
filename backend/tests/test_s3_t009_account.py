@@ -107,7 +107,7 @@ async def test_register_creates_current_user_and_opaque_account_cookie(tmp_path:
     assert "account_session=" in set_cookie
     assert "HttpOnly" in set_cookie
     assert "SameSite=lax" in set_cookie
-    assert "Path=/api/v1/account" in set_cookie
+    assert "Path=/api" in set_cookie
     assert "Max-Age=1209600" in set_cookie
     assert "Cache-Control" in response.headers
 
@@ -124,6 +124,23 @@ async def test_register_creates_current_user_and_opaque_account_cookie(tmp_path:
     assert sessions[0][0] != response.cookies.get("account_session")
     assert len(sessions[0][0]) == 64
     assert sessions[0][2] is None
+
+
+@pytest.mark.asyncio
+async def test_secure_account_cookie_is_marked_secure(tmp_path: Path):
+    _, client = await _client(tmp_path, secure_cookie=True)
+    async with client:
+        response = await client.post(
+            "/api/v1/account/register",
+            json={
+                "email": "secure@example.com",
+                "password": PASSWORD,
+                "displayName": "Secure",
+            },
+        )
+
+    assert response.status_code == 200
+    assert "Secure" in response.headers["set-cookie"]
 
 
 @pytest.mark.asyncio
