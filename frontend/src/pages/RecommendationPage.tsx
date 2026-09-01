@@ -305,9 +305,15 @@ export function RecommendationPage() {
           </header>
 
           {loading && (
-            <p className="recommendation-loading" role="status">
-              <LoaderCircle className="spin-icon" size={18} /> 正在整理推荐地点…
-            </p>
+            <section className="recommendation-loading" role="status" aria-live="polite">
+              <div className="recommendation-loading__signal"><LoaderCircle className="spin-icon" size={19} /><span>LIVE ANALYSIS</span></div>
+              <div className="recommendation-loading__copy"><h2>正在编排行程候选</h2><p>系统正在校验地点、路线距离、时间窗口与关怀限制。</p></div>
+              <ol className="recommendation-loading__steps">
+                <li><span>01</span><strong>恢复已确认的出行事实</strong><i /></li>
+                <li><span>02</span><strong>筛选符合约束的地点候选</strong><i /></li>
+                <li><span>03</span><strong>计算路线与预算可行性</strong><i /></li>
+              </ol>
+            </section>
           )}
           {error && (
             <section className="draft-confirmation" role="alert">

@@ -4723,21 +4723,15 @@ select:focus-visible {
   .recommendation-actions .button { width: 100%; }
 }
 
-/* Pointer-aware grid: a restrained blue bloom follows desktop cursors. */
 .app-shell {
-  --grid-focus-x: -400px;
-  --grid-focus-y: -400px;
   background-image:
-    radial-gradient(260px circle at var(--grid-focus-x) var(--grid-focus-y), rgba(43, 126, 241, 0.16), transparent 70%),
     linear-gradient(rgba(23, 105, 224, 0.035) 1px, transparent 1px),
     linear-gradient(90deg, rgba(23, 105, 224, 0.035) 1px, transparent 1px);
-  background-size: auto, 28px 28px, 28px 28px;
-  transition: background-image 0.2s ease;
+  background-size: 28px 28px;
 }
 
 .app-shell--compact {
   background-image:
-    radial-gradient(260px circle at var(--grid-focus-x) var(--grid-focus-y), rgba(43, 126, 241, 0.13), transparent 70%),
     linear-gradient(rgba(23, 105, 224, 0.028) 1px, transparent 1px),
     linear-gradient(90deg, rgba(23, 105, 224, 0.028) 1px, transparent 1px);
 }

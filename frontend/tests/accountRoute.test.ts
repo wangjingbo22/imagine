@@ -40,6 +40,26 @@ test('model settings show the server error instead of masking failed API Key sto
   assert.match(page, /保存失败：\$\{saveErrorMessage\(error\)\}/)
 })
 
+test('recommendation loading presents staged analysis instead of an empty status area', async () => {
+  const page = await readFile(new URL('../src/pages/RecommendationPage.tsx', import.meta.url), 'utf8')
+  const styles = await readFile(new URL('../src/styles/future-system.css', import.meta.url), 'utf8')
+
+  assert.match(page, /LIVE ANALYSIS/)
+  assert.match(page, /正在编排行程候选/)
+  assert.match(page, /恢复已确认的出行事实/)
+  assert.match(page, /计算路线与预算可行性/)
+  assert.match(styles, /\.recommendation-loading__steps/)
+  assert.match(styles, /@keyframes recommendationScan/)
+})
+
+test('application shell has no pointer-tracking grid effect', async () => {
+  const shell = await readFile(new URL('../src/components/AppShell.tsx', import.meta.url), 'utf8')
+  const styles = await readFile(new URL('../src/styles/white-web.css', import.meta.url), 'utf8')
+
+  assert.doesNotMatch(shell, /onPointerMove|onPointerLeave|grid-focus/)
+  assert.doesNotMatch(styles, /grid-focus|Pointer-aware grid/)
+})
+
 test('account page provides authentication and profile actions through the shared session', async () => {
   const page = await readFile(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8')
 
