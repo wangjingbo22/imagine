@@ -29,8 +29,10 @@ from app.schemas.trip import (
     AssistanceProfile,
     CreateDayTrip,
     CreateSingleDayTrip,
+    CreateTwoDayTrip,
     Trip,
     TripStatus,
+    validate_two_day_trip_json,
 )
 from app.schemas.workflow import (
     ConstraintConfirmationResult,
@@ -80,6 +82,16 @@ class SqliteWorkflowRepository:
                     trip_json TEXT NOT NULL,
                     semantic_json TEXT NOT NULL,
                     confirmed_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS two_day_trip_snapshots (
+                    trip_id TEXT PRIMARY KEY,
+                    trip_json TEXT NOT NULL,
+                    semantic_json TEXT NOT NULL,
+                    saved_at TEXT NOT NULL
                 )
                 """
             )
@@ -324,6 +336,76 @@ class SqliteWorkflowRepository:
             flow_kind=TripFlowKind.COLLABORATION_V2,
             ignore_participant_id=False,
         )
+
+    @staticmethod
+    def _two_day_trip_semantic_json(trip: CreateTwoDayTrip) -> str:
+        payload = trip.model_dump(mode="json", by_alias=True)
+        return json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+    def save_two_day_trip_snapshot(
+        self,
+        trip: CreateTwoDayTrip,
+    ) -> CreateTwoDayTrip:
+        """Persist an isolated immutable two-day DRAFT snapshot."""
+
+        validated = validate_two_day_trip_json(trip.model_dump_json(by_alias=True))
+        trip_text = str(validated.trip_id)
+        trip_json = validated.model_dump_json(by_alias=True)
+        semantic_json = self._two_day_trip_semantic_json(validated)
+        saved_at = datetime.now(UTC).isoformat()
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT * FROM two_day_trip_snapshots WHERE trip_id = ?",
+                    (trip_text,),
+                ).fetchone()
+                if row is None:
+                    connection.execute(
+                        """
+                        INSERT INTO two_day_trip_snapshots (
+                            trip_id, trip_json, semantic_json, saved_at
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                        (trip_text, trip_json, semantic_json, saved_at),
+                    )
+                    row = connection.execute(
+                        "SELECT * FROM two_day_trip_snapshots WHERE trip_id = ?",
+                        (trip_text,),
+                    ).fetchone()
+                elif row["semantic_json"] != semantic_json:
+                    raise PlanStoreError(
+                        "TWO_DAY_TRIP_CONFLICT",
+                        "同一 tripId 已保存过不同的两日 Trip 内容，不允许覆盖",
+                    )
+                connection.execute("COMMIT")
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+
+        assert row is not None
+        return validate_two_day_trip_json(row["trip_json"])
+
+    def read_two_day_trip_snapshot(self, trip_id: UUID) -> CreateTwoDayTrip:
+        """Read one isolated two-day DRAFT snapshot."""
+
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT trip_json FROM two_day_trip_snapshots WHERE trip_id = ?",
+                (str(trip_id),),
+            ).fetchone()
+        if row is None:
+            raise PlanStoreError(
+                "TWO_DAY_TRIP_NOT_FOUND",
+                "未找到两日 Trip 快照",
+            )
+        return validate_two_day_trip_json(row["trip_json"])
 
     def require_confirmed_trip(
         self,

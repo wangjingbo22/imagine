@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date, time, timedelta
 from enum import Enum
 import re
 from typing import Annotated, Literal
@@ -232,8 +232,55 @@ class CreateSingleDayTrip(CreateDayTrip):
     days: list[TripDayInput] = Field(min_length=1, max_length=1)
 
 
+class CreateTwoDayTrip(Trip):
+    """The isolated two-day DRAFT snapshot contract."""
+
+    status: Literal["DRAFT"]
+    days: list[TripDayInput] = Field(min_length=2, max_length=2)
+
+
 def _normalized_preference(value: str) -> str:
     return normalize("NFKC", value).strip().casefold()
+
+
+def _validate_preference_policy(trip: Trip) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    for participant_index, participant in enumerate(trip.participants):
+        must_visit: dict[str, int] = {}
+        avoid_place: dict[str, int] = {}
+        for preference_index, preference in enumerate(participant.preferences):
+            preference_path = (
+                f"participants[{participant_index}].preferences[{preference_index}]"
+            )
+            expected_hard = preference.type is not PreferenceType.INTEREST
+            if preference.is_hard is not expected_hard:
+                issues.append(
+                    ValidationIssue(
+                        path=f"{preference_path}.isHard",
+                        code="invalid_preference_hardness",
+                        message="Preference hardness does not match its type",
+                    )
+                )
+
+            normalized_value = _normalized_preference(preference.value)
+            if preference.type is PreferenceType.MUST_VISIT:
+                must_visit[normalized_value] = preference_index
+            elif preference.type is PreferenceType.AVOID_PLACE:
+                avoid_place[normalized_value] = preference_index
+
+        for value in sorted(must_visit.keys() & avoid_place.keys()):
+            conflict_index = max(must_visit[value], avoid_place[value])
+            issues.append(
+                ValidationIssue(
+                    path=(
+                        f"participants[{participant_index}].preferences"
+                        f"[{conflict_index}].value"
+                    ),
+                    code="preference_conflict",
+                    message="A place cannot be both must-visit and avoid",
+                )
+            )
+    return issues
 
 
 def validate_single_day_policy(
@@ -289,42 +336,78 @@ def validate_single_day_policy(
             )
         )
 
-    for participant_index, participant in enumerate(trip.participants):
-        must_visit: dict[str, int] = {}
-        avoid_place: dict[str, int] = {}
-        for preference_index, preference in enumerate(participant.preferences):
-            preference_path = (
-                f"participants[{participant_index}].preferences[{preference_index}]"
+    issues.extend(_validate_preference_policy(trip))
+    return issues
+
+
+def validate_two_day_policy(trip: CreateTwoDayTrip) -> list[ValidationIssue]:
+    """Validate the cross-field rules for the isolated two-day contract."""
+
+    issues: list[ValidationIssue] = []
+    if trip.end_date != trip.start_date + timedelta(days=1):
+        issues.append(
+            ValidationIssue(
+                path="endDate",
+                code="non_consecutive_dates",
+                message="endDate must be the day after startDate for a two-day trip",
             )
-            expected_hard = preference.type is not PreferenceType.INTEREST
-            if preference.is_hard is not expected_hard:
+        )
+
+    expected_dates = (trip.start_date, trip.end_date)
+    day_indexes = [day.day_index for day in trip.days]
+    invalid_index_paths: set[str] = set()
+    for day_position, day in enumerate(trip.days):
+        index_path = f"days[{day_position}].dayIndex"
+        if day.day_index != day_position:
+            invalid_index_paths.add(index_path)
+            issues.append(
+                ValidationIssue(
+                    path=index_path,
+                    code="invalid_day_index",
+                    message="dayIndex must be 0 for the first day and 1 for the second day",
+                )
+            )
+
+        if day.date != expected_dates[day_position]:
+            issues.append(
+                ValidationIssue(
+                    path=f"days[{day_position}].date",
+                    code="date_mismatch",
+                    message="day date must match its corresponding trip boundary date",
+                )
+            )
+
+        if day.time_window.end <= day.time_window.start:
+            issues.append(
+                ValidationIssue(
+                    path=f"days[{day_position}].timeWindow.end",
+                    code="invalid_time_window",
+                    message="timeWindow.end must be later than timeWindow.start",
+                )
+            )
+
+        if day.daily_budget_cents > trip.total_budget_cents:
+            issues.append(
+                ValidationIssue(
+                    path=f"days[{day_position}].dailyBudgetCents",
+                    code="budget_exceeded",
+                    message="daily budget cannot exceed total budget",
+                )
+            )
+
+    if len(set(day_indexes)) != len(day_indexes):
+        for day_position in range(len(day_indexes)):
+            index_path = f"days[{day_position}].dayIndex"
+            if index_path not in invalid_index_paths:
                 issues.append(
                     ValidationIssue(
-                        path=f"{preference_path}.isHard",
-                        code="invalid_preference_hardness",
-                        message="Preference hardness does not match its type",
+                        path=index_path,
+                        code="invalid_day_index",
+                        message="dayIndex values must be unique",
                     )
                 )
 
-            normalized_value = _normalized_preference(preference.value)
-            if preference.type is PreferenceType.MUST_VISIT:
-                must_visit[normalized_value] = preference_index
-            elif preference.type is PreferenceType.AVOID_PLACE:
-                avoid_place[normalized_value] = preference_index
-
-        for value in sorted(must_visit.keys() & avoid_place.keys()):
-            conflict_index = max(must_visit[value], avoid_place[value])
-            issues.append(
-                ValidationIssue(
-                    path=(
-                        f"participants[{participant_index}].preferences"
-                        f"[{conflict_index}].value"
-                    ),
-                    code="preference_conflict",
-                    message="A place cannot be both must-visit and avoid",
-                )
-            )
-
+    issues.extend(_validate_preference_policy(trip))
     return issues
 
 
@@ -376,12 +459,27 @@ def validate_create_day_trip_json(raw: str | bytes) -> CreateDayTrip:
     return trip
 
 
+def validate_two_day_trip_json(raw: str | bytes) -> CreateTwoDayTrip:
+    """Parse and validate the isolated two-day DRAFT Trip contract."""
+
+    try:
+        trip = CreateTwoDayTrip.model_validate_json(raw, strict=True)
+    except ValidationError as exc:
+        raise TripSchemaError(issues_from_pydantic(exc.errors())) from exc
+
+    policy_issues = validate_two_day_policy(trip)
+    if policy_issues:
+        raise TripSchemaError(policy_issues)
+    return trip
+
+
 __all__ = [
     "AssistanceProfile",
     "AssistanceType",
     "CityContext",
     "CreateDayTrip",
     "CreateSingleDayTrip",
+    "CreateTwoDayTrip",
     "GeoPoint",
     "NapWindow",
     "Participant",
@@ -397,5 +495,7 @@ __all__ = [
     "WalkLimits",
     "validate_single_day_policy",
     "validate_create_day_trip_json",
+    "validate_two_day_policy",
+    "validate_two_day_trip_json",
     "validate_trip_json",
 ]
