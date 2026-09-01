@@ -59,6 +59,7 @@ export interface AmapPlanResult {
   evidence: LocationEvidence
   plan: PlanSnapshot
   candidateRequest: CandidatePlanRequest
+  candidatePreview: CandidatePlanPreview | null
   registeredPlan: StoredPlanVersion | null
   planningIssue: PlanningIssue | null
   knownCostCents: number
@@ -687,6 +688,23 @@ export function candidatePreviewIssue(preview: CandidatePlanPreview): PlanningIs
   }
 }
 
+export function candidatePreviewConfirmationNotice(preview: CandidatePlanPreview | null) {
+  if (preview?.validationStatus !== 'NEEDS_CONFIRMATION') {
+    return null
+  }
+  const details = [...new Set([
+    ...preview.warnings.map((warning) => warning.message.trim()),
+    ...preview.constraintResults
+      .filter((result) => result.status === 'NEEDS_CONFIRMATION')
+      .map((result) => result.suggestion?.trim() ?? ''),
+  ].filter(Boolean))]
+  return {
+    summary: '候选计划已通过预览校验，仍需核对计划事实。',
+    details,
+    actionLabel: '继续核对计划事实',
+  }
+}
+
 export function canAcceptCurrentCandidate({
   hasCandidateRequest,
   validationStatus,
@@ -878,6 +896,7 @@ async function createAmapPlan(
     },
     plan,
     candidateRequest,
+    candidatePreview,
     registeredPlan: null,
     planningIssue: candidatePreviewIssue(candidatePreview),
     knownCostCents: plan.totalCostCents,

@@ -33,6 +33,7 @@ import { RouteOverview } from '../components/RouteOverview'
 import { SegmentRouteModePicker } from '../components/SegmentRouteModePicker'
 import { TaskPhotoCard } from '../components/TaskPhotoCard'
 import type {
+  CandidatePlanPreview,
   CandidatePlanRequest,
   CandidatePlanReview,
   CandidateReviewItem,
@@ -61,6 +62,7 @@ import {
   acceptInitialCandidatePlan,
   canAcceptCurrentCandidate,
   canReplaceCandidateSegment,
+  candidatePreviewConfirmationNotice,
   loadAmapPlan,
   replaceAmapPlanSegment,
   type AmapPlanResult,
@@ -369,6 +371,9 @@ export function WorkspacePage() {
   const [candidateRequest, setCandidateRequest] = useState<CandidatePlanRequest | null>(
     navigationState?.amapPlanResult?.candidateRequest ?? null,
   )
+  const [candidatePreview, setCandidatePreview] = useState<CandidatePlanPreview | null>(
+    navigationState?.amapPlanResult?.candidatePreview ?? null,
+  )
   const planningDraft = draft ?? (
     candidateRequest ? restoreDraftFromPlanningFacts(candidateRequest) : null
   )
@@ -413,6 +418,7 @@ export function WorkspacePage() {
       setPlanningTripSnapshot(current.tripSnapshot)
       setRestoredPlan(display)
       setPersistedPlanId(current.planId)
+      setCandidatePreview(null)
       if (current.version === 2) {
         setExecutionAdjustmentCount(1)
       }
@@ -458,6 +464,7 @@ export function WorkspacePage() {
         setRestoredPlan(toDisplayPlan(stored))
         setPersistedPlanId(stored.planId)
         setPlanningTripSnapshot(stored.tripSnapshot)
+        setCandidatePreview(null)
         void tripApi.getPlanningFacts(tripId, organizerToken).then((factsResponse) => {
           if (cancelled) return
           setCandidateRequest(factsResponse.data)
@@ -541,6 +548,7 @@ export function WorkspacePage() {
       setProviderPlan(result.plan)
       setLocationEvidence(result.evidence)
       setCandidateRequest(result.candidateRequest)
+      setCandidatePreview(result.candidatePreview)
       setPlanningTripSnapshot(result.candidateRequest.trip)
       setPlanningIssue(result.planningIssue)
       setCandidateReview(result.planningIssue?.review ?? null)
@@ -618,6 +626,7 @@ export function WorkspacePage() {
     hasLocalSegmentFailure: Boolean(localSegmentFailure),
     pendingSegmentIndex,
   })
+  const candidatePreviewNotice = candidatePreviewConfirmationNotice(candidatePreview)
   const hasIssuedPassPlan = serverPlanReady
   const remainingBudgetCents = Math.max(0, budgetCents - activePlan.totalCostCents)
   const budgetUsagePercent = budgetCents > 0
@@ -792,6 +801,7 @@ export function WorkspacePage() {
         locationEvidence,
         persistedPlanId,
         restoredPlan,
+        candidatePreview,
         planningIssue,
         localFailure: localSegmentFailure,
       }, result)
@@ -800,6 +810,7 @@ export function WorkspacePage() {
       setProviderPlan(transition.state.providerPlan)
       setLocationEvidence(transition.state.locationEvidence)
       setRestoredPlan(transition.state.restoredPlan)
+      setCandidatePreview(transition.state.candidatePreview)
       setPlanningIssue(transition.state.planningIssue)
       setCandidateReview(null)
       setReviewValues({})
@@ -845,6 +856,7 @@ export function WorkspacePage() {
       return
     }
     setIsRegenerating(true)
+    setCandidatePreview(null)
     setPlanLifecycleError('')
     const feedback = [
       ...selectedFeedbackOptions,
@@ -876,6 +888,7 @@ export function WorkspacePage() {
       setProviderPlan(result.plan)
       setLocationEvidence(result.evidence)
       setCandidateRequest(result.candidateRequest)
+      setCandidatePreview(result.candidatePreview)
       setPlanningTripSnapshot(result.candidateRequest.trip)
       setPlanningIssue(result.planningIssue)
       setCandidateReview(result.planningIssue?.review ?? null)
@@ -1061,6 +1074,7 @@ export function WorkspacePage() {
       setPlanningTripSnapshot(stored.tripSnapshot)
       setPlanningIssue(null)
       setCandidateReview(null)
+      setCandidatePreview(null)
       const facts = await tripApi.getPlanningFacts(tripId, organizerToken)
       setCandidateRequest(facts.data)
       setPlanLifecycleError('价格、设施与来源事实已由服务端重新校验，Plan V1 已获得 PASS。')
@@ -1850,6 +1864,14 @@ export function WorkspacePage() {
                   {planningIssue && !candidateReview && (
                     <p aria-live="polite" className="media-error">{planningIssue.message}</p>
                   )}
+                  {candidatePreviewNotice && (
+                    <div aria-live="polite" className="evidence-review-list">
+                      <p>{candidatePreviewNotice.summary}</p>
+                      {candidatePreviewNotice.details.length > 0 && (
+                        <ul>{candidatePreviewNotice.details.map((detail) => <li key={detail}>{detail}</li>)}</ul>
+                      )}
+                    </div>
+                  )}
                   <button className="button button--ghost" onClick={() => setIsFeedbackOpen(true)} type="button">
                     <MessageSquareText size={17} /> 不满意，重新推荐
                   </button>
@@ -1862,7 +1884,9 @@ export function WorkspacePage() {
                     {isConfirmingPlan ? <LoaderCircle className="spin-icon" size={17} /> : null}
                     {isConfirmingPlan
                       ? '正在确认…'
-                      : candidateReadyForAcceptance
+                      : candidatePreviewNotice && candidateReadyForAcceptance
+                        ? candidatePreviewNotice.actionLabel
+                        : candidateReadyForAcceptance
                         ? '接受推荐并确认 Plan V1'
                         : '证据待确认，暂不可接受'}
                     {!isConfirmingPlan && <ArrowRight size={18} />}

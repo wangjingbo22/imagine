@@ -230,6 +230,32 @@ const failingPreview: CandidatePlanPreview = {
   }],
 }
 
+const needsConfirmationPreview: CandidatePlanPreview = {
+  ...passingPreview,
+  validationStatus: 'NEEDS_CONFIRMATION',
+  metrics: {
+    ...passingPreview.metrics!,
+    validationStatus: 'NEEDS_CONFIRMATION',
+  },
+  constraintResults: [{
+    ruleId: 'price.reference',
+    scope: 'TASK',
+    hardness: 'HARD',
+    status: 'NEEDS_CONFIRMATION',
+    referenceId: 'poi-1',
+    observed: {},
+    suggestion: '请核对景点票价。',
+  }],
+  warnings: [{
+    code: 'UNKNOWN_PRICE',
+    severity: 'WARNING',
+    resolution: 'NEEDS_CONFIRMATION',
+    referenceId: 'poi-1',
+    field: 'priceReference.amountCents',
+    message: '景点票价仍未知。',
+  }],
+}
+
 function planSnapshotFor(base: CandidatePlanRequest): PlanSnapshot {
   return {
     id: 'candidate-plan',
@@ -334,6 +360,7 @@ test('initial planning previews exactly one candidate without issuing V1', async
   assert.deepEqual(JSON.parse(String(previews[0].init.body)), result.candidateRequest)
   assert.equal(result.registeredPlan, null)
   assert.equal(result.plan.validationStatus, 'PASS')
+  assert.deepEqual(result.candidatePreview, passingPreview)
 
   const failedTrip = structuredClone(base.trip)
   failedTrip.tripId = '11111111-1111-4111-8111-111111111112'
@@ -359,6 +386,7 @@ test('initial planning previews exactly one candidate without issuing V1', async
   assert.equal(failedResult.planningIssue?.code, 'CANDIDATE_PREVIEW_REJECTED')
   assert.match(failedResult.planningIssue?.message ?? '', /时间窗/)
   assert.equal(failedResult.planningIssue?.review, null)
+  assert.deepEqual(failedResult.candidatePreview, failingPreview)
 })
 
 test('initial planning defers V1 issuance to the workspace acceptance action', () => {
@@ -474,6 +502,29 @@ test('workspace interaction predicates block acceptance during route replacement
   }), false)
 })
 
+test('NEEDS_CONFIRMATION preview notice retains concrete facts without blocking final issuance', () => {
+  const helpers = amapPlan as typeof amapPlan & {
+    candidatePreviewConfirmationNotice: (preview: CandidatePlanPreview | null) => {
+      summary: string
+      details: string[]
+      actionLabel: string
+    } | null
+  }
+  const notice = helpers.candidatePreviewConfirmationNotice(needsConfirmationPreview)
+  assert.deepEqual(notice, {
+    summary: '候选计划已通过预览校验，仍需核对计划事实。',
+    details: ['景点票价仍未知。', '请核对景点票价。'],
+    actionLabel: '继续核对计划事实',
+  })
+  assert.equal(amapPlan.canAcceptCurrentCandidate({
+    hasCandidateRequest: true,
+    validationStatus: needsConfirmationPreview.validationStatus,
+    hasPlanningIssue: false,
+    hasLocalSegmentFailure: false,
+    pendingSegmentIndex: null,
+  }), true)
+})
+
 test('a hard server preview failure retains rebuilt facts and route evidence until a later PASS replacement', async () => {
   const transitionModule = await import(pathToFileURL(stateTransitionPath).href)
   const applyResult = transitionModule.applySegmentReplacementResult
@@ -501,6 +552,7 @@ test('a hard server preview failure retains rebuilt facts and route evidence unt
     restoredPlan: null,
     planningIssue: null,
     localFailure: null,
+    candidatePreview: null,
   }
   const failed = applyResult(initial, {
     evidence: { segmentIndex: 1, route: replacement },
@@ -515,6 +567,7 @@ test('a hard server preview failure retains rebuilt facts and route evidence unt
   assert.match(failed.state.planningIssue?.message ?? '', /时间窗/)
   assert.equal(failed.state.planningIssue?.review, null)
   assert.equal(failed.state.localFailure, null)
+  assert.equal(failed.state.candidatePreview, failingPreview)
   assert.equal(
     failed.state.providerPlan.tasks[1].timeRange,
     `${candidate.taskFacts[1].startAt.slice(0, 5)}—${candidate.taskFacts[1].endAt.slice(0, 5)}`,
@@ -528,6 +581,7 @@ test('a hard server preview failure retains rebuilt facts and route evidence unt
   assert.equal(recovered.state.planningIssue, null)
   assert.equal(recovered.state.providerPlan.validationStatus, 'PASS')
   assert.equal(recovered.state.candidateRequest, candidate)
+  assert.equal(recovered.state.candidatePreview, passingPreview)
 })
 
 test('final acceptance opens server fact review without confirming or starting an issued candidate', async () => {

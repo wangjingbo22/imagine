@@ -22,6 +22,7 @@ export interface SegmentRouteReplacementDisplayState {
   locationEvidence: LocationEvidence
   persistedPlanId: string | null
   restoredPlan: PlanSnapshot | null
+  candidatePreview: CandidatePlanPreview | null
   planningIssue: PlanningIssue | null
   localFailure: LocalSegmentRouteFailure | null
 }
@@ -140,6 +141,7 @@ export function applySegmentReplacementResult(
         locationEvidence,
         persistedPlanId: null,
         restoredPlan: null,
+        candidatePreview: result.preview,
         planningIssue: candidatePreviewIssue(result.preview),
         localFailure: null,
       },
@@ -158,6 +160,7 @@ export function applySegmentReplacementResult(
       locationEvidence,
       persistedPlanId: null,
       restoredPlan: null,
+      candidatePreview: null,
       planningIssue: {
         code: 'SEGMENT_ROUTE_SCHEDULE_FAILURE',
         message,

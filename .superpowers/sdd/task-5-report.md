@@ -37,3 +37,14 @@
 - `npm.cmd --prefix frontend run lint`: passed with the same four pre-existing warnings outside Task 5 files.
 - `npm.cmd --prefix frontend run build`: passed.
 - `git diff --check`: passed.
+
+## P2 Preview Confirmation UX/State Fix
+
+- Preserved the complete server `CandidatePlanPreview` through initial planning and successful segment replacements, and cleared it for regeneration, local schedule failures, and restored issued plans.
+- Added a pure `NEEDS_CONFIRMATION` notice formatter that presents server warning messages plus matching constraint suggestions without creating a review or blocking V1 issuance.
+- Workspace now announces the concrete confirmation facts before acceptance and labels the enabled action `继续核对计划事实`.
+- RED command: `npm.cmd --prefix frontend test`; result: 133 passed, 3 expected failures for missing preview retention, notice formatter, and replacement state.
+- GREEN command: `npm.cmd --prefix frontend test`; result: 136 passed, 0 failed.
+- `npm.cmd --prefix frontend run lint`: passed with four pre-existing warnings outside Task 5 files.
+- `npm.cmd --prefix frontend run build`: passed with the existing `runtime-config.js` bundling advisory.
+- `git diff --check`: passed.
