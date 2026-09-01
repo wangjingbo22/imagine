@@ -72,6 +72,9 @@ async def create_conversation(
     if isinstance(outcome, TripUnderstandingFallbackResponse):
         return ApiResponse(data=outcome)
     revision = outcome
+    recognition = request.app.state.trip_draft_revision_creator.get_recognition(
+        revision
+    )
     organizer_access = current.bootstrap(
         revision=revision,
         idempotency_key=idempotency_key,
@@ -79,6 +82,7 @@ async def create_conversation(
     return ApiResponse(
         data=OrganizerConversationCreated(
             revision=revision,
+            recognition=recognition,
             organizerAccess=organizer_access,
         )
     )

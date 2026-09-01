@@ -17,7 +17,7 @@ from app.application.recommendation_service import (
 from app.core.errors import AppError
 from app.domain.collaboration import TripFlowKind
 from app.domain.hard_conflicts import merged_constraints_for_revision
-from app.domain.models import ApiResponse
+from app.domain.models import ApiResponse, GeoPoint, Place
 from app.domain.recommendation import CandidateFactProvenance
 from app.infrastructure.provider_fact_registry import SqliteProviderFactRegistry
 from app.services.planning.models import CandidateEndpointFact
@@ -30,6 +30,7 @@ from app.services.recommendation import (
 
 
 router = APIRouter(tags=["S2 可信候选推荐"])
+PROVIDER_SEARCH_RADIUS_METERS = 25_000
 
 
 def _mark_private_organizer_response(response: Response) -> None:
@@ -84,6 +85,37 @@ async def _provider_endpoint_fact(
         location=city_context.center,
         provenance=city_resolution.provenance,
     )
+
+
+async def _provider_places_for_term(
+    provider: object,
+    *,
+    city_resolution: object,
+    center: GeoPoint,
+    keywords: str,
+) -> list[Place]:
+    city_context = city_resolution.cityContext
+    nearby_places = getattr(provider, "nearby_places", None)
+    if callable(nearby_places):
+        result = await nearby_places(
+            city_context,
+            center=center,
+            radius_meters=PROVIDER_SEARCH_RADIUS_METERS,
+            keywords=keywords,
+            types=[],
+            page=1,
+            page_size=25,
+        )
+        return result.places
+
+    result = await provider.search_places(
+        city_context,
+        keywords=keywords,
+        types=[],
+        page=1,
+        page_size=25,
+    )
+    return result.places
 
 
 def get_recommendation_service(
@@ -289,14 +321,12 @@ async def recommendations(trip_id: UUID, request: Request) -> ApiResponse:
         )
         provider_places = []
         for keywords in _provider_search_terms(must_visit, interests):
-            result = await request.app.state.location_service.search_places(
-                city.cityContext,
+            provider_places.extend(await _provider_places_for_term(
+                request.app.state.location_service,
+                city_resolution=city,
+                center=start_fact.location,
                 keywords=keywords,
-                types=[],
-                page=1,
-                page_size=25,
-            )
-            provider_places.extend(result.places)
+            ))
             try:
                 TrustedRecommendationService.pre_filter_provider_places(
                     provider_places,

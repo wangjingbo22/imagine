@@ -110,12 +110,13 @@ class AmapLocationService:
             raise AppError("CITY_NOT_FOUND", "未找到目标城市", 404, False)
         item = geocodes[0]
         location = _coordinates(item.get("location"))
-        provider_city_code = _text(item.get("citycode"))
         ad_code = _text(item.get("adcode"))
-        city_code = ad_code or provider_city_code
+        city_code, city_display_name = _planning_city_identity(
+            item,
+            fallback_name=normalized_name,
+        )
         if not city_code:
             raise AppError("CITY_CONTEXT_INVALID", "高德未返回城市编码", 502, False)
-        city_display_name = _text(item.get("city")) or normalized_name
         return CityResolution(
             cityContext=CityContext(
                 country_code="CN",
@@ -478,6 +479,30 @@ def _assert_same_city(
         409,
         False,
     )
+
+
+def _planning_city_identity(
+    item: dict[str, Any],
+    *,
+    fallback_name: str,
+) -> tuple[str, str]:
+    """Promote district geocodes to the city scope used by planning."""
+
+    ad_code = _text(item.get("adcode"))
+    provider_city_code = _text(item.get("citycode"))
+    province_name = _text(item.get("province"))
+    city_name = _text(item.get("city"))
+
+    if ad_code.isdigit() and len(ad_code) == 6:
+        is_municipality = province_name.endswith("市") and (
+            not city_name or city_name == province_name
+        )
+        if is_municipality:
+            return f"{ad_code[:2]}0000", province_name
+        if city_name and not ad_code.endswith("00"):
+            return f"{ad_code[:4]}00", city_name
+
+    return ad_code or provider_city_code, city_name or fallback_name
 
 
 def _coordinates(value: Any) -> GeoPoint:

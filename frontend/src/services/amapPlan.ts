@@ -32,7 +32,10 @@ import {
   scheduleTaskRanges,
   secondsSinceMidnight,
 } from './restClock'
-import { hasCompleteRouteRiskFacts, routeWalkingMeters } from './routeRiskFacts'
+import {
+  hasCompleteRouteRiskFacts,
+  routeWalkingMeters,
+} from './routeRiskFacts'
 import {
   appendConfirmedReturnPlace,
   selectedPlacesFromSignedFactSet,
@@ -135,31 +138,10 @@ function scheduleProviderOperation<T>(operation: () => Promise<T>) {
   return scheduled
 }
 
-function isRetryableProviderError(error: unknown) {
-  if (error instanceof ApiError) {
-    return error.code === 'AMAP_RATE_LIMITED' ||
-      error.code === 'PROVIDER_UNAVAILABLE' ||
-      error.code === 'PROVIDER_TIMEOUT' ||
-      error.code === 503
-  }
-  const message = error instanceof Error ? error.message : String(error)
-  return /CUQPS|QPS|EXCEEDED_THE_LIMIT|访问过于频繁|服务繁忙|暂时不可用|请求超时/i.test(message)
-}
-
 async function providerCall<T>(operation: () => Promise<T>): Promise<T> {
-  let lastError: unknown
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      return await scheduleProviderOperation(operation)
-    } catch (error) {
-      lastError = error
-      if (!isRetryableProviderError(error) || attempt === 4) {
-        throw error
-      }
-      await delay(650 * (attempt + 1))
-    }
-  }
-  throw lastError
+  // AmapClient owns provider retries. Retrying here would multiply every
+  // provider operation and can turn one logical plan into fifteen requests.
+  return scheduleProviderOperation(operation)
 }
 
 function unique(values: string[]) {
@@ -193,14 +175,16 @@ function placeIdentity(place: Place) {
 async function searchByQuery(
   tripId: string,
   city: CityResolution,
+  center: GeoPoint,
   query: string,
   organizerToken?: string | null,
 ) {
-  const response = await tripApi.searchPlaces(
+  const response = await tripApi.searchNearbyPlaces(
     tripId,
     city.cityContext,
-    query,
-    [],
+    center,
+    { keywords: query },
+    planningRadiusMeters,
     1,
     8,
     organizerToken,
@@ -212,6 +196,7 @@ async function collectPlaces(
   tripId: string,
   draft: TripDraftInput,
   city: CityResolution,
+  searchCenter: GeoPoint,
   options: AmapPlanOptions,
 ) {
   const requestedQueries = searchQueries(draft, options.extraQueries)
@@ -220,20 +205,26 @@ async function collectPlaces(
   const excludedIds = new Set(options.excludePlaceIds ?? [])
   const buckets: Place[][] = []
   const successfulQueries: string[] = []
+  let lastSearchError: unknown
 
   for (const query of queries) {
     try {
-      const result = await providerCall(
-        () => searchByQuery(tripId, city, query, options.organizerToken),
-      )
+      const result = await providerCall(() => searchByQuery(
+        tripId,
+        city,
+        searchCenter,
+        query,
+        options.organizerToken,
+      ))
       buckets.push(result.filter((place) =>
-        directDistanceMeters(city.cityContext.center, place.location) <= planningRadiusMeters &&
+        directDistanceMeters(searchCenter, place.location) <= planningRadiusMeters &&
         !excludedIds.has(place.placeId) &&
         !isAvoided(place, fragments),
       ))
       successfulQueries.push(query)
       await delay(180)
-    } catch {
+    } catch (error) {
+      lastSearchError = error
       // Continue with successful same-city keyword buckets.
     }
   }
@@ -244,19 +235,28 @@ async function collectPlaces(
     }
     try {
       buckets.push(
-        (await providerCall(
-          () => searchByQuery(tripId, city, query, options.organizerToken),
-        )).filter((place) =>
-          directDistanceMeters(city.cityContext.center, place.location) <= planningRadiusMeters &&
+        (await providerCall(() => searchByQuery(
+          tripId,
+          city,
+          searchCenter,
+          query,
+          options.organizerToken,
+        ))).filter((place) =>
+          directDistanceMeters(searchCenter, place.location) <= planningRadiusMeters &&
           !excludedIds.has(place.placeId) &&
           !isAvoided(place, fragments),
         ),
       )
       successfulQueries.push(query)
       await delay(180)
-    } catch {
+    } catch (error) {
+      lastSearchError = error
       // A single keyword failure must not turn successful Provider results into mock data.
     }
+  }
+
+  if (successfulQueries.length === 0 && lastSearchError !== undefined) {
+    throw lastSearchError
   }
 
   const selected: Place[] = []
@@ -414,7 +414,7 @@ const practicalBicycleDistanceMeters = 8_000
 export function routeModeCandidates(
   directDistance: number,
   maxWalkMeters: number,
-  cyclingAllowed = true,
+  cyclingAllowed = false,
 ): TravelMode[] {
   const walkThreshold = Math.min(maxWalkMeters, comfortableWalkDistanceMeters)
   if (directDistance <= walkThreshold) {
@@ -707,11 +707,15 @@ async function createAmapPlan(
     throw new Error('T004 已确认 Trip 与当前 tripId 不一致，请重新确认行程。')
   }
   onPhase?.('CITY', `正在通过高德解析“${confirmedTrip.cityContext.cityName}”及已确认起终点`)
-  const city = (await providerCall(
+  const providerCity = (await providerCall(
     () => tripApi.resolveCity(confirmedTrip.cityContext.cityName),
   )).data
-  if (city.cityContext.cityCode !== confirmedTrip.cityContext.cityCode) {
+  if (providerCity.cityContext.cityCode !== confirmedTrip.cityContext.cityCode) {
     throw new Error('Provider 城市解析与 T004 已确认 Trip 不一致，请重新确认行程。')
+  }
+  const city: CityResolution = {
+    ...providerCity,
+    cityContext: confirmedTrip.cityContext,
   }
   const endpoints = await resolveConfirmedEndpoints(
     tripId,
@@ -732,7 +736,13 @@ async function createAmapPlan(
         selection,
         options.organizerToken,
       )
-    : await collectPlaces(tripId, draft, city, options)
+    : await collectPlaces(
+        tripId,
+        draft,
+        city,
+        endpoints.startLocation.location,
+        options,
+      )
   const intermediatePlaces = selection
     ? collected.places
     : orderByShortestNextSegment(collected.places).slice(0, 3)
@@ -878,21 +888,27 @@ export async function buildAmapReplanCandidate(
   }
 
   onPhase?.('PLACES', '正在检索替代地点，并固定复用 Plan V1 的最终目的地')
-  const collected = await collectPlaces(tripId, draft, city, {
-    extraQueries: options.extraQueries,
-    organizerToken: options.organizerToken,
-    excludePlaceIds: [
-      ...baseFacts.map((fact) => fact.place.placeId),
-      ...(options.excludePlaceIds ?? []),
-    ],
-  })
+  const previousFact = prefixLength > 0 ? baseFacts[prefixLength - 1] : null
+  const collected = await collectPlaces(
+    tripId,
+    draft,
+    city,
+    previousFact?.place.location ?? baseRequest.startLocation.location,
+    {
+      extraQueries: options.extraQueries,
+      organizerToken: options.organizerToken,
+      excludePlaceIds: [
+        ...baseFacts.map((fact) => fact.place.placeId),
+        ...(options.excludePlaceIds ?? []),
+      ],
+    },
+  )
   const replacementPlaces = orderByShortestNextSegment(collected.places)
     .slice(0, replaceableCount)
   if (replacementPlaces.length < replaceableCount) {
     throw new Error('高德没有返回足够的新地点，未生成 Plan V2。')
   }
   const suffixPlaces = [...replacementPlaces, finalFact.place]
-  const previousFact = prefixLength > 0 ? baseFacts[prefixLength - 1] : null
   let origin = previousFact?.place.location ?? baseRequest.startLocation.location
   const suffixRoutes: ProviderRoute[] = []
   onPhase?.('ROUTES', `正在生成 ${suffixPlaces.length} 段连续路线并回到固定终点`)

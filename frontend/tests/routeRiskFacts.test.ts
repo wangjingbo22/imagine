@@ -5,6 +5,7 @@ import type { ProviderRoute } from '../src/domain/trip.ts'
 import {
   facilityEvidenceNeedsConfirmation,
   hasCompleteRouteRiskFacts,
+  preferredTravelMode,
   routeWalkingMeters,
 } from '../src/services/routeRiskFacts.ts'
 
@@ -56,6 +57,16 @@ test('walking uses distanceMeters exactly as the backend adapter does', () => {
   })
   assert.equal(hasCompleteRouteRiskFacts(walking), true)
   assert.equal(routeWalkingMeters(walking), 750)
+})
+
+test('missing walking limit does not make long routes prefer walking', () => {
+  assert.equal(preferredTravelMode(1_000, null), 'WALKING')
+  assert.equal(preferredTravelMode(29_000, null), 'TRANSIT')
+})
+
+test('an explicit walking limit still controls route preference', () => {
+  assert.equal(preferredTravelMode(400, 500), 'WALKING')
+  assert.equal(preferredTravelMode(401, 500), 'TRANSIT')
 })
 
 test('unknown facility provenance never renders as verified PASS', () => {

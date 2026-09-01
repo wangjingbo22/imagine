@@ -3,17 +3,24 @@ import test from 'node:test'
 
 import { routeModeCandidates } from '../src/services/amapPlan.ts'
 
-test('prefers walking for a short segment', () => {
+test('does not select cycling unless it is explicitly allowed', () => {
+  assert.deepEqual(routeModeCandidates(4_000, Number.POSITIVE_INFINITY), [
+    'TRANSIT',
+    'DRIVING',
+    'WALKING',
+  ])
+})
+
+test('keeps walking first for a short segment', () => {
   assert.deepEqual(routeModeCandidates(900, Number.POSITIVE_INFINITY), [
     'WALKING',
-    'BICYCLING',
     'TRANSIT',
     'DRIVING',
   ])
 })
 
-test('prefers bicycling for a medium segment', () => {
-  assert.deepEqual(routeModeCandidates(4_000, Number.POSITIVE_INFINITY), [
+test('allows cycling only for an explicit cycling preference', () => {
+  assert.deepEqual(routeModeCandidates(4_000, Number.POSITIVE_INFINITY, true), [
     'BICYCLING',
     'TRANSIT',
     'DRIVING',
@@ -21,8 +28,8 @@ test('prefers bicycling for a medium segment', () => {
   ])
 })
 
-test('prefers public transit for a long segment', () => {
-  assert.deepEqual(routeModeCandidates(12_000, Number.POSITIVE_INFINITY), [
+test('keeps cycling as a fallback for an explicitly allowed long segment', () => {
+  assert.deepEqual(routeModeCandidates(12_000, Number.POSITIVE_INFINITY, true), [
     'TRANSIT',
     'BICYCLING',
     'DRIVING',

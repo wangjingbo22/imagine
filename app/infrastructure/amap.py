@@ -29,6 +29,7 @@ class AmapClient:
                 connect=max(timeout_seconds, 15.0),
             ),
             transport=transport,
+            trust_env=False,
         )
 
     async def close(self) -> None:
@@ -108,7 +109,6 @@ class AmapClient:
                         str(payload.get("infocode", "")),
                         str(payload.get("info", "")),
                     )
-
                 if provider_error is None:
                     return payload
                 if not provider_error.retryable or attempt == self._retry_attempts - 1:

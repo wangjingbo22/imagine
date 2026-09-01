@@ -5,7 +5,7 @@ import importlib.util
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
@@ -25,10 +25,10 @@ def _store_module():
     return importlib.import_module("app.infrastructure.trip_draft_revision_store")
 
 
-def _repository(path: Path):
+def _repository(path: Path, *, clock=None, owner_id=None):
     repository_type = getattr(_store_module(), "SqliteTripDraftRevisionRepository", None)
     assert repository_type is not None
-    return repository_type(path)
+    return repository_type(path, clock=clock, owner_id=owner_id)
 
 
 def _command(*, key: str = "0123456789abcdef", digest: str = "b" * 64):
@@ -151,7 +151,7 @@ def test_stale_base_revision_is_rejected_before_claim(tmp_path: Path) -> None:
         assert connection.execute("SELECT COUNT(*) FROM trip_draft_commands").fetchone()[0] == 1
 
 
-def test_pending_command_hides_old_current_revision(tmp_path: Path) -> None:
+def test_pending_command_keeps_committed_current_revision_readable(tmp_path: Path) -> None:
     repository = _repository(tmp_path / "drafts.sqlite3")
     initial_claim = repository.claim_initial(_command(), draft_id=DRAFT_ID, trip_id=TRIP_ID)
     repository.complete(initial_claim, _revision(), _extraction())
@@ -162,8 +162,64 @@ def test_pending_command_hides_old_current_revision(tmp_path: Path) -> None:
         base_revision=1,
     )
 
-    with pytest.raises(_store_module().TripDraftRevisionStoreError, match="TRIP_DRAFT_REVISION_UNAVAILABLE"):
-        repository.get_current(TRIP_ID)
+    assert repository.get_current(TRIP_ID) == _revision()
+
+
+def test_stale_claim_is_failed_and_current_revision_becomes_readable(tmp_path: Path) -> None:
+    database_path = tmp_path / "drafts.sqlite3"
+    now = datetime(2026, 8, 31, 6, 0, tzinfo=UTC)
+    repository = _repository(database_path, clock=lambda: now, owner_id="old-process")
+    initial_claim = repository.claim_initial(_command(), draft_id=DRAFT_ID, trip_id=TRIP_ID)
+    repository.complete(initial_claim, _revision(), _extraction())
+    repository.claim_next(
+        _command(key="fedcba9876543210"),
+        draft_id=DRAFT_ID,
+        trip_id=TRIP_ID,
+        base_revision=1,
+    )
+
+    now += timedelta(seconds=1)
+    recovered = _repository(database_path, clock=lambda: now, owner_id="new-process")
+
+    assert recovered.get_current(TRIP_ID) == _revision()
+    with sqlite3.connect(database_path) as connection:
+        head = connection.execute(
+            "SELECT pending_revision FROM trip_draft_heads WHERE trip_id=?",
+            (str(TRIP_ID),),
+        ).fetchone()
+        command = connection.execute(
+            """SELECT status, failure_code, completed_at
+               FROM trip_draft_commands WHERE idempotency_key=?""",
+            ("fedcba9876543210",),
+        ).fetchone()
+    assert head == (None,)
+    assert command[0:2] == ("FAILED", "DRAFT_OPERATION_INTERRUPTED")
+    assert command[2] == now.isoformat()
+
+
+def test_long_running_claim_owned_by_current_process_remains_in_progress(tmp_path: Path) -> None:
+    database_path = tmp_path / "drafts.sqlite3"
+    now = datetime(2026, 8, 31, 6, 0, tzinfo=UTC)
+    repository = _repository(database_path, clock=lambda: now, owner_id="current-process")
+    initial_claim = repository.claim_initial(_command(), draft_id=DRAFT_ID, trip_id=TRIP_ID)
+    repository.complete(initial_claim, _revision(), _extraction())
+    repository.claim_next(
+        _command(key="fedcba9876543210"),
+        draft_id=DRAFT_ID,
+        trip_id=TRIP_ID,
+        base_revision=1,
+    )
+
+    now += timedelta(minutes=10)
+    restarted = _repository(database_path, clock=lambda: now, owner_id="current-process")
+
+    assert restarted.get_current(TRIP_ID) == _revision()
+    with sqlite3.connect(database_path) as connection:
+        command = connection.execute(
+            "SELECT status, failure_code FROM trip_draft_commands WHERE idempotency_key=?",
+            ("fedcba9876543210",),
+        ).fetchone()
+    assert command == ("CLAIMED", None)
 
 
 def test_completed_revision_preserves_two_transport_attempts(tmp_path: Path) -> None:

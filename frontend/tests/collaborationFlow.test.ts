@@ -205,6 +205,14 @@ test('organizer page serially rolls the collaboration version and prepares READY
   assert.match(page, /填入北京多人组织者模板/)
 })
 
+test('READY collaboration always exposes the authoritative recommendation action', async () => {
+  const page = await readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8')
+  assert.match(page, /collaboration && canEnterRecommendation\(collaboration\) && <button/)
+  assert.doesNotMatch(page, /canEnterRecommendation\(collaboration\) && planningDraft/)
+  assert.match(page, /if \(planningDraft\) setStoredPlanContext/)
+  assert.match(page, /navigate\(`\/recommendation\/\$\{collaboration\.tripId\}`\)/)
+})
+
 test('home group card opens the planner directly in multiplayer creation mode', async () => {
   const [home, planner] = await Promise.all([
     readFile(new URL('../src/pages/HomePage.tsx', import.meta.url), 'utf8'),
@@ -232,6 +240,19 @@ test('fixed-question fallback requires an explicit six-answer review and a fresh
   assert.match(page, /智能整理服务暂不可用/)
   assert.match(page, /已保留 6 \/ 6 核对结果/)
   assert.match(page, /再次尝试智能整理/)
+})
+
+test('reviewed fallback revision renders authoritative degradation without model success copy', async () => {
+  const [domain, page] = await Promise.all([
+    readFile(new URL('../src/domain/collaboration.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8'),
+  ])
+  assert.match(domain, /source: 'MODEL_PROPOSAL' \| 'REVIEWED_FIXED_QUESTIONS'/)
+  assert.match(domain, /degradedReason: string \| null/)
+  assert.match(page, /result\.recognition\.source === 'REVIEWED_FIXED_QUESTIONS'/)
+  assert.match(page, /本次百炼未成功，草稿来自已核对的六项回答/)
+  assert.match(page, /result\.recognition\.degradedReason/)
+  assert.doesNotMatch(page, /百炼成功/)
 })
 
 test('recommendation route consumes the guarded server Trip without legacy reconfirmation', async () => {

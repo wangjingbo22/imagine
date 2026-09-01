@@ -242,6 +242,7 @@ class TripUnderstandingExplicitFields(UnderstandingContractModel):
 
 class TripUnderstandingRequest(UnderstandingContractModel):
     schema_version: Literal["1.0"]
+    scope: Literal["FULL_TRIP", "MEMBER_PROFILE"] = "FULL_TRIP"
     reference_date: date
     raw_conversation: str = Field(max_length=8000)
     explicit_fields: TripUnderstandingExplicitFields
@@ -682,6 +683,21 @@ TripUnderstandingFailureCode = Literal[
 ]
 
 
+class TripDraftRevisionRecognition(UnderstandingContractModel):
+    source: Literal["MODEL_PROPOSAL", "REVIEWED_FIXED_QUESTIONS"]
+    model: str | None = Field(default=None, max_length=120)
+    degraded_reason: TripUnderstandingFailureCode | None = None
+    call_count: Literal[0, 1, 2]
+
+    @model_validator(mode="after")
+    def validate_source_metadata(self) -> "TripDraftRevisionRecognition":
+        if self.source == "MODEL_PROPOSAL" and self.degraded_reason is not None:
+            raise ValueError("model proposals cannot carry a degraded reason")
+        if self.source == "REVIEWED_FIXED_QUESTIONS" and self.degraded_reason is None:
+            raise ValueError("reviewed fixed questions must preserve a failure code")
+        return self
+
+
 class TripUnderstandingGatewayResult(UnderstandingContractModel):
     decision: Literal["MODEL_PROPOSAL", "FIXED_QUESTIONS"]
     proposal: TripUnderstandingProposal | None
@@ -860,6 +876,7 @@ __all__ = [
     "ParsedTripFields",
     "TripUnderstandingExplicitFields",
     "TripUnderstandingFailureCode",
+    "TripDraftRevisionRecognition",
     "TripUnderstandingGatewayResult",
     "TripUnderstandingProposal",
     "TripUnderstandingRequest",

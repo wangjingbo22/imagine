@@ -25,6 +25,7 @@ import {
   collaborationPlanningDraft,
   invitationTokenFromText,
 } from '../services/collaborationDraft'
+import { getStoredOrganizerToken, setStoredOrganizerToken, setStoredPlanContext } from '../services/organizerStorage'
 
 const questions = [
   ['trip', '这次想去哪里、哪天出发、当天大约什么时间可用？'],
@@ -110,7 +111,7 @@ export function ConversationPlannerPage() {
   const preview = useMemo(() => revision?.understanding.trip, [revision])
   const previewParticipant = revision?.understanding.participants[0]
   const organizerToken = revision
-    ? result?.organizerAccess.organizerToken ?? window.sessionStorage.getItem(`organizer-token:${revision.tripId}`)
+    ? result?.organizerAccess.organizerToken ?? getStoredOrganizerToken(revision.tripId)
     : null
   const organizerConfirmed = collaboration?.participants.some((item) => item.role === 'ORGANIZER' && item.confirmationStatus === 'CONFIRMED') ?? false
   const memberParticipants = collaboration?.participants.filter((item) => item.role === 'MEMBER') ?? []
@@ -292,7 +293,7 @@ export function ConversationPlannerPage() {
       if (!created.organizerAccess.organizerToken || !created.organizerAccess.organizerTokenAvailable) {
         throw new Error('组织者凭证未生成；为避免越权，当前行程不能继续。')
       }
-      window.sessionStorage.setItem(`organizer-token:${created.revision.tripId}`, created.organizerAccess.organizerToken)
+      setStoredOrganizerToken(created.revision.tripId, created.organizerAccess.organizerToken)
       if (parentTripId && Number.isInteger(parentDayIndex) && parentDayIndex >= 0) {
         const parentToken = window.sessionStorage.getItem(`parent-trip-token:${parentTripId}`)
         if (!parentToken) throw new Error('父行程组织者凭证已丢失，不能绑定当日行程。')
@@ -386,7 +387,7 @@ export function ConversationPlannerPage() {
         : null
       setPlanningDraft(draft)
       if (draft && canEnterRecommendation(current)) {
-        window.sessionStorage.setItem(`s2-plan-context:${revision.tripId}`, JSON.stringify({ draft }))
+        setStoredPlanContext(revision.tripId, draft)
       }
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === 'PARTICIPANT_CONFIRMATION_REQUIRED') {
@@ -459,7 +460,7 @@ export function ConversationPlannerPage() {
           </div>
         </section>}
         {parentTripId && <button className="parent-trip-return" type="button" onClick={() => navigate(`/parent-trips/${parentTripId}`)}>← 返回多日父行程</button>}
-        {result && revision && <section className="confirmation-card"><div className="confirmation-card__head"><span><Check size={20} /></span><div><strong>Agent 解析确认卡</strong><p>请先确认组织者资料；多人行程随后按成员逐个生成可重复打开的邀请链接。</p></div></div>
+        {result && revision && <section className="confirmation-card"><div className="confirmation-card__head"><span><Check size={20} /></span><div><strong>{result.recognition.source === 'REVIEWED_FIXED_QUESTIONS' ? '已核对六项回答草稿' : 'Agent 解析确认卡'}</strong><p>{result.recognition.source === 'REVIEWED_FIXED_QUESTIONS' ? `本次百炼未成功，草稿来自已核对的六项回答（${result.recognition.degradedReason ?? '未知失败'}）。仍可继续确认资料。` : '请先确认组织者资料；多人行程随后按成员逐个生成可重复打开的邀请链接。'}</p></div></div>
           <ul className="confirmation-grid">{[['城市', preview?.cityName], ['日期', preview?.travelDate], ['时间', `${preview?.startTime ?? '未识别'} 至 ${preview?.endTime ?? '未识别'}`], ['起终点', `${preview?.startLocationText ?? '未识别'} → ${preview?.endLocationText ?? '未识别'}`], ['预算', preview?.budgetCents === null || preview?.budgetCents === undefined ? '未识别' : `¥${preview.budgetCents / 100}`], ['兴趣', previewParticipant?.interests.join('、') || '未识别']].map(([label, value]) => <li key={label}><strong>{label}</strong><span>{value}</span></li>)}</ul>
           <div><strong>需要更正？</strong><p>{questions.map(([, question], index) => <button className="button button--soft" type="button" key={question} onClick={() => editAnswer(index)}>修改第 {index + 1} 问</button>)}</p></div>
           {collaboration && <div className="draft-confirmation"><div className="draft-confirmation__heading"><span><UsersRound size={18} /></span><div><strong>协作进度</strong><p role="status" aria-live="polite">{collaboration.progress.confirmedCount} / {collaboration.progress.expectedCount} 位成员已确认 · {collaboration.status}</p></div></div>
@@ -468,7 +469,10 @@ export function ConversationPlannerPage() {
           </div>}
           {collaboration && hasMemberParticipants && links.length === 0 && <div className="invite-card invite-card--pending"><strong>成员邀请入口</strong><p>{!organizerConfirmed ? '点击上方“确认组织者资料并生成成员邀请链接”，生成后成员可直接打开或复制自己的专属链接。' : needsInvitations ? '点击上方“生成成员邀请链接”，生成后成员可直接打开或复制自己的专属链接。' : '邀请已创建，但当前标签页没有可展示的链接密钥。请返回创建页面重新发起一趟多人行程。'}</p></div>}
           {links.length > 0 && <div className="invite-card"><strong>成员邀请链接</strong><p>每个链接只对应一名成员，在该成员确认资料前可以重复打开。再次打开会生成新会话，并让该成员上一次打开的旧标签页失效。</p>{links.map((item, index) => <div className="invite-row" key={item.invitationId}><span>成员 {index + 1}</span><code>{item.link}</code><div className="invite-row__actions"><a className="button button--soft" href={item.link}><ArrowRight size={14} />进入成员页</a><button type="button" className="button button--soft" onClick={() => void navigator.clipboard.writeText(item.link)}><Copy size={14} />复制</button></div></div>)}</div>}
-          {collaboration && canEnterRecommendation(collaboration) && <button className="button button--primary" type="button" onClick={() => { if (planningDraft) window.sessionStorage.setItem(`s2-plan-context:${collaboration.tripId}`, JSON.stringify({ draft: planningDraft })); navigate(`/recommendation/${collaboration.tripId}`) }}>查看唯一推荐 <ArrowRight size={18} /></button>}
+          {collaboration && canEnterRecommendation(collaboration) && <button className="button button--primary" type="button" onClick={() => {
+            if (planningDraft) setStoredPlanContext(collaboration.tripId, planningDraft)
+            navigate(`/recommendation/${collaboration.tripId}`)
+          }}>查看唯一推荐 <ArrowRight size={18} /></button>}
         </section>}
       </section>
     </main>

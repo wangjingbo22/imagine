@@ -8,7 +8,11 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
-from app.application.llm_gateway import TripUnderstandingTransportError
+from app.application.llm_gateway import (
+    MemberProfileModelProposal,
+    OrganizerTripModelProposal,
+    TripUnderstandingTransportError,
+)
 from app.domain.trip_draft import (
     LlmTripDraftFields,
     TripDraftExtractionError,
@@ -18,6 +22,7 @@ from app.domain.trip_draft import (
 
 
 _SYSTEM_PROMPT = """你是行知旅伴的行程字段提取器。只做信息抽取，不生成攻略。
+不要展示思考过程；读取完输入后立即输出最短的合法 JSON。
 请输出一个 JSON 对象，字段固定为：
 cityName, travelDate, startTime, endTime, startLocationText, endLocationText,
 budgetCents, interests, mustVisit, avoidPlaces。
@@ -43,10 +48,24 @@ _TRIP_UNDERSTANDING_SCHEMA = json.dumps(
     separators=(",", ":"),
 )
 
+_MEMBER_PROFILE_SCHEMA = json.dumps(
+    MemberProfileModelProposal.model_json_schema(by_alias=True),
+    ensure_ascii=False,
+    separators=(",", ":"),
+)
+
+_ORGANIZER_TRIP_SCHEMA = json.dumps(
+    OrganizerTripModelProposal.model_json_schema(by_alias=True),
+    ensure_ascii=False,
+    separators=(",", ":"),
+)
+
 _TRIP_UNDERSTANDING_SYSTEM_PROMPT = f"""You produce only one JSON object that
 validates against the following JSON Schema. Follow it exactly, including all
 required nested fields, null values, arrays, camelCase names, and
 additionalProperties restrictions.
+Do not generate explanatory reasoning. Return the smallest valid JSON object
+immediately after reading the request.
 
 {_TRIP_UNDERSTANDING_SCHEMA}
 
@@ -58,6 +77,62 @@ MOBILITY_ASSISTANCE_BETA), copy it into the first participant's nickname,
 budgetCapCents, and careDraft.assistanceTypeHint respectively. A selected care
 mode must produce a non-null careDraft with the remaining optional care values
 set to null (and walkLimits containing null values).
+
+The issue arrays are a closed, internally consistent set:
+- Never put a field in missingFields when its proposal value is non-null or its
+  referenced list item exists.
+- Every missingFields or ambiguities item must have exactly one matching
+  confirmationQuestions item with the same fieldPath, memberKey, and
+  questionKey. Do not emit any other confirmationQuestions.
+- Every non-null scalar and every list item needs exactly one fieldEvidence
+  entry, including careDraft.assistanceTypeHint. For a literal care token such
+  as ORDINARY, use that exact token as USER_TEXT sourceText.
+- An extracted value needs fieldEvidence, not a confirmation question.
+- USER_TEXT sourceText must be an exact substring of rawConversation.
+"""
+
+_MEMBER_PROFILE_SYSTEM_PROMPT = f"""你是成员个人资料提取器，只返回一个符合以下
+JSON Schema 的对象。不要解释、不要输出 Markdown、不要展示思考过程，读取后立即返回
+最短的合法 JSON；所有字段都必须出现，字段名使用 camelCase，不得增加字段。
+
+{_MEMBER_PROFILE_SCHEMA}
+
+只读取 rawConversation 中的【用户初始描述】、【个人偏好（兴趣与地点限制）】、
+【个人限制（预算、步行、换乘、休息、关怀）】和【最终确认与不可妥协限制】。
+其他段落是组织者共享的只读信息，绝对不能提取为成员字段。
+
+提取规则：
+- nickname 只有成员明确自称时才填写，否则为 null；不得把组织者或占位名称当成成员昵称。
+- budgetCapCents 是个人预算的人民币分整数；“未设置”返回 null。
+- interests、mustVisit、avoidPlaces 只保留成员自己的明确表达，空答案返回 []，不要猜测。
+- 没有额外关怀限制时，careDraft.assistanceTypeHint 返回 ORDINARY；亲子、低体力、行动辅助
+  分别使用 PARENT_CHILD、LOW_STAMINA、MOBILITY_ASSISTANCE_BETA。其余未明确的关怀值为 null，
+  walkLimits 的两个字段必须保留；没有任何关怀表述时 careDraft 才返回 null。
+- 每个非 null 标量、每个数组元素和 careDraft 中每个非 null 值，都必须有且只有一个
+  fieldEvidence。fieldPath 使用精简路径，例如 interests[0]、budgetCapCents、
+  careDraft.walkLimits.maxContinuousMeters；sourceText 必须逐字出现在 rawConversation 中。
+- null 字段和空数组不要创建证据。数组值去重，避免条件不得同时放入 mustVisit。
+"""
+
+_ORGANIZER_TRIP_SYSTEM_PROMPT = f"""你是行程固定问卷提取器，只返回一个符合以下
+JSON Schema 的对象。不要解释、不要输出 Markdown、不要展示思考过程，读取后立即返回
+最短的合法 JSON；所有字段都必须出现，字段名使用 camelCase，不得增加字段。
+
+{_ORGANIZER_TRIP_SCHEMA}
+
+这是已经填写完整的六问表单，只做信息抽取，不生成攻略，也不要生成缺失项、歧义或追问。
+提取规则：
+- trip 的城市、日期、起止时间只来自【行程基础】；起点、终点、共享预算只来自
+  【出发地、结束地与共享费用】。预算转换为人民币分整数，例如 900 元返回 90000。
+- participants 数量严格等于【同行信息】的人数，memberKey 必须按 member-1、member-2、
+  member-3 排列。第一位是组织者；尚未填写个人资料的受邀成员保留 null、[] 和 null careDraft，
+  不得编造昵称、预算、偏好或关怀需求。
+- 组织者昵称来自【同行信息】；组织者个人预算、关怀模式和限制来自【个人限制】。
+- interests、mustVisit、avoidPlaces 只来自【个人偏好】、【用户初始描述】和【最终确认】；
+  数组值去重，避开地点不得同时出现在 mustVisit。
+- 关怀类型使用 ORDINARY、PARENT_CHILD、LOW_STAMINA、MOBILITY_ASSISTANCE_BETA；
+  其余未明确的关怀值为 null，walkLimits 的两个字段必须保留。
+- 不要输出 fieldEvidence；服务端会从固定问卷原文生成证据并校验。
 """
 
 
@@ -70,17 +145,20 @@ class BailianTripDraftExtractor:
         api_key: str,
         base_url: str,
         model: str,
+        organizer_model: str | None = None,
         timeout_seconds: float,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         if not 8 <= timeout_seconds <= 45:
             raise ValueError("timeoutSeconds must be between 8 and 45 seconds")
         self.model = model
+        self.organizer_model = organizer_model or model
         self.timeout_seconds = timeout_seconds
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=timeout_seconds,
             transport=transport,
+            trust_env=False,
         )
         self._headers = {"Authorization": f"Bearer {api_key}"}
 
@@ -96,6 +174,7 @@ class BailianTripDraftExtractor:
         payload: dict[str, Any] = {
             "model": self.model,
             "temperature": 0,
+            "enable_thinking": False,
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": _SYSTEM_PROMPT},
@@ -164,18 +243,74 @@ class BailianTripDraftExtractor:
             ]
         )
 
+    async def propose_organizer_trip(
+        self,
+        request: TripUnderstandingRequest,
+    ) -> str:
+        compact_request = json.dumps(
+            {
+                "schemaVersion": "1.0",
+                "referenceDate": request.reference_date.isoformat(),
+                "rawConversation": request.raw_conversation,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return await self._trip_understanding_completion(
+            [
+                {"role": "system", "content": _ORGANIZER_TRIP_SYSTEM_PROMPT},
+                {"role": "user", "content": compact_request},
+            ],
+            max_tokens=1400,
+            deadline_seconds=30,
+            model=self.organizer_model,
+        )
+
+    async def propose_member_profile(
+        self,
+        request: TripUnderstandingRequest,
+    ) -> str:
+        compact_request = json.dumps(
+            {
+                "schemaVersion": "1.0",
+                "rawConversation": request.raw_conversation,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return await self._trip_understanding_completion(
+            [
+                {"role": "system", "content": _MEMBER_PROFILE_SYSTEM_PROMPT},
+                {"role": "user", "content": compact_request},
+            ],
+            max_tokens=1600,
+            deadline_seconds=20,
+        )
+
     async def _trip_understanding_completion(
         self,
         messages: list[dict[str, str]],
+        *,
+        max_tokens: int | None = None,
+        deadline_seconds: float | None = None,
+        model: str | None = None,
     ) -> str:
         payload: dict[str, Any] = {
-            "model": self.model,
+            "model": model or self.model,
             "temperature": 0,
+            "enable_thinking": False,
             "response_format": {"type": "json_object"},
             "messages": messages,
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        effective_deadline = (
+            self.timeout_seconds
+            if deadline_seconds is None
+            else min(self.timeout_seconds, deadline_seconds)
+        )
         try:
-            async with asyncio.timeout(self.timeout_seconds):
+            async with asyncio.timeout(effective_deadline):
                 response = await self._client.post(
                     "/chat/completions",
                     headers=self._headers,

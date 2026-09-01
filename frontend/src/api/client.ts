@@ -46,6 +46,34 @@ function isTripSchemaError(body: unknown): body is TripSchemaErrorResponse {
   )
 }
 
+type ErrorBody = {
+  code?: number | string
+  message?: string
+  errors?: Array<Record<string, unknown>>
+}
+
+function isObject(body: unknown): body is Record<string, unknown> {
+  return body !== null && typeof body === 'object'
+}
+
+async function readResponseBody(response: Response): Promise<unknown> {
+  const text = await response.text()
+  if (!text) {
+    return undefined
+  }
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    if (!response.ok) {
+      throw new ApiError(
+        response.status,
+        `服务端请求失败（HTTP ${response.status}）`,
+      )
+    }
+    throw new ApiError('API_RESPONSE_INVALID', '服务端返回了无法识别的数据')
+  }
+}
+
 export async function requestBare<T>(
   path: string,
   init?: RequestInit,
@@ -57,11 +85,7 @@ export async function requestBare<T>(
       ...init?.headers,
     },
   })
-  const body = (await response.json()) as T | TripSchemaErrorResponse | {
-    code?: number | string
-    message?: string
-    errors?: Array<Record<string, unknown>>
-  }
+  const body = await readResponseBody(response)
   if (isTripSchemaError(body)) {
     throw new ApiError(
       body.code,
@@ -71,11 +95,7 @@ export async function requestBare<T>(
     )
   }
   if (!response.ok) {
-    const error = body as {
-      code?: number | string
-      message?: string
-      errors?: Array<Record<string, unknown>>
-    }
+    const error = (isObject(body) ? body : {}) as ErrorBody
     throw new ApiError(
       error.code ?? response.status,
       error.message || `HTTP ${response.status}`,
@@ -98,11 +118,7 @@ export async function request<T>(
     },
   })
 
-  const body = (await response.json()) as ApiResponse<T> | TripSchemaErrorResponse | {
-    code?: number | string
-    message?: string
-    errors?: Array<Record<string, unknown>>
-  }
+  const body = await readResponseBody(response)
   if (isTripSchemaError(body)) {
     throw new ApiError(
       body.code,
@@ -112,10 +128,18 @@ export async function request<T>(
     )
   }
 
-  if (!response.ok || body.code !== 200) {
-    const details = 'errors' in body && Array.isArray(body.errors) ? body.errors : []
-    throw new ApiError(body.code ?? response.status, body.message || `HTTP ${response.status}`, [], details)
+  if (!isObject(body)) {
+    if (!response.ok) {
+      throw new ApiError(response.status, `服务端请求失败（HTTP ${response.status}）`)
+    }
+    throw new ApiError('API_RESPONSE_INVALID', '服务端返回了无法识别的数据')
   }
 
-  return body as ApiResponse<T>
+  const error = body as ErrorBody
+  if (!response.ok || error.code !== 200) {
+    const details = Array.isArray(error.errors) ? error.errors : []
+    throw new ApiError(error.code ?? response.status, error.message || `HTTP ${response.status}`, [], details)
+  }
+
+  return body as unknown as ApiResponse<T>
 }

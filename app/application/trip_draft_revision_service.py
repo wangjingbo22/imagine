@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import re
 from datetime import date, datetime
 from typing import Literal
@@ -36,6 +38,7 @@ from app.domain.collaboration import (
 from app.domain.collaboration_digest import canonical_sha256
 from app.domain.trip_draft import (
     TripDraftRevision,
+    TripDraftRevisionRecognition,
     TripUnderstandingExplicitFields,
     TripUnderstandingExtraction,
     TripUnderstandingFailureCode,
@@ -54,6 +57,9 @@ from app.infrastructure.trip_draft_revision_store import (
     TripDraftRevisionStoreError,
 )
 from app.schemas.validation_error import TripSchemaError
+
+
+logger = logging.getLogger(__name__)
 
 
 class TripUnderstandingRecognition(CollaborationModel):
@@ -80,6 +86,13 @@ class TripDraftRevisionService(TripDraftRevisionPort):
     _INITIAL_OPERATION = "INITIAL_ANSWER"
     _MEMBER_OPERATION = "MEMBER_ANSWER"
     _RELAXATION_OPERATION = "RELAXATION"
+    _MEMBER_PROFILE_PREFIXES = (
+        "budgetCapCents",
+        "interests[",
+        "mustVisit[",
+        "avoidPlaces[",
+        "careDraft.",
+    )
 
     def __init__(
         self,
@@ -102,6 +115,11 @@ class TripDraftRevisionService(TripDraftRevisionPort):
             "PARTICIPANT_SCOPE_VIOLATION": ("成员只能修改自己的草稿字段", 403, False),
             "COLLABORATION_OPERATION_IN_PROGRESS": ("协作操作正在进行", 409, True),
             "TRIP_DRAFT_REVISION_UNAVAILABLE": ("行程草稿版本服务不可用", 503, True),
+            "DRAFT_OPERATION_INTERRUPTED": (
+                "上次智能整理被服务重启中断，请重新提交",
+                503,
+                True,
+            ),
             "DRAFT_PARSE_IN_PROGRESS": ("草稿解析正在进行", 409, True),
             "TRIP_UNDERSTANDING_INVALID": ("行程理解结果无效", 502, False),
             "TRIP_UNDERSTANDING_UNAVAILABLE": ("行程理解服务不可用", 503, True),
@@ -126,9 +144,17 @@ class TripDraftRevisionService(TripDraftRevisionPort):
     def _map_revision_failure(cls, error: Exception) -> AppError:
         if isinstance(error, AppError):
             return error
+        if isinstance(error, TripDraftRevisionStoreError):
+            return cls._store_error(error)
         if isinstance(error, (ValidationError, TripSchemaError)):
             return cls._app_error("TRIP_UNDERSTANDING_INVALID")
         return cls._app_error("TRIP_UNDERSTANDING_UNAVAILABLE")
+
+    def _release_unfinished_claim(self, claim: ClaimedCommand) -> None:
+        try:
+            self.repository.fail(claim, code="DRAFT_OPERATION_INTERRUPTED")
+        except TripDraftRevisionStoreError:
+            pass
 
     @staticmethod
     def _claim_result(
@@ -174,9 +200,12 @@ class TripDraftRevisionService(TripDraftRevisionPort):
         cls,
         submission: ConversationSubmission,
         reference_date: date,
+        *,
+        scope: Literal["FULL_TRIP", "MEMBER_PROFILE"] = "FULL_TRIP",
     ) -> TripUnderstandingRequest:
         return TripUnderstandingRequest(
             schemaVersion="1.0",
+            scope=scope,
             referenceDate=reference_date,
             rawConversation=submission.transcript,
             explicitFields=cls._empty_explicit_fields(),
@@ -371,8 +400,8 @@ class TripDraftRevisionService(TripDraftRevisionPort):
         if replay is not None:
             return replay
         assert isinstance(claim, ClaimedCommand)
-        request = self._understanding_request(payload, payload.reference_date)
         try:
+            request = self._understanding_request(payload, payload.reference_date)
             extraction = await self._understand(request)
             if extraction.decision == "FIXED_QUESTIONS":
                 if (
@@ -423,7 +452,13 @@ class TripDraftRevisionService(TripDraftRevisionPort):
                 else extraction.proposal
             )
             proposal = validate_trip_understanding(request, proposal)
-            extraction = extraction.model_copy(update={"proposal": proposal})
+            persisted_extraction = TripUnderstandingExtraction(
+                proposal=proposal,
+                recognitionSource="MODEL_PROPOSAL",
+                recognitionModel=extraction.model,
+                degradedReason=extraction.failure_code,
+                llmCallCount=extraction.call_count,
+            )
             bindings = {
                 participant.member_key: uuid4()
                 for participant in proposal.participants
@@ -434,19 +469,37 @@ class TripDraftRevisionService(TripDraftRevisionPort):
                 member_bindings=bindings,
                 created_at=self._clock(),
             )
+            self.repository.complete(claim, revision, persisted_extraction)
+            return revision
+        except asyncio.CancelledError:
+            logger.warning("initial trip understanding request was cancelled")
+            raise
         except Exception as error:
             failure = self._map_revision_failure(error)
+            logger.warning("initial trip understanding failed code=%s", failure.code)
             try:
                 self.repository.fail(claim, code=failure.code)
             except TripDraftRevisionStoreError as store_error:
                 raise self._store_error(store_error) from store_error
             raise failure from error
-        self.repository.complete(claim, revision, extraction)
-        return revision
+        finally:
+            self._release_unfinished_claim(claim)
 
     def get_current(self, trip_id: UUID) -> TripDraftRevisionView:
         try:
             return self.repository.get_current(trip_id)
+        except TripDraftRevisionStoreError as error:
+            raise TripDraftRevisionUnavailable(error.code) from error
+
+    def get_recognition(
+        self,
+        revision: TripDraftRevisionView,
+    ) -> TripDraftRevisionRecognition:
+        try:
+            return self.repository.get_recognition(
+                draft_id=revision.draft_id,
+                revision=revision.revision,
+            )
         except TripDraftRevisionStoreError as error:
             raise TripDraftRevisionUnavailable(error.code) from error
 
@@ -500,6 +553,100 @@ class TripDraftRevisionService(TripDraftRevisionPort):
                 raise cls._app_error("PARTICIPANT_SCOPE_VIOLATION")
         return candidate
 
+    @classmethod
+    def _merge_member_profile_scope(
+        cls,
+        *,
+        current: TripDraftRevisionView,
+        candidate: TripUnderstandingProposal,
+        participant_id: UUID,
+    ) -> TripUnderstandingProposal:
+        current_keys = [item.member_key for item in current.understanding.participants]
+        candidate_keys = [item.member_key for item in candidate.participants]
+        if candidate_keys == current_keys:
+            return cls._merge_member_scope(
+                current=current,
+                candidate=candidate,
+                participant_id=participant_id,
+            )
+        if candidate_keys != ["member-1"]:
+            raise cls._app_error("DRAFT_BINDINGS_IMMUTABLE")
+
+        own_key = cls._member_key(current, participant_id)
+        own_index = current_keys.index(own_key)
+        extracted = candidate.participants[0]
+        before = current.understanding.participants[own_index]
+        replace_prefixes = cls._MEMBER_PROFILE_PREFIXES
+        nickname = before.nickname
+        if extracted.nickname is not None:
+            nickname = extracted.nickname
+            replace_prefixes = ("nickname", *replace_prefixes)
+
+        payload = current.understanding.model_dump(mode="python", by_alias=True)
+        payload["participants"][own_index].update(
+            {
+                "nickname": nickname,
+                "budgetCapCents": extracted.budget_cap_cents,
+                "interests": list(extracted.interests),
+                "mustVisit": list(extracted.must_visit),
+                "avoidPlaces": list(extracted.avoid_places),
+                "careDraft": (
+                    extracted.care_draft.model_dump(mode="python", by_alias=True)
+                    if extracted.care_draft is not None
+                    else None
+                ),
+            }
+        )
+
+        target_prefix = f"participants[{own_index}]."
+        source_prefix = "participants[0]."
+
+        def is_replaced(path: str, member_key: str | None) -> bool:
+            return (
+                member_key == own_key
+                and path.startswith(target_prefix)
+                and path.removeprefix(target_prefix).startswith(replace_prefixes)
+            )
+
+        def remap(item: object) -> dict[str, object] | None:
+            value = item.model_dump(mode="python", by_alias=True)  # type: ignore[attr-defined]
+            path = value["fieldPath"]
+            if value.get("memberKey") != "member-1" or not path.startswith(source_prefix):
+                return None
+            tail = path.removeprefix(source_prefix)
+            if not tail.startswith(replace_prefixes):
+                return None
+            value["fieldPath"] = f"{target_prefix}{tail}"
+            value["memberKey"] = own_key
+            return value
+
+        payload["fieldEvidence"] = [
+            item for item in payload["fieldEvidence"]
+            if not is_replaced(item["fieldPath"], item.get("memberKey"))
+        ]
+        payload["fieldEvidence"].extend(
+            mapped
+            for item in candidate.field_evidence
+            if (mapped := remap(item)) is not None
+        )
+
+        for payload_key, source_items in (
+            ("missingFields", candidate.missing_fields),
+            ("ambiguities", candidate.ambiguities),
+            ("confirmationQuestions", candidate.confirmation_questions),
+        ):
+            payload[payload_key] = [
+                item for item in payload[payload_key]
+                if not is_replaced(item["fieldPath"], item.get("memberKey"))
+            ]
+            payload[payload_key].extend(
+                mapped
+                for item in source_items
+                if (mapped := remap(item)) is not None
+            )
+
+        return TripUnderstandingProposal.model_validate(payload)
+
     async def submit_participant_conversation(
         self,
         *,
@@ -538,9 +685,13 @@ class TripDraftRevisionService(TripDraftRevisionPort):
         if replay is not None:
             return replay
         assert isinstance(claim, ClaimedCommand)
-        reference_date = current.understanding.trip.travel_date or date.today()
-        request = self._understanding_request(submission, reference_date)
         try:
+            reference_date = current.understanding.trip.travel_date or date.today()
+            request = self._understanding_request(
+                submission,
+                reference_date,
+                scope="MEMBER_PROFILE",
+            )
             extraction = await self._understand(request)
             if extraction.decision == "FIXED_QUESTIONS":
                 if submission.reviewed_fallback:
@@ -583,10 +734,17 @@ class TripDraftRevisionService(TripDraftRevisionPort):
                 return outcome
             assert extraction.proposal is not None
             proposal = validate_trip_understanding(request, extraction.proposal)
-            candidate = self._merge_member_scope(
+            candidate = self._merge_member_profile_scope(
                 current=current,
                 candidate=proposal,
                 participant_id=participant_id,
+            )
+            merged_extraction = TripUnderstandingExtraction(
+                proposal=candidate,
+                recognitionSource="MODEL_PROPOSAL",
+                recognitionModel=extraction.model,
+                degradedReason=extraction.failure_code,
+                llmCallCount=extraction.call_count,
             )
             revision = self._build_revision(
                 claim=claim,
@@ -594,15 +752,28 @@ class TripDraftRevisionService(TripDraftRevisionPort):
                 member_bindings=dict(current.member_bindings),
                 created_at=self._clock(),
             )
+            self.repository.complete(claim, revision, merged_extraction)
+            return revision
+        except asyncio.CancelledError:
+            logger.warning(
+                "member trip understanding request was cancelled trip_id=%s",
+                trip_id,
+            )
+            raise
         except Exception as error:
             failure = self._map_revision_failure(error)
+            logger.warning(
+                "member trip understanding failed code=%s trip_id=%s",
+                failure.code,
+                trip_id,
+            )
             try:
                 self.repository.fail(claim, code=failure.code)
             except TripDraftRevisionStoreError as store_error:
                 raise self._store_error(store_error) from store_error
             raise failure from error
-        self.repository.complete(claim, revision, extraction)
-        return revision
+        finally:
+            self._release_unfinished_claim(claim)
 
     @classmethod
     def _participant_index(
@@ -796,7 +967,10 @@ class TripDraftRevisionService(TripDraftRevisionPort):
             except TripDraftRevisionStoreError as store_error:
                 raise self._store_error(store_error) from store_error
             raise failure from error
-        self.repository.complete(claim, revision, extraction)
+        try:
+            self.repository.complete(claim, revision, extraction)
+        except TripDraftRevisionStoreError as error:
+            raise self._store_error(error) from error
         return revision
 
 

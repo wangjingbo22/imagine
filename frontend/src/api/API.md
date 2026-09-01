@@ -323,11 +323,28 @@ src/api/tripContract.ts
 - 组织者只能点击 `actorScope=ORGANIZER` 的选项；成员选项显示“需对应成员本人处理”，不得由前端绕过权限。
 - 页面只有在 `status=READY_TO_PLAN && canPlan=true && readinessDigest!=null` 时显示唯一推荐入口。冲突解决后若成员状态为 `NEEDS_RECONFIRMATION`，应继续显示等待重新确认，不得直接进入规划。
 - 组织者创建入口已接入 T002 `TripDraftRevision` 生产实现；任何 revision、权限或 readiness 校验失败仍必须 fail-closed，前端不得伪造成功状态。
+- `POST /api/v2/trips/conversations` 的成功创建响应在 `data.recognition` 返回 `source`（`MODEL_PROPOSAL` 或 `REVIEWED_FIXED_QUESTIONS`）、`model`、`degradedReason` 和 `callCount`。模型成功时 `degradedReason` 必须为 `null`；六项复核降级时必须保留真实百炼失败码，页面不得显示百炼成功，但仍可继续既有组织者确认流程。未完成复核的失败响应仍使用 `FIXED_QUESTIONS` fallback 形状。
 
-## 14. 尚未登记的远端接口
+## 14. S2-T012 任务照片生命周期接口
+
+以下三条接口已由后端实现，照片按任务维度软替换或删除，并使用 `tripId` 统计同一行程的活跃照片数量。
+
+- `GET /api/v2/trips/{tripId}/tasks/{taskId}/media`：读取任务当前活跃照片；没有照片时 `data` 为 `null`。
+- `POST /api/v2/trips/{tripId}/tasks/{taskId}/media`：写入任务照片；请求体为 `dataUrl`、`mimeType`（`image/jpeg` 或 `image/webp`）和 `byteSize`，同一任务已有照片时替换它。
+- `DELETE /api/v2/trips/{tripId}/tasks/{taskId}/media`：软删除任务当前活跃照片。
+
+成功响应沿用 `{ "code": 200, "message": "success", "data": ... }`。照片对象字段为 `mediaId`、`taskId`、`dataUrl`、`mimeType`、`byteSize` 和 `createdAt`。同一行程最多保留 8 张活跃照片。
+
+错误约定：
+
+- `TRIP_MEDIA_LIMIT_REACHED`：HTTP 409，不可重试。
+- `TASK_MEDIA_NOT_FOUND`：HTTP 404，不可重试。
+- `MEDIA_STORAGE_UNAVAILABLE`：HTTP 503，可重试；表示媒体 SQLite 初始化、读取、替换或删除暂不可用。替换失败时旧照片保持可读，重试成功后才完成替换。
+
+## 15. 尚未登记的远端接口
 
 以下能力目前没有远端 HTTP 契约：
 
-- 照片与视频上传
+- 视频上传
 
-照片与视频当前仅保存在浏览器本地；团队若需要跨设备同步，必须先补充 URL、请求 DTO、响应 DTO、状态转换和错误码，不得伪造上传成功。
+视频当前仅保存在浏览器本地；团队若需要跨设备同步，必须先补充 URL、请求 DTO、响应 DTO、状态转换和错误码，不得伪造上传成功。

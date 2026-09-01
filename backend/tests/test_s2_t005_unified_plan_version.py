@@ -1359,6 +1359,11 @@ def test_direct_collaboration_v1_city_mismatch_stops_planner_and_state(monkeypat
         })
     })
     boundary = _boundary()
+    boundary.workflow_service = SimpleNamespace(
+        require_confirmed_trip=lambda _trip_id, _trip: (_ for _ in ()).throw(
+            AppError("CONFIRMED_TRIP_MISMATCH", "mismatch", 409, False)
+        ),
+    )
     stage_calls = 0
     planner_calls = 0
 
@@ -1407,6 +1412,77 @@ def test_planning_projection_accepts_city_administrative_suffix_alias() -> None:
     )
 
     assert "cityName" not in paths
+
+
+def test_collaboration_boundary_accepts_provider_county_city_canonical_name() -> None:
+    request = _request_for_shape("SINGLE", 1)
+    revision = _revision_for_request(request)
+    revision.understanding.trip.city_name = "瑞安"
+    canonical_request = request.model_copy(update={
+        "trip": request.trip.model_copy(update={
+            "city_context": request.trip.city_context.model_copy(
+                update={"city_name": "温州市", "city_code": "330300"}
+            )
+        })
+    })
+    confirmed: list[object] = []
+    boundary = _boundary()
+    boundary.workflow_service = SimpleNamespace(
+        require_confirmed_trip=lambda _trip_id, trip: confirmed.append(trip),
+    )
+
+    boundary._require_collaboration_request_matches_revision(
+        canonical_request,
+        _collaboration_permit(revision),
+    )
+
+    assert confirmed == [canonical_request.trip]
+
+
+def test_collaboration_boundary_rejects_unconfirmed_provider_city_alias() -> None:
+    request = _request_for_shape("SINGLE", 1)
+    revision = _revision_for_request(request)
+    revision.understanding.trip.city_name = "瑞安"
+    changed_request = request.model_copy(update={
+        "trip": request.trip.model_copy(update={
+            "city_context": request.trip.city_context.model_copy(
+                update={"city_name": "温州市", "city_code": "330300"}
+            )
+        })
+    })
+    boundary = _boundary()
+    boundary.workflow_service = SimpleNamespace(
+        require_confirmed_trip=lambda _trip_id, _trip: (_ for _ in ()).throw(
+            AppError("CONFIRMED_TRIP_MISMATCH", "mismatch", 409, False)
+        ),
+    )
+
+    with pytest.raises(AppError) as captured:
+        boundary._require_collaboration_request_matches_revision(
+            changed_request,
+            _collaboration_permit(revision),
+        )
+
+    assert captured.value.code == "COLLABORATION_PLAN_SNAPSHOT_MISMATCH"
+
+
+def test_planning_projection_fills_missing_member_identity_and_budget() -> None:
+    request = _request_for_shape("GROUP", 2)
+    revision = _revision_for_request(request)
+    for participant in revision.understanding.participants:
+        participant.nickname = None
+        participant.budget_cap_cents = None
+
+    projected = _boundary()._revision_planning_projection(revision)
+
+    assert [item["nickname"] for item in projected["participants"]] == [
+        "成员 1",
+        "成员 2",
+    ]
+    assert [item["budgetCents"] for item in projected["participants"]] == [
+        revision.understanding.trip.budget_cents,
+        revision.understanding.trip.budget_cents,
+    ]
 
 
 def test_planning_projection_exposes_city_name_mismatch_path() -> None:

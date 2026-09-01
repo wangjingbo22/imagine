@@ -295,9 +295,11 @@ export const tripApi = {
     radiusMeters = 3_000,
     page = 1,
     pageSize = 20,
+    organizerToken?: string | null,
   ) {
     return request<PlaceCollection>('/api/v1/places/nearby', {
       method: 'POST',
+      headers: organizerHeaders(organizerToken),
       body: JSON.stringify({
         schemaVersion: '1.0',
         tripId,

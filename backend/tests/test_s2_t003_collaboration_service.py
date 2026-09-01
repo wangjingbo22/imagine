@@ -43,6 +43,43 @@ class ReadyHarness:
     organizer_token: str
 
 
+@pytest.mark.parametrize(
+    ("code", "message", "status", "retryable"),
+    (
+        (
+            "ORGANIZER_PERMISSION_REQUIRED",
+            "组织者凭证缺失、已失效或不属于当前行程，请从创建行程的浏览器页面重新进入。",
+            403,
+            False,
+        ),
+        (
+            "COLLABORATION_OPERATION_IN_PROGRESS",
+            "该行程正在执行另一个规划请求，请稍候再试。",
+            409,
+            True,
+        ),
+        (
+            "COLLABORATION_VERSION_STALE",
+            "协作状态已被其他页面更新，请刷新后重试。",
+            409,
+            False,
+        ),
+    ),
+)
+def test_store_errors_expose_actionable_messages(
+    code: str,
+    message: str,
+    status: int,
+    retryable: bool,
+) -> None:
+    error = CollaborationService._store_error(CollaborationStoreError(code))
+
+    assert error.code == code
+    assert error.message == message
+    assert error.http_status == status
+    assert error.retryable is retryable
+
+
 def _ready_harness(tmp_path) -> ReadyHarness:
     revision = load_revision()
     ordinary = CareDraft(
