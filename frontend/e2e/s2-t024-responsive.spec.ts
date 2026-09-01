@@ -248,6 +248,32 @@ async function mockWorkspace(page: Page, kind: 'execute' | 'diff' | 'summary') {
   await page.route(`**/api/v1/trips/${T024_TRIP_ID}/summary`, async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: api(tripSummary) })
   })
+  await page.route(`**/api/v1/trips/${T024_TRIP_ID}/memory-timeline`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: api({
+        schemaVersion: '1.0',
+        tripId: T024_TRIP_ID,
+        summary: {
+          completedTaskCount: 3,
+          skippedTaskCount: 0,
+          totalTaskCount: 3,
+          completionRatePercent: 100,
+          plannedCostCents: 35000,
+          actualCostCents: 32000,
+          costDifferenceCents: -3000,
+          currency: 'CNY',
+          currentPlanVersion: 2,
+          planChangeCount: 1,
+          photoCount: 0,
+          participantCareResults: [],
+          assistanceProfile: null,
+        },
+        items: [],
+      }),
+    })
+  })
   await page.route(`**/api/v2/trips/${T024_TRIP_ID}/tasks/*/media`, async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: api(null) })
   })
@@ -284,6 +310,7 @@ test('mocked single-person UI integration confirms the recommendation and enters
   await page.getByLabel('开始').fill('09:00')
   await page.getByLabel('结束').fill('20:00')
   await page.getByRole('button', { name: /下一个问题/ }).click()
+  await page.getByLabel('组织者昵称').fill('组织者')
   await page.getByRole('button', { name: /下一个问题/ }).click()
   await page.getByLabel('出发地').fill('北京站')
   await page.getByLabel('结束地').fill('北京站')
@@ -291,7 +318,7 @@ test('mocked single-person UI integration confirms the recommendation and enters
   await page.getByRole('button', { name: /下一个问题/ }).click()
   await page.locator('.conversation-textarea--answer').fill('喜欢历史文化，没有必去和避开地点。')
   await page.getByRole('button', { name: /下一个问题/ }).click()
-  await page.locator('.conversation-textarea--answer').fill('预算上限350元，普通出行。')
+  await page.getByLabel('个人预算上限（元）').fill('350')
   await page.getByRole('button', { name: /下一个问题/ }).click()
   await page.locator('.conversation-textarea--answer').fill('以上信息正确。')
   await page.getByRole('button', { name: /完成问答并智能整理/ }).click()
@@ -347,7 +374,7 @@ test('unique recommendation remains readable at the acceptance viewport', async 
 for (const fixture of [
   { kind: 'execute' as const, expected: '执行旅程' },
   { kind: 'diff' as const, expected: 'Plan V2' },
-  { kind: 'summary' as const, expected: '旅途回忆' },
+  { kind: 'summary' as const, expected: '真实旅程时间线' },
 ]) {
   test(`mocked ${fixture.kind} fixture stays responsive (UI contract only)`, async ({ page }) => {
     await installSession(page)

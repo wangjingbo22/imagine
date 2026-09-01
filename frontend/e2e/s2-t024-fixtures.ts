@@ -181,6 +181,12 @@ export const organizerRevision = {
 
 export const organizerConversation = {
   revision: organizerRevision,
+  recognition: {
+    source: 'MODEL_PROPOSAL',
+    model: 'qwen-plus',
+    degradedReason: null,
+    callCount: 1,
+  },
   organizerAccess: {
     tripId: T024_TRIP_ID,
     organizerParticipantId: '40000000-0000-4000-8000-000000000024',
