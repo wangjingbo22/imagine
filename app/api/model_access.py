@@ -7,6 +7,7 @@ from fastapi import Request
 
 from app.application.llm_gateway import StrictTripUnderstandingGateway
 from app.application.llm_gateway import StrictCandidateSelectionGateway
+from app.application.account_service import validate_public_model_base_url
 from app.application.recommendation_service import RecommendationOrchestrationService
 from app.application.trip_draft_revision_service import TripDraftRevisionService
 from app.core.errors import AppError
@@ -33,6 +34,7 @@ def require_account_model_credentials(request: Request) -> AccountModelCredentia
 @asynccontextmanager
 async def account_trip_draft_revision_service(request: Request):
     model, api_key, base_url = require_account_model_credentials(request)
+    base_url = validate_public_model_base_url(base_url)
     settings = request.app.state.settings
     extractor = BailianTripDraftExtractor(
         api_key=api_key,
@@ -54,6 +56,7 @@ async def account_trip_draft_revision_service(request: Request):
 @asynccontextmanager
 async def account_recommendation_service(request: Request):
     model, api_key, base_url = require_account_model_credentials(request)
+    base_url = validate_public_model_base_url(base_url)
     settings = request.app.state.settings
     client = OpenAiCompatibleCandidateSelectionClient(
         api_key=api_key,

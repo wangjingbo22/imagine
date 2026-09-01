@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 import ipaddress
+import socket
 from urllib.parse import urlparse
 from cryptography.fernet import Fernet, InvalidToken
 from collections.abc import Callable
@@ -26,6 +27,41 @@ from app.infrastructure.account_store import (
 )
 
 MAX_SESSION_TTL_DAYS = 14
+
+
+def validate_public_model_base_url(value: str) -> str:
+    try:
+        parsed = urlparse(value)
+        port = parsed.port
+    except ValueError as error:
+        raise AppError(
+            "ACCOUNT_MODEL_BASE_URL_INVALID",
+            "模型 API 地址必须是有效的 HTTPS 地址",
+            422,
+            False,
+        ) from error
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+    ):
+        raise AppError("ACCOUNT_MODEL_BASE_URL_INVALID", "模型 API 地址必须是有效的 HTTPS 地址", 422, False)
+    if parsed.query or parsed.fragment or port not in (None, 443):
+        raise AppError("ACCOUNT_MODEL_BASE_URL_FORBIDDEN", "该地址不在允许的公共 HTTPS 服务范围内", 422, False)
+    hostname = parsed.hostname.casefold().rstrip(".")
+    if hostname == "localhost":
+        raise AppError("ACCOUNT_MODEL_BASE_URL_FORBIDDEN", "该地址不在允许的公共 HTTPS 服务范围内", 422, False)
+    try:
+        addresses = {
+            ipaddress.ip_address(result[4][0])
+            for result in socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
+        }
+    except (socket.gaierror, ValueError) as error:
+        raise AppError("ACCOUNT_MODEL_ENDPOINT_UNAVAILABLE", "暂时无法连接模型服务，请稍后重试", 503, True) from error
+    if not addresses or any(not address.is_global for address in addresses):
+        raise AppError("ACCOUNT_MODEL_BASE_URL_FORBIDDEN", "该地址不在允许的公共 HTTPS 服务范围内", 422, False)
+    return value.rstrip("/")
 
 
 class AccountService:
@@ -141,23 +177,7 @@ class AccountService:
         user = self.current_user(token)
         if self._cipher is None:
             raise AppError("ACCOUNT_KEY_STORAGE_UNAVAILABLE", "服务端未配置 API Key 加密密钥", 503, False)
-        parsed = urlparse(payload.base_url)
-        if (
-            parsed.scheme != "https"
-            or not parsed.hostname
-            or parsed.username
-            or parsed.password
-        ):
-            raise AppError("ACCOUNT_MODEL_BASE_URL_INVALID", "模型 API 地址必须是 HTTPS URL", 422, False)
-        if parsed.query or parsed.fragment or parsed.port not in (None, 443):
-            raise AppError("ACCOUNT_MODEL_BASE_URL_FORBIDDEN", "该地址不在允许的公共 HTTPS 服务范围内", 422, False)
-        try:
-            ipaddress.ip_address(parsed.hostname)
-        except ValueError:
-            pass
-        else:
-            raise AppError("ACCOUNT_MODEL_BASE_URL_FORBIDDEN", "该地址不在允许的公共 HTTPS 服务范围内", 422, False)
-        base_url = payload.base_url.rstrip("/")
+        base_url = validate_public_model_base_url(payload.base_url)
         api_key = payload.api_key.get_secret_value()
         self.repository.save_model_settings(user.user_id, model=payload.model, encrypted_api_key=self._cipher.encrypt(api_key.encode()).decode(), base_url=base_url)
         return ModelSettingsView(
