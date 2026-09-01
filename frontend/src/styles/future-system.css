@@ -215,9 +215,45 @@ body,
 .recommendation-hero,
 .parent-trip-hero,
 .parent-member-header { border-bottom-color: var(--future-line); }
+.recommendation-panel {
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.78);
+}
+.recommendation-hero {
+  position: relative;
+  min-height: 228px;
+  margin: 0 0 26px;
+  padding: 42px 48px 36px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-bottom: 1px solid #d8e5f5;
+  background: #ffffff;
+}
+.recommendation-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: #1769e0;
+}
+.recommendation-hero::after {
+  content: '';
+  position: absolute;
+  top: 38px;
+  right: 46px;
+  width: 116px;
+  height: 72px;
+  border-top: 1px solid #b9d5f9;
+  border-right: 1px solid #b9d5f9;
+  opacity: 0.9;
+}
+.recommendation-hero .section-kicker { margin: 0; color: #1769e0; font-size: 11px; letter-spacing: .08em; }
 .recommendation-hero h1,
 .parent-trip-hero h1,
 .parent-member-header h1 { color: #0b2650; letter-spacing: 0; }
+.recommendation-hero h1 { margin: 14px 0 12px; max-width: 680px; font-size: clamp(38px, 4vw, 56px); line-height: 1; font-weight: 760; }
+.recommendation-hero p { max-width: 760px; padding-right: 110px; color: #58718f; font-size: 15px; line-height: 1.75; }
 .recommendation-location { border-color: #d8e5f5; background: rgba(255, 255, 255, 0.68); }
 .recommendation-location__order,
 .trusted-plan__heading-icon { color: white; background: #1769e0; }
@@ -319,6 +355,11 @@ body,
   .planner-sidebar .eyebrow { color: #155ebc; border-color: #cfe2ff; background: #edf5ff; }
   .account-layout { width: min(100% - 28px, 1080px); padding: 38px 0 72px; }
   .hero-section { min-height: auto; background-size: 34px 34px; }
+  .recommendation-panel { background: transparent; }
+  .recommendation-hero { min-height: 0; margin: 0 0 20px; padding: 32px 24px 28px; }
+  .recommendation-hero::after { top: 22px; right: 22px; width: 62px; height: 42px; }
+  .recommendation-hero h1 { margin: 13px 0 11px; font-size: 38px; }
+  .recommendation-hero p { padding-right: 0; font-size: 14px; }
   .recommendation-loading { min-height: 0; padding: 26px 22px; grid-template-columns: 1fr; gap: 28px; }
   .recommendation-loading__steps { grid-row: auto; grid-column: auto; }
 }
