@@ -229,6 +229,42 @@ test('walking unavailability requests driving once and never requests transit or
   assert.deepEqual(modes, ['WALKING', 'DRIVING'])
 })
 
+test('rejects a provider route whose mode differs from the requested driving fallback', async (t) => {
+  const originalFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = originalFetch })
+  const { base, city } = fixture()
+  const modes: TravelMode[] = []
+  globalThis.fetch = (async (_input, init = {}) => {
+    const body = JSON.parse(String(init.body)) as {
+      mode: TravelMode
+      origin: GeoPoint
+      destination: GeoPoint
+    }
+    modes.push(body.mode)
+    const returned = body.mode === 'WALKING'
+      ? route('walking-over-limit', body.origin, body.destination, 'WALKING', 1_200, 1_001)
+      : route('wrong-mode', body.origin, body.destination, 'BICYCLING')
+    return ok({ cityCode: '110100', routes: [returned], provenance })
+  }) as typeof fetch
+
+  await assert.rejects(
+    requestDefaultAmapRoute(
+      base.trip.tripId,
+      city,
+      base.startLocation.location,
+      base.taskFacts[0].place.location,
+      2_000,
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof Error)
+      assert.match(error.message, /DRIVING/)
+      assert.match(error.message, /BICYCLING/)
+      return true
+    },
+  )
+  assert.deepEqual(modes, ['WALKING', 'DRIVING'])
+})
+
 test('driving failure remains readable and does not fall back to transit or cycling', async (t) => {
   const originalFetch = globalThis.fetch
   t.after(() => { globalThis.fetch = originalFetch })

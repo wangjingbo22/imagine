@@ -8,6 +8,7 @@ import type {
   CandidatePlanRequest,
   CandidatePlanningTrip,
   CandidateTaskFact,
+  CityContext,
   CityResolution,
   CreateDayTrip,
   CreateSingleDayTrip,
@@ -459,7 +460,7 @@ export function orderByShortestNextSegment(places: Place[], seed: GeoPoint) {
 
 async function requestFirstRoute(
   tripId: string,
-  city: CityResolution,
+  cityContext: CityContext,
   origin: GeoPoint,
   destination: GeoPoint,
   mode: TravelMode,
@@ -467,7 +468,7 @@ async function requestFirstRoute(
 ) {
   const response = await tripApi.planRoute(
     tripId,
-    city.cityContext,
+    cityContext,
     origin,
     destination,
     mode,
@@ -476,6 +477,9 @@ async function requestFirstRoute(
   )
   const route = response.data.routes[0]
   if (!route) throw new Error(`高德未返回 ${mode} 路线`)
+  if (route.mode !== mode) {
+    throw new Error(`高德为 ${mode} 请求返回了 ${route.mode} 路线`)
+  }
   return route
 }
 
@@ -491,7 +495,7 @@ export async function requestDefaultAmapRoute(
   try {
     walking = await providerCall(() => requestFirstRoute(
       tripId,
-      city,
+      city.cityContext,
       origin,
       destination,
       'WALKING',
@@ -509,7 +513,7 @@ export async function requestDefaultAmapRoute(
   }
   return providerCall(() => requestFirstRoute(
     tripId,
-    city,
+    city.cityContext,
     origin,
     destination,
     'DRIVING',
@@ -1032,22 +1036,14 @@ export async function replaceAmapPlanSegment(
     throw new RangeError('segment index is outside the candidate route facts')
   }
   const selectedFact = baseRequest.taskFacts[segmentIndex]
-  const response = await providerCall(() => tripApi.planRoute(
+  const route = await providerCall(() => requestFirstRoute(
     tripId,
     baseRequest.trip.cityContext,
     selectedFact.route.origin,
     selectedFact.route.destination,
     mode,
-    null,
     organizerToken,
   ))
-  const route = response.data.routes[0]
-  if (!route) {
-    throw new Error(`高德未返回 ${mode} 路线`)
-  }
-  if (route.mode !== mode) {
-    throw new Error(`高德返回的路线方式不是所选的 ${mode}`)
-  }
 
   const evidence = { segmentIndex, route }
   let candidateRequest: CandidatePlanRequest
