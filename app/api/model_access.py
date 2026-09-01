@@ -23,4 +23,23 @@ def require_account_model_credentials(request: Request) -> AccountModelCredentia
     return credentials
 
 
-__all__ = ["AccountModelCredentials", "require_account_model_credentials"]
+def optional_account_model_credentials(
+    request: Request,
+) -> AccountModelCredentials | None:
+    """Return the signed-in user's model settings when they are available.
+
+    The collaboration endpoints still support the deployment-level model as a
+    fallback for guests and existing shared links.  A missing account session
+    is therefore not an error at this boundary; a broken saved credential is.
+    """
+    token = request.cookies.get("account_session")
+    if not token:
+        return None
+    return request.app.state.account_service.user_model_credentials(token)
+
+
+__all__ = [
+    "AccountModelCredentials",
+    "optional_account_model_credentials",
+    "require_account_model_credentials",
+]

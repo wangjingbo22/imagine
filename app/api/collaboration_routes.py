@@ -4,9 +4,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
+from app.api.model_access import optional_account_model_credentials
 from app.application.collaboration_service import CollaborationService
+from app.application.llm_gateway import StrictTripUnderstandingGateway
 from app.application.trip_draft_revision_service import (
     TripUnderstandingFallbackResponse,
+    TripDraftRevisionService,
 )
 from app.core.errors import AppError
 from app.domain.collaboration import (
@@ -21,6 +24,7 @@ from app.domain.collaboration import (
     ResolveConfirmationItemRequest,
 )
 from app.domain.models import ApiResponse
+from app.infrastructure.bailian import BailianTripDraftExtractor
 
 
 router = APIRouter(prefix="/api/v2", tags=["S2 成员确认与硬冲突"])
@@ -67,9 +71,8 @@ async def create_conversation(
 ) -> ApiResponse:
     response.headers["Cache-Control"] = "no-store"
     idempotency_key = require_idempotency_key(request)
-    outcome = await request.app.state.trip_draft_revision_creator.create_initial(
-        payload,
-        idempotency_key=idempotency_key,
+    outcome = await _create_initial_with_available_model(
+        request, payload, idempotency_key
     )
     if isinstance(outcome, TripUnderstandingFallbackResponse):
         return ApiResponse(data=outcome)
@@ -88,6 +91,42 @@ async def create_conversation(
             organizerAccess=organizer_access,
         )
     )
+
+
+async def _create_initial_with_available_model(
+    request: Request,
+    payload: OrganizerConversationRequest,
+    idempotency_key: str,
+):
+    """Prefer the current account's saved model over the server default.
+
+    The original creator remains the fallback so public/shared collaboration
+    links retain their previous deployment-level behaviour.
+    """
+    creator = request.app.state.trip_draft_revision_creator
+    credentials = optional_account_model_credentials(request)
+    if credentials is None:
+        return await creator.create_initial(payload, idempotency_key=idempotency_key)
+
+    model, api_key, base_url = credentials
+    extractor = BailianTripDraftExtractor(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        timeout_seconds=request.app.state.settings.bailian_request_timeout_seconds,
+    )
+    account_creator = TripDraftRevisionService(
+        repository=creator.repository,
+        gateway=StrictTripUnderstandingGateway(extractor),
+        clock=creator._clock,
+    )
+    try:
+        return await account_creator.create_initial(
+            payload,
+            idempotency_key=idempotency_key,
+        )
+    finally:
+        await extractor.close()
 
 
 @router.post("/trips/{trip_id}/participants/{participant_id}/invitations")

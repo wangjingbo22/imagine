@@ -19,6 +19,7 @@ from app.domain.trip_draft import (
     TripUnderstandingProposal,
 )
 from app.main import create_app
+from app.api import collaboration_routes
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "trip_understanding"
@@ -125,6 +126,53 @@ class CountingGateway:
             callCount=self.call_count,
             model="test-model",
         )
+
+
+@pytest.mark.asyncio
+async def test_conversation_uses_bound_account_model_when_server_key_is_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The v2 intake must not fall back merely because BAILIAN_API_KEY is unset."""
+    proposal = _proposal()
+
+    class BoundAccountService:
+        def user_model_credentials(self, token: str):
+            assert token == "signed-in-account"
+            return ("account-qwen", "account-key", "https://model.example/v1")
+
+    class BoundExtractor:
+        def __init__(self, *, model: str, **_: object) -> None:
+            self.model = model
+
+        async def propose_trip_understanding(self, request) -> str:
+            return proposal.model_dump_json(by_alias=True)
+
+        async def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(collaboration_routes, "BailianTripDraftExtractor", BoundExtractor)
+    app = create_app(
+        settings=_settings(tmp_path),
+        service=object(),  # type: ignore[arg-type]
+        account_service=BoundAccountService(),  # type: ignore[arg-type]
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.post(
+            "/api/v2/trips/conversations",
+            headers={"Idempotency-Key": "bound-account-key-0001"},
+            cookies={"account_session": "signed-in-account"},
+            json=_conversation_payload(),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["recognition"] == {
+        "source": "MODEL_PROPOSAL",
+        "model": "account-qwen",
+        "degradedReason": None,
+        "callCount": 1,
+    }
 
 
 async def _request_conversation(
