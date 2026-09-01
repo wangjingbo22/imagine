@@ -59,8 +59,8 @@ test('T010 strips the bearer invitation from the URL before redemption', async (
   assert.ok(redemptionIndex > stripIndex)
   assert.match(page, /storeParentMemberSession/)
   assert.match(page, /clearPendingInvitation/)
-  assert.match(page, /ACCOUNT_SESSION_REQUIRED/)
-  assert.match(page, /\/account\?returnTo=%2Fparent-join/)
+  assert.match(page, /redeemParentTripInvitation/)
+  assert.doesNotMatch(page, /ACCOUNT_SESSION_REQUIRED|\/account\?returnTo=%2Fparent-join/)
 })
 
 

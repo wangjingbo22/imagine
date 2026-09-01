@@ -1,40 +1,17 @@
-import { Heart, LogIn, LogOut, MapPin, Save, UserRound } from 'lucide-react'
+import { LogIn, LogOut, UserRound } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   loginAccount,
   registerAccount,
-  updateAccountProfile,
 } from '../api/accountApi'
 import { AppShell } from '../components/AppShell'
-import type { CurrentUser } from '../domain/account'
 import { useAccountSession } from '../session/useAccountSession'
 
 type AccountMode = 'login' | 'register'
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
-}
-
-function interestsFromText(value: string): string[] {
-  return value
-    .split(',')
-    .map((interest) => interest.trim())
-    .filter(Boolean)
-}
-
-type ProfileDraft = {
-  displayName: string
-  homeCity: string
-  interests: string
-}
-
-function profileValues(user: CurrentUser): ProfileDraft {
-  return {
-    displayName: user.displayName,
-    homeCity: user.homeCity ?? '',
-    interests: user.interests.join(', '),
-  }
 }
 
 export function AccountPage() {
@@ -44,25 +21,14 @@ export function AccountPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [registerDisplayName, setRegisterDisplayName] = useState('')
-  const [profileDraft, setProfileDraft] = useState<ProfileDraft | null>(null)
   const [authenticating, setAuthenticating] = useState(false)
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-  const profile = user ? profileDraft ?? profileValues(user) : null
 
   function switchMode(nextMode: AccountMode) {
     setMode(nextMode)
     setError('')
     setNotice('')
-  }
-
-  function updateProfileDraft(change: Partial<ProfileDraft>) {
-    if (!user) return
-    setProfileDraft((current) => ({
-      ...(current ?? profileValues(user)),
-      ...change,
-    }))
   }
 
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
@@ -75,10 +41,9 @@ export function AccountPage() {
         ? await loginAccount({ email, password })
         : await registerAccount({ email, password, displayName: registerDisplayName })
       setCurrentUser(response.data)
-      setProfileDraft(null)
       setRegisterDisplayName('')
       setPassword('')
-      setNotice(mode === 'login' ? '已登录，请完成画像后继续绑定模型。' : '账户已创建，请完成画像后继续绑定模型。')
+      navigate('/model-settings', { replace: true })
     } catch (caught) {
       setError(errorMessage(caught, '账户请求失败，请稍后重试'))
     } finally {
@@ -86,36 +51,7 @@ export function AccountPage() {
     }
   }
 
-  async function saveProfile(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!profile) return
-    const interestValues = interestsFromText(profile.interests)
-    if (interestValues.length > 8) {
-      setError('兴趣最多填写 8 项')
-      setNotice('')
-      return
-    }
-    setSaving(true)
-    setError('')
-    setNotice('')
-    try {
-      const response = await updateAccountProfile({
-        displayName: profile.displayName,
-        homeCity: profile.homeCity.trim() || null,
-        interests: interestValues,
-      })
-      setCurrentUser(response.data)
-      setProfileDraft(null)
-      navigate('/model-settings', { replace: true })
-    } catch (caught) {
-      setError(errorMessage(caught, '画像保存失败，请稍后重试'))
-    } finally {
-      setSaving(false)
-    }
-  }
-
   async function signOut() {
-    setSaving(true)
     setError('')
     setNotice('')
     try {
@@ -123,13 +59,10 @@ export function AccountPage() {
       setEmail('')
       setPassword('')
       setRegisterDisplayName('')
-      setProfileDraft(null)
       setMode('login')
       setNotice('已退出账户')
     } catch (caught) {
       setError(errorMessage(caught, '退出失败，请稍后重试'))
-    } finally {
-      setSaving(false)
     }
   }
 
@@ -151,11 +84,11 @@ export function AccountPage() {
       <main className="account-layout">
         <section className="account-intro">
           <p className="section-kicker">YOUR JOURNEY</p>
-          <h1>{user ? '把熟悉的偏好，留给下一次出发。' : '从你的账户，开始一段更贴合的旅程。'}</h1>
-          <p>保存常用城市与兴趣，规划时可以少填一点，让行程更快进入真正重要的部分。</p>
+          <h1>{user ? '账户已登录。' : '登录后开始规划你的旅程。'}</h1>
+          <p>登录后绑定模型与 API Key，即可开始创建你的行程。</p>
         </section>
 
-        {user && profile ? (
+        {user ? (
           <section className="account-panel account-panel--profile">
             <div className="account-panel__heading">
               <div className="account-avatar"><UserRound size={22} /></div>
@@ -164,28 +97,14 @@ export function AccountPage() {
                 <h2>{user.email}</h2>
               </div>
             </div>
-            <form className="account-form" onSubmit={(event) => void saveProfile(event)}>
-              <label>
-                <span>显示名称</span>
-                <input value={profile.displayName} onChange={(event) => updateProfileDraft({ displayName: event.target.value })} maxLength={80} required />
-              </label>
-              <label>
-                <span><MapPin size={15} /> 常用城市</span>
-                <input value={profile.homeCity} onChange={(event) => updateProfileDraft({ homeCity: event.target.value })} maxLength={80} placeholder="例如：北京" />
-              </label>
-              <label>
-                <span><Heart size={15} /> 兴趣</span>
-                <input value={profile.interests} onChange={(event) => updateProfileDraft({ interests: event.target.value })} placeholder="用逗号分隔，最多 8 项" />
-              </label>
-              <div className="account-form__actions">
-                <button className="button button--primary" type="submit" disabled={saving}>
-                  <Save size={17} /> {saving ? '保存中' : '保存画像'}
-                </button>
-                <button className="button button--soft" type="button" onClick={() => void signOut()} disabled={saving}>
-                  <LogOut size={17} /> 退出
-                </button>
-              </div>
-            </form>
+            <div className="account-form__actions">
+              <button className="button button--primary" type="button" onClick={() => navigate('/model-settings')}>
+                绑定模型
+              </button>
+              <button className="button button--soft" type="button" onClick={() => void signOut()}>
+                <LogOut size={17} /> 退出
+              </button>
+            </div>
             {notice && <p className="account-notice" role="status">{notice}</p>}
             {error && <p className="account-error" role="alert">{error}</p>}
           </section>

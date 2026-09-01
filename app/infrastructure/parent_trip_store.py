@@ -527,13 +527,13 @@ class SqliteParentTripRepository:
         *,
         token: str,
         idempotency_key: str,
-        account_user_id: UUID,
+        account_user_id: UUID | None,
         display_name: str,
         interests: list[str],
     ) -> tuple[dict[str, object], str]:
         now = self._clock()
         token_hash = self._hash(token)
-        account_text = str(account_user_id)
+        account_text = str(account_user_id) if account_user_id else None
         session_secret = self._derived_secret(token, f"parent-session:{idempotency_key}")
         with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -580,17 +580,18 @@ class SqliteParentTripRepository:
 
                 if member["account_user_id"] not in (None, account_text):
                     raise ParentTripStoreError("PARENT_INVITATION_ACCOUNT_MISMATCH")
-                existing_membership = connection.execute(
-                    """SELECT participant_id FROM parent_trip_members
-                    WHERE parent_trip_id=? AND account_user_id=? AND participant_id<>?""",
-                    (
-                        invitation["parent_trip_id"],
-                        account_text,
-                        invitation["participant_id"],
-                    ),
-                ).fetchone()
-                if existing_membership is not None:
-                    raise ParentTripStoreError("PARENT_ACCOUNT_ALREADY_MEMBER")
+                if account_text is not None:
+                    existing_membership = connection.execute(
+                        """SELECT participant_id FROM parent_trip_members
+                        WHERE parent_trip_id=? AND account_user_id=? AND participant_id<>?""",
+                        (
+                            invitation["parent_trip_id"],
+                            account_text,
+                            invitation["participant_id"],
+                        ),
+                    ).fetchone()
+                    if existing_membership is not None:
+                        raise ParentTripStoreError("PARENT_ACCOUNT_ALREADY_MEMBER")
 
                 session_id = uuid4()
                 session_expires_at = now + timedelta(days=30)

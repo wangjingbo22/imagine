@@ -151,13 +151,14 @@ async def redeem_parent_trip_invitation(
     parent_trip_service: ParentTripService = Depends(get_parent_trip_service),
 ) -> ApiResponse:
     _no_store(response)
-    user = account_service.current_user(_token(request))
+    session_token = _token(request)
+    user = account_service.current_user(session_token) if session_token else None
     return ApiResponse(
         data=parent_trip_service.redeem_invitation(
             token=payload.token,
             idempotency_key=_idempotency_key(request),
-            account_user_id=user.user_id,
-            display_name=user.display_name,
-            interests=user.interests,
+            account_user_id=user.user_id if user else None,
+            display_name=user.display_name if user else "同行成员",
+            interests=user.interests if user else [],
         )
     )

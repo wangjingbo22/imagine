@@ -476,7 +476,7 @@ class ParentTripService:
         *,
         token: str,
         idempotency_key: str,
-        account_user_id: UUID,
+        account_user_id: UUID | None,
         display_name: str,
         interests: list[str],
     ) -> ParentTripInvitationRedeemed:

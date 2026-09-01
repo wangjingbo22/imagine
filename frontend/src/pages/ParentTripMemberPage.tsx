@@ -13,7 +13,6 @@ import {
   redeemParentTripInvitation,
   updateParentTripMemberProfile,
 } from '../api/parentTripApi'
-import { ApiError } from '../api/client'
 import { AppShell } from '../components/AppShell'
 import type { ParentTripSyncView } from '../domain/parentTrip'
 import {
@@ -100,13 +99,6 @@ export function ParentTripMemberPage() {
       })
       .catch((caught: unknown) => {
         if (cancelled) return
-        if (
-          caught instanceof ApiError &&
-          caught.code === 'ACCOUNT_SESSION_REQUIRED'
-        ) {
-          navigate('/account?returnTo=%2Fparent-join', { replace: true })
-          return
-        }
         setPhase('ERROR')
         setError(caught instanceof Error ? caught.message : '加入父行程失败。')
       })

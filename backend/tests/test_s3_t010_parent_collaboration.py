@@ -175,13 +175,6 @@ async def test_three_people_poll_with_isolated_profiles_and_version_guard(
         second_data = second_invite.json()["data"]
         first_token = str(first_data["invitationUrl"]).rsplit("/", 1)[-1]
         second_token = str(second_data["invitationUrl"]).rsplit("/", 1)[-1]
-        unauthenticated = await client.post(
-            "/api/v1/account/parent-trip-invitations/redeem",
-            headers={"Idempotency-Key": "redeem-member-no-account"},
-            json={"schemaVersion": "1.0", "token": first_token},
-        )
-        assert unauthenticated.status_code == 401
-        assert unauthenticated.json()["code"] == "ACCOUNT_SESSION_REQUIRED"
         legacy_redeem = await client.post(
             "/api/v3/parent-trip-invitations/redeem",
             headers={"Idempotency-Key": "redeem-member-legacy-path"},
@@ -369,6 +362,42 @@ async def test_three_people_poll_with_isolated_profiles_and_version_guard(
         assert restored_sync["syncVersion"] == 7
         assert restored_sync["visibleProfiles"][0]["nickname"] == "小林"
         assert restored_sync["parentTrip"]["days"][0]["budgetCents"] == 40_000
+
+
+@pytest.mark.asyncio
+async def test_parent_invitation_redeems_without_an_account_session(tmp_path: Path) -> None:
+    database_path = tmp_path / "anonymous-parent-member.sqlite3"
+    app = create_app(settings=settings(database_path))
+    parent_id = str(uuid4())
+    organizer_token = "anonymous-parent-organizer-token-0123456789"
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        await create_parent(client, parent_id=parent_id, organizer_token=organizer_token)
+        created = await invite(
+            client,
+            parent_id=parent_id,
+            organizer_token=organizer_token,
+            expected_version=1,
+            idempotency_key="anonymous-member-invitation-0001",
+        )
+        invitation_token = str(created.json()["data"]["invitationUrl"]).rsplit("/", 1)[-1]
+        redeemed = await client.post(
+            "/api/v1/account/parent-trip-invitations/redeem",
+            headers={"Idempotency-Key": "anonymous-member-redeem-0001"},
+            json={"schemaVersion": "1.0", "token": invitation_token},
+        )
+        assert redeemed.status_code == 200, redeemed.text
+        member_session = redeemed.json()["data"]["memberSessionToken"]
+        view = await client.get(
+            f"/api/v3/parent-trips/{parent_id}/sync",
+            headers={"X-Parent-Member-Session": member_session},
+        )
+
+    assert view.status_code == 200, view.text
+    assert view.json()["data"]["visibleProfiles"][0]["nickname"] == "同行成员"
 
 
 def test_existing_parent_collaboration_database_migrates_account_binding(
