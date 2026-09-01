@@ -1529,6 +1529,442 @@ body,
   background: #fffaf0;
 }
 
+/* Blue-white visual system: shared across the home, planning, account, and trip flows. */
+:root {
+  --web-bg: #f3f7fc;
+  --web-surface: #ffffff;
+  --web-surface-soft: #f7faff;
+  --web-ink: #10233f;
+  --web-muted: #62738b;
+  --web-line: #d9e4f2;
+  --web-blue: #1769e0;
+  --web-blue-dark: #0a3f99;
+  --web-blue-soft: #eaf2ff;
+  --web-green: #1769e0;
+  --web-green-soft: #eaf2ff;
+  --web-amber: #b76e18;
+  --web-shadow: 0 20px 54px rgba(21, 66, 124, 0.11);
+}
+
+body,
+.app-shell,
+.app-shell--compact {
+  background-color: var(--web-bg);
+  background-image:
+    linear-gradient(rgba(23, 105, 224, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 105, 224, 0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+body {
+  color: var(--web-ink);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgba(23, 105, 224, 0.28);
+  outline-offset: 3px;
+}
+
+.topbar {
+  height: 76px;
+  border-bottom-color: rgba(23, 105, 224, 0.12);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 8px 28px rgba(28, 68, 121, 0.06);
+}
+
+.brand-mark__icon,
+.agent-orb,
+.conversation-intro > span,
+.confirmation-card__head > span,
+.shared-trip-card__head > span {
+  background: #0a4bb3;
+  box-shadow: 0 10px 22px rgba(23, 105, 224, 0.22);
+}
+
+.topbar__status {
+  color: #365171;
+  border-color: #d6e3f6;
+  background: #f7faff;
+}
+
+.avatar {
+  background: #102f60;
+}
+
+.status-dot {
+  background: #2274e8;
+  box-shadow: 0 0 0 4px rgba(34, 116, 232, 0.12);
+}
+
+.hero-section {
+  min-height: 720px;
+  color: var(--web-ink);
+  background-color: #f8fbff;
+  background-image:
+    linear-gradient(rgba(23, 105, 224, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 105, 224, 0.06) 1px, transparent 1px);
+  background-size: 52px 52px;
+}
+
+.hero-section::after {
+  border-color: rgba(23, 105, 224, 0.16);
+  box-shadow: 0 0 0 72px rgba(23, 105, 224, 0.028), 0 0 0 164px rgba(23, 105, 224, 0.014);
+}
+
+.hero-grid {
+  opacity: 0.3;
+  background-image: none;
+}
+
+.aurora--one {
+  background: radial-gradient(circle, rgba(74, 148, 255, 0.2), transparent 68%);
+}
+
+.aurora--two {
+  background: radial-gradient(circle, rgba(99, 183, 255, 0.16), transparent 70%);
+}
+
+.hero-content h1,
+.section-heading h2,
+.model-settings__intro h1 {
+  letter-spacing: 0;
+}
+
+.hero-content h1 span,
+.section-heading > span,
+.mode-link,
+.model-settings__title > span,
+.key-security svg {
+  color: var(--web-blue);
+}
+
+.eyebrow,
+.eyebrow--dark {
+  color: #165cb8;
+  border-color: #cfe1ff;
+  background: #eef5ff;
+  box-shadow: 0 8px 20px rgba(23, 105, 224, 0.08);
+}
+
+.button {
+  min-height: 46px;
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.button--primary {
+  background: #1262d4;
+  box-shadow: 0 12px 28px rgba(23, 105, 224, 0.24);
+}
+
+.button--primary:hover {
+  background: #0a4bb3;
+  box-shadow: 0 18px 34px rgba(23, 105, 224, 0.28);
+}
+
+.button--soft {
+  color: #155cba;
+  border-color: #cddfff;
+  background: #edf5ff;
+}
+
+.button--ghost {
+  color: #16365e;
+  border-color: #d3e0f1;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.glass-card,
+.floating-card--plan,
+.model-settings__panel,
+.mode-card,
+.planner-panel,
+.conversation-card,
+.entry-mode-card,
+.parent-trip-card,
+.parent-day-card,
+.parent-member-profile,
+.parent-member-state {
+  border-color: #d9e5f4;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--web-shadow);
+}
+
+.floating-card,
+.mode-card,
+.model-settings__panel,
+.conversation-card,
+.entry-mode-card {
+  border-radius: 8px;
+}
+
+.pass-chip,
+.verified-chip,
+.mode-tag {
+  color: #165cb8;
+  border: 1px solid #cde0ff;
+  background: #edf5ff;
+}
+
+.route-preview__line,
+.budget-row i,
+.progress-bar i,
+.summary-metrics i,
+.agent-progress-track i {
+  background: #2a7df1;
+}
+
+.route-preview__stop > span {
+  background: #1769e0;
+  border-color: #eaf2ff;
+}
+
+.capability-strip {
+  color: white;
+  border-color: #0b397e;
+  background: #0b3472;
+}
+
+.capability-strip article > span {
+  color: #d9eaff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.experience-section,
+.footer {
+  background: #f8fbff;
+}
+
+.solo-visual,
+.multiday-visual {
+  background: #1262d4;
+}
+
+.group-visual {
+  color: #18549b;
+  background: #dcecff;
+}
+
+.avatar-bubble {
+  background: #2a7df1;
+}
+
+.avatar-bubble--b { background: #67a8ff; }
+.avatar-bubble--c { background: #164f9b; }
+
+.planner-sidebar {
+  background: #0b3472;
+}
+
+.planner-sidebar .eyebrow {
+  color: #dcecff;
+  border-color: rgba(220, 236, 255, 0.26);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.step-list .is-complete > span {
+  background: #4391ff;
+  border-color: #4391ff;
+}
+
+.step-list .is-current > span {
+  color: #0a4bb3;
+}
+
+.conversation-panel {
+  background-color: #f8fbff;
+  background-image: radial-gradient(circle at 92% 5%, rgba(99, 168, 255, 0.18), transparent 26rem);
+}
+
+.conversation-card,
+.entry-mode-card,
+.question-bubble,
+.shared-trip-card {
+  border-color: #d5e4f6;
+  background: #ffffff;
+}
+
+.question-bubble::before {
+  border-color: #d5e4f6;
+  background: #ffffff;
+}
+
+.conversation-textarea,
+.key-input input,
+.parent-trip-card input,
+.parent-trip-card select,
+.parent-member-profile input {
+  border-color: #ceddf0;
+  background: #fbfdff;
+}
+
+.conversation-textarea:focus,
+.key-input input:focus,
+.parent-trip-card input:focus,
+.parent-trip-card select:focus,
+.parent-member-profile input:focus {
+  border-color: #2a7df1;
+  box-shadow: 0 0 0 4px rgba(42, 125, 241, 0.13);
+}
+
+.model-settings {
+  position: relative;
+  padding-top: 74px;
+}
+
+.model-settings::before {
+  content: '';
+  position: absolute;
+  top: 26px;
+  right: -12%;
+  width: 240px;
+  height: 240px;
+  border: 1px solid rgba(23, 105, 224, 0.16);
+  border-radius: 50%;
+  box-shadow: 0 0 0 34px rgba(23, 105, 224, 0.035), 0 0 0 70px rgba(23, 105, 224, 0.022);
+  pointer-events: none;
+}
+
+.model-settings__intro,
+.model-settings__panel {
+  position: relative;
+  z-index: 1;
+}
+
+.model-settings__panel {
+  padding: 34px;
+}
+
+.model-settings__title > span {
+  color: #1769e0;
+  border-radius: 8px;
+  background: #eaf2ff;
+}
+
+.model-settings__notice {
+  padding: 12px 14px;
+  color: #155cba;
+  border-left: 3px solid #2a7df1;
+  background: #edf5ff;
+}
+
+.parent-trip-page,
+.parent-member-page {
+  color: var(--web-ink);
+}
+
+.parent-trip-hero,
+.parent-member-header,
+.parent-collaboration,
+.parent-place-memory {
+  border-bottom-color: #d9e5f4;
+}
+
+.parent-budget-summary strong,
+.parent-member-budget strong,
+.parent-day-date,
+.parent-trip-return {
+  color: #1769e0;
+}
+
+.shared-trip-card__grid article,
+.parent-invitation {
+  border-color: #d9e5f4;
+  background: #f8fbff;
+}
+
+.entry-mode-grid button {
+  color: #163b67;
+  border-color: #d4e2f4;
+  background: #fbfdff;
+  box-shadow: 0 8px 24px rgba(19, 74, 146, 0.05);
+}
+
+.entry-mode-grid button:hover {
+  border-color: #78aaf0;
+  box-shadow: 0 16px 30px rgba(23, 105, 224, 0.13);
+}
+
+.entry-mode-grid button > svg:first-child,
+.answer-hints article > svg,
+.question-field-cards label > span svg,
+.time-picker-card legend svg {
+  color: #1769e0;
+  background: #eaf2ff;
+}
+
+.entry-mode-grid button > svg:last-child,
+.join-entry > span,
+.question-bubble__meta,
+.goal-start-actions > span.is-ready {
+  color: #1769e0;
+}
+
+.join-entry {
+  border: 1px solid #d7e5f5;
+  background: #f2f7ff;
+}
+
+.join-entry input,
+.question-field-cards label,
+.time-picker-card,
+.answer-hints article {
+  border-color: #d5e3f3;
+  background: #ffffff;
+}
+
+.question-field-cards input,
+.care-mode-select select {
+  color: #163b67;
+  border-color: #d1dfef;
+  background: #fbfdff;
+}
+
+.care-mode-select:hover select,
+.care-mode-select:focus-within select,
+.question-field-cards input:focus {
+  border-color: #2a7df1;
+  box-shadow: 0 0 0 3px rgba(42, 125, 241, 0.13);
+}
+
+.shared-trip-card {
+  background: #f6faff;
+}
+
+.shared-trip-card__grid svg,
+.parent-participant-avatar,
+.parent-day-status--actual_recorded {
+  color: #1769e0;
+}
+
+.parent-participant-avatar {
+  color: white;
+  background: #1769e0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .topbar { height: 68px; }
+  .model-settings { padding-top: 42px; }
+  .model-settings::before { right: -35%; transform: scale(0.72); }
+  .model-settings__panel { padding: 22px; }
+  .hero-section { min-height: auto; background-size: 34px 34px; }
+}
+
 .recommendation-place-memory li span {
   overflow-wrap: anywhere;
   font-size: 12px;
