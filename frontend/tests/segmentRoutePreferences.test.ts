@@ -155,8 +155,8 @@ function fixture(): { base: CandidatePlanRequest; city: CityResolution } {
   }
   const places = [
     place('poi-1', points[1]),
-    place('poi-2', points[2]),
-    place('poi-3', points[3]),
+    place('poi-2', points[2], '餐饮服务;中餐厅'),
+    place('poi-3', points[3], '餐饮服务;中餐厅'),
     { ...place('return-home', points[4], 'RETURN'), name: '确认终点' },
   ]
   const routes = places.map((item, index) => route(
@@ -295,7 +295,13 @@ test('initial planning previews exactly one candidate without issuing V1', async
   Date.now = () => (now += 2_000)
   const { base, city } = fixture()
   const calls: Array<{ url: string; init: RequestInit }> = []
-  const nearbyPlaces = base.taskFacts.slice(0, 3).map((fact) => fact.place)
+  const nearbyPlaces = [
+    { ...base.taskFacts[0].place, category: '景点' },
+    { ...base.taskFacts[1].place, category: '景点' },
+    { ...base.taskFacts[2].place, category: '景点' },
+    { ...base.taskFacts[1].place, placeId: 'meal-lunch', name: '午餐餐厅' },
+    { ...base.taskFacts[2].place, placeId: 'meal-dinner', name: '晚餐餐厅' },
+  ]
   let previewResponse = passingPreview
   globalThis.fetch = (async (input, init = {}) => {
     const url = String(input)
@@ -929,7 +935,7 @@ test('unschedulable returned route stays in local FAIL evidence without previewi
   assert.equal(result.candidateRequest, null)
   assert.equal(result.preview.validationStatus, 'FAIL')
   assert.equal(result.preview.metrics, null)
-  assert.match(result.preview.constraintResults[0].suggestion ?? '', /时间窗/)
+  assert.match(result.preview.constraintResults[0].suggestion ?? '', /时间窗|规定时间/)
   assert.deepEqual(result.evidence.route, impossible)
   assert.deepEqual(base, before)
 })

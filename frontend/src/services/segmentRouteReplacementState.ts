@@ -37,6 +37,7 @@ const routeModeLabels = {
   TRANSIT: '公共交通',
   DRIVING: '驾车',
   BICYCLING: '骑行',
+  TAXI: '打车',
 } as const
 
 function routeWalkingMeters(route: ProviderRoute) {
@@ -119,6 +120,7 @@ function candidatePreviewIssue(preview: CandidatePlanPreview): PlanningIssue | n
       ? suggestions.join(' ')
       : '候选路线未通过服务端预览校验。',
     review: null,
+    details: [],
   }
 }
 
@@ -165,6 +167,7 @@ export function applySegmentReplacementResult(
         code: 'SEGMENT_ROUTE_SCHEDULE_FAILURE',
         message,
         review: null,
+        details: [],
       },
       localFailure: {
         segmentIndex: result.evidence.segmentIndex,

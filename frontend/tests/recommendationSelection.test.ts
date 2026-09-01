@@ -178,6 +178,45 @@ test('confirmation accepts organizer-edited signed candidates and preserves thei
   )
 })
 
+test('meal-aware edits keep restaurant slots and reject lodging candidates', () => {
+  const mealAware = bundle()
+  mealAware.candidates[0] = {
+    ...mealAware.candidates[0],
+    name: '高德本地美食街',
+    category: '购物服务;特色商业街',
+  }
+  mealAware.trustedPlan!.tasks = [
+    mealAware.candidates[2],
+    mealAware.candidates[0],
+    mealAware.candidates[1],
+  ]
+
+  assert.throws(
+    () => confirmRecommendationSelection(
+      tripId,
+      mealAware,
+      [mealAware.candidates[2], mealAware.candidates[3], mealAware.candidates[1]],
+    ),
+    /必须保留 1 个真实餐饮地点/,
+  )
+
+  const withHotel = bundle()
+  withHotel.candidates[0] = {
+    ...withHotel.candidates[0],
+    name: '高德商务酒店',
+    category: '住宿服务;宾馆酒店',
+  }
+  withHotel.trustedPlan!.tasks = [
+    withHotel.candidates[2],
+    withHotel.candidates[0],
+    withHotel.candidates[1],
+  ]
+  assert.throws(
+    () => confirmRecommendationSelection(tripId, withHotel),
+    /不能把酒店或住宿地点/,
+  )
+})
+
 test('edited selections reject duplicate, unsigned and stale candidates', () => {
   const duplicated = bundle()
   assert.throws(
@@ -230,7 +269,7 @@ test('deterministic fallback keeps three intermediates and appends one return', 
   assert.equal(planningPlaces.length, 4)
 })
 
-test('missing trace, four intermediates or changed server facts fail closed', () => {
+test('missing trace, six intermediates or changed server facts fail closed', () => {
   const missingDigest = bundle()
   missingDigest.providerFactDigest = null
   assert.throws(
@@ -239,10 +278,13 @@ test('missing trace, four intermediates or changed server facts fail closed', ()
   )
 
   const tooMany = bundle()
-  tooMany.trustedPlan!.tasks = tooMany.candidates.slice(0, 4)
+  tooMany.trustedPlan!.tasks = [
+    ...tooMany.candidates.slice(0, 5),
+    candidate(99),
+  ]
   assert.throws(
     () => confirmRecommendationSelection(tripId, tooMany),
-    /2—3 个中间地点/,
+    /2—5 个中间地点/,
   )
 
   const valid = bundle()
@@ -299,7 +341,7 @@ test('signed recommendation session restores the same bundle and clears all rela
 test('recommendation sessions from the old filtering policy are discarded', () => {
   const storage = memoryStorage()
   storage.setItem(recommendationBundleStorageKey(tripId), JSON.stringify({
-    schemaVersion: '1.0',
+    schemaVersion: '1.6',
     tripId,
     bundle: bundle(),
   }))
@@ -313,7 +355,7 @@ test('tampered recommendation session is discarded instead of being displayed', 
   const input = bundle()
   input.providerFactDigest = 'not-a-digest'
   storage.setItem(recommendationBundleStorageKey(tripId), JSON.stringify({
-    schemaVersion: '1.1',
+    schemaVersion: '1.7',
     tripId,
     bundle: input,
   }))

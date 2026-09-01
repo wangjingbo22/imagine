@@ -920,6 +920,187 @@ body,
   border-color: var(--web-line);
 }
 
+.route-price-summary {
+  margin-top: 16px;
+  padding: 12px 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  border-top: 1px solid var(--web-line);
+  border-bottom: 1px solid var(--web-line);
+}
+
+.route-price-summary > span {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-content: start;
+  column-gap: 7px;
+  color: var(--web-blue);
+}
+
+.route-price-summary b,
+.route-price-summary small {
+  grid-column: 2;
+}
+
+.route-price-summary b {
+  color: var(--web-ink);
+  font-size: 10px;
+}
+
+.route-price-summary small {
+  margin-top: 2px;
+  color: var(--web-muted);
+  font-size: 8px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.route-change-notice {
+  margin-top: 12px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #176d51;
+  font-size: 10px;
+  line-height: 1.55;
+  border: 1px solid #cfe9df;
+  border-radius: 8px;
+  background: var(--web-green-soft);
+}
+
+.route-change-notice svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.route-mode-picker {
+  margin-top: 13px;
+  padding-top: 12px;
+  border-top: 1px solid var(--web-line);
+}
+
+.route-mode-picker__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.route-mode-picker__head > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--web-muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.route-mode-picker__head > span svg {
+  color: var(--web-blue);
+}
+
+.route-mode-picker__head > strong {
+  color: var(--web-ink);
+  font-size: 9px;
+  text-align: right;
+}
+
+.route-mode-picker__options {
+  margin-top: 9px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid #cfd9e8;
+  border-radius: 8px;
+}
+
+.route-mode-picker__options button {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #526079;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 750;
+  border: 0;
+  border-right: 1px solid #dce3ed;
+  border-radius: 0;
+  background: white;
+  cursor: pointer;
+}
+
+.route-mode-picker__options button:last-child {
+  border-right: 0;
+}
+
+.route-mode-picker__options button:hover:not(:disabled):not(.is-selected) {
+  color: var(--web-blue-dark);
+  background: #f5f8ff;
+}
+
+.route-mode-picker__options button.is-selected {
+  color: white;
+  background: var(--web-blue);
+}
+
+.route-mode-picker__options button:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 3px solid rgba(37, 99, 235, 0.24);
+  outline-offset: -3px;
+}
+
+.route-mode-picker__options button:disabled {
+  cursor: not-allowed;
+}
+
+.route-mode-picker__options button:disabled:not(.is-selected) {
+  color: #9ca6b5;
+  background: #f5f7fa;
+}
+
+.route-mode-picker__options button.is-selected:disabled {
+  opacity: 0.78;
+}
+
+.route-mode-picker__status {
+  margin-top: 7px;
+  display: block;
+  color: var(--web-muted);
+  font-size: 8px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .route-price-summary {
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+
+  .route-mode-picker__head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .route-mode-picker__head > strong {
+    text-align: left;
+  }
+
+  .route-mode-picker__options button {
+    padding: 0 5px;
+    gap: 4px;
+  }
+}
+
 .task-guide-button {
   width: 100%;
   min-height: 34px;
@@ -1527,6 +1708,524 @@ body,
   gap: 3px;
   border-left: 2px solid #d9a441;
   background: #fffaf0;
+}
+
+/* Blue-white visual system: shared across the home, planning, account, and trip flows. */
+:root {
+  --web-bg: #f3f7fc;
+  --web-surface: #ffffff;
+  --web-surface-soft: #f7faff;
+  --web-ink: #10233f;
+  --web-muted: #62738b;
+  --web-line: #d9e4f2;
+  --web-blue: #1769e0;
+  --web-blue-dark: #0a3f99;
+  --web-blue-soft: #eaf2ff;
+  --web-green: #1769e0;
+  --web-green-soft: #eaf2ff;
+  --web-amber: #b76e18;
+  --web-shadow: 0 20px 54px rgba(21, 66, 124, 0.11);
+}
+
+body,
+.app-shell,
+.app-shell--compact {
+  background-color: var(--web-bg);
+  background-image:
+    linear-gradient(rgba(23, 105, 224, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 105, 224, 0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+body {
+  color: var(--web-ink);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgba(23, 105, 224, 0.28);
+  outline-offset: 3px;
+}
+
+.topbar {
+  height: 76px;
+  border-bottom-color: rgba(23, 105, 224, 0.12);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 8px 28px rgba(28, 68, 121, 0.06);
+}
+
+.brand-mark__icon,
+.agent-orb,
+.conversation-intro > span,
+.confirmation-card__head > span,
+.shared-trip-card__head > span {
+  background: #0a4bb3;
+  box-shadow: 0 10px 22px rgba(23, 105, 224, 0.22);
+}
+
+.topbar__status {
+  color: #365171;
+  border-color: #d6e3f6;
+  background: #f7faff;
+}
+
+.avatar {
+  background: #102f60;
+}
+
+.status-dot {
+  background: #2274e8;
+  box-shadow: 0 0 0 4px rgba(34, 116, 232, 0.12);
+}
+
+.hero-section {
+  min-height: 720px;
+  color: var(--web-ink);
+  background-color: #f8fbff;
+  background-image:
+    linear-gradient(rgba(23, 105, 224, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 105, 224, 0.06) 1px, transparent 1px);
+  background-size: 52px 52px;
+}
+
+.hero-section::after {
+  border-color: rgba(23, 105, 224, 0.16);
+  box-shadow: 0 0 0 72px rgba(23, 105, 224, 0.028), 0 0 0 164px rgba(23, 105, 224, 0.014);
+}
+
+.hero-grid {
+  opacity: 0.3;
+  background-image: none;
+}
+
+.aurora--one {
+  background: radial-gradient(circle, rgba(74, 148, 255, 0.2), transparent 68%);
+}
+
+.aurora--two {
+  background: radial-gradient(circle, rgba(99, 183, 255, 0.16), transparent 70%);
+}
+
+.hero-content h1,
+.section-heading h2,
+.model-settings__intro h1 {
+  letter-spacing: 0;
+}
+
+.hero-content h1 span,
+.section-heading > span,
+.mode-link,
+.model-settings__title > span,
+.key-security svg {
+  color: var(--web-blue);
+}
+
+.eyebrow,
+.eyebrow--dark {
+  color: #165cb8;
+  border-color: #cfe1ff;
+  background: #eef5ff;
+  box-shadow: 0 8px 20px rgba(23, 105, 224, 0.08);
+}
+
+.button {
+  min-height: 46px;
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.button--primary {
+  background: #1262d4;
+  box-shadow: 0 12px 28px rgba(23, 105, 224, 0.24);
+}
+
+.button--primary:hover {
+  background: #0a4bb3;
+  box-shadow: 0 18px 34px rgba(23, 105, 224, 0.28);
+}
+
+.button--soft {
+  color: #155cba;
+  border-color: #cddfff;
+  background: #edf5ff;
+}
+
+.button--ghost {
+  color: #16365e;
+  border-color: #d3e0f1;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.glass-card,
+.floating-card--plan,
+.model-settings__panel,
+.mode-card,
+.planner-panel,
+.conversation-card,
+.entry-mode-card,
+.parent-trip-card,
+.parent-day-card,
+.parent-member-profile,
+.parent-member-state {
+  border-color: #d9e5f4;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--web-shadow);
+}
+
+.floating-card,
+.mode-card,
+.model-settings__panel,
+.conversation-card,
+.entry-mode-card {
+  border-radius: 8px;
+}
+
+.pass-chip,
+.verified-chip,
+.mode-tag {
+  color: #165cb8;
+  border: 1px solid #cde0ff;
+  background: #edf5ff;
+}
+
+.route-preview__line,
+.budget-row i,
+.progress-bar i,
+.summary-metrics i,
+.agent-progress-track i {
+  background: #2a7df1;
+}
+
+.route-preview__stop > span {
+  background: #1769e0;
+  border-color: #eaf2ff;
+}
+
+.capability-strip {
+  color: white;
+  border-color: #0b397e;
+  background: #0b3472;
+}
+
+.capability-strip article > span {
+  color: #d9eaff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.experience-section,
+.footer {
+  background: #f8fbff;
+}
+
+.solo-visual,
+.multiday-visual {
+  background: #1262d4;
+}
+
+.group-visual {
+  color: #18549b;
+  background: #dcecff;
+}
+
+.avatar-bubble {
+  background: #2a7df1;
+}
+
+.avatar-bubble--b { background: #67a8ff; }
+.avatar-bubble--c { background: #164f9b; }
+
+.planner-sidebar {
+  background: #0b3472;
+}
+
+.planner-sidebar .eyebrow {
+  color: #dcecff;
+  border-color: rgba(220, 236, 255, 0.26);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.step-list .is-complete > span {
+  background: #4391ff;
+  border-color: #4391ff;
+}
+
+.step-list .is-current > span {
+  color: #0a4bb3;
+}
+
+.conversation-panel {
+  background-color: #f8fbff;
+  background-image: radial-gradient(circle at 92% 5%, rgba(99, 168, 255, 0.18), transparent 26rem);
+}
+
+.conversation-card,
+.entry-mode-card,
+.question-bubble,
+.shared-trip-card {
+  border-color: #d5e4f6;
+  background: #ffffff;
+}
+
+.question-bubble::before {
+  border-color: #d5e4f6;
+  background: #ffffff;
+}
+
+.conversation-textarea,
+.key-input input,
+.parent-trip-card input,
+.parent-trip-card select,
+.parent-member-profile input {
+  border-color: #ceddf0;
+  background: #fbfdff;
+}
+
+.conversation-textarea:focus,
+.key-input input:focus,
+.parent-trip-card input:focus,
+.parent-trip-card select:focus,
+.parent-member-profile input:focus {
+  border-color: #2a7df1;
+  box-shadow: 0 0 0 4px rgba(42, 125, 241, 0.13);
+}
+
+.model-settings {
+  position: relative;
+  padding-top: 74px;
+}
+
+.model-settings::before {
+  content: '';
+  position: absolute;
+  top: 26px;
+  right: -12%;
+  width: 240px;
+  height: 240px;
+  border: 1px solid rgba(23, 105, 224, 0.16);
+  border-radius: 50%;
+  box-shadow: 0 0 0 34px rgba(23, 105, 224, 0.035), 0 0 0 70px rgba(23, 105, 224, 0.022);
+  pointer-events: none;
+}
+
+.model-settings__intro,
+.model-settings__panel {
+  position: relative;
+  z-index: 1;
+}
+
+.model-settings__panel {
+  padding: 34px;
+}
+
+.model-settings__title > span {
+  color: #1769e0;
+  border-radius: 8px;
+  background: #eaf2ff;
+}
+
+.model-settings__notice {
+  padding: 12px 14px;
+  color: #155cba;
+  border-left: 3px solid #2a7df1;
+  background: #edf5ff;
+}
+
+.parent-trip-page,
+.parent-member-page {
+  color: var(--web-ink);
+}
+
+.parent-trip-hero,
+.parent-member-header,
+.parent-collaboration,
+.parent-place-memory {
+  border-bottom-color: #d9e5f4;
+}
+
+.parent-budget-summary strong,
+.parent-member-budget strong,
+.parent-day-date,
+.parent-trip-return {
+  color: #1769e0;
+}
+
+.shared-trip-card__grid article,
+.parent-invitation {
+  border-color: #d9e5f4;
+  background: #f8fbff;
+}
+
+.entry-mode-grid button {
+  color: #163b67;
+  border-color: #d4e2f4;
+  background: #fbfdff;
+  box-shadow: 0 8px 24px rgba(19, 74, 146, 0.05);
+}
+
+.entry-mode-grid button:hover {
+  border-color: #78aaf0;
+  box-shadow: 0 16px 30px rgba(23, 105, 224, 0.13);
+}
+
+.entry-mode-grid button > svg:first-child,
+.answer-hints article > svg,
+.question-field-cards label > span svg,
+.time-picker-card legend svg {
+  color: #1769e0;
+  background: #eaf2ff;
+}
+
+.entry-mode-grid button > svg:last-child,
+.join-entry > span,
+.question-bubble__meta,
+.goal-start-actions > span.is-ready {
+  color: #1769e0;
+}
+
+.join-entry {
+  border: 1px solid #d7e5f5;
+  background: #f2f7ff;
+}
+
+.join-entry input,
+.question-field-cards label,
+.time-picker-card,
+.answer-hints article {
+  border-color: #d5e3f3;
+  background: #ffffff;
+}
+
+.question-field-cards input,
+.care-mode-select select {
+  color: #163b67;
+  border-color: #d1dfef;
+  background: #fbfdff;
+}
+
+.care-mode-select:hover select,
+.care-mode-select:focus-within select,
+.question-field-cards input:focus {
+  border-color: #2a7df1;
+  box-shadow: 0 0 0 3px rgba(42, 125, 241, 0.13);
+}
+
+.shared-trip-card {
+  background: #f6faff;
+}
+
+.shared-trip-card__grid svg,
+.parent-participant-avatar,
+.parent-day-status--actual_recorded {
+  color: #1769e0;
+}
+
+.parent-participant-avatar {
+  color: white;
+  background: #1769e0;
+}
+
+/* Dark blue areas use explicit foreground values rather than inherited tones. */
+.planner-sidebar h1,
+.planner-sidebar strong,
+.planner-sidebar .step-list .is-complete,
+.planner-sidebar .step-list .is-current {
+  color: #ffffff;
+}
+
+.planner-sidebar > div > p,
+.planner-sidebar .step-list li,
+.planner-sidebar .step-list small,
+.planner-sidebar .privacy-note {
+  color: #c8dcf8;
+}
+
+.planner-sidebar .step-list li::after {
+  background: rgba(216, 234, 255, 0.36);
+}
+
+.planner-sidebar .step-list li > span {
+  color: #dceaff;
+  border-color: rgba(220, 234, 255, 0.64);
+}
+
+.planner-sidebar .privacy-note {
+  border-color: rgba(220, 234, 255, 0.25);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.planner-sidebar .privacy-note svg {
+  color: #8fc1ff;
+}
+
+.capability-strip strong {
+  color: #ffffff;
+}
+
+.capability-strip small {
+  color: #bdd7fa;
+}
+
+@media (max-width: 700px) {
+  .planner-sidebar {
+    background: #ffffff;
+    border-bottom: 1px solid #d7e5f5;
+  }
+
+  .planner-sidebar h1,
+  .planner-sidebar strong,
+  .planner-sidebar .step-list .is-complete,
+  .planner-sidebar .step-list .is-current {
+    color: #102f60;
+  }
+
+  .planner-sidebar > div > p,
+  .planner-sidebar .step-list li,
+  .planner-sidebar .step-list small,
+  .planner-sidebar .privacy-note {
+    color: #58718f;
+  }
+
+  .planner-sidebar .step-list li::after {
+    background: #cdddf1;
+  }
+
+  .planner-sidebar .step-list li > span {
+    color: #1769e0;
+    border-color: #9fc4f8;
+  }
+
+  .planner-sidebar .privacy-note {
+    border-color: #d7e5f5;
+    background: #f3f8ff;
+  }
+
+  .planner-sidebar .eyebrow {
+    color: #165cb8;
+    border-color: #cfe1ff;
+    background: #eef5ff;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .topbar { height: 68px; }
+  .model-settings { padding-top: 42px; }
+  .model-settings::before { right: -35%; transform: scale(0.72); }
+  .model-settings__panel { padding: 22px; }
+  .hero-section { min-height: auto; background-size: 34px 34px; }
 }
 
 .recommendation-place-memory li span {
@@ -3660,7 +4359,42 @@ body,
   }
 
   .planner-sidebar {
-    background: #f8fafc;
+    background: #ffffff;
+    border-bottom: 1px solid #d7e5f5;
+  }
+
+  .planner-sidebar h1,
+  .planner-sidebar strong,
+  .planner-sidebar .step-list .is-complete,
+  .planner-sidebar .step-list .is-current {
+    color: #102f60;
+  }
+
+  .planner-sidebar > div > p,
+  .planner-sidebar .step-list li,
+  .planner-sidebar .step-list small,
+  .planner-sidebar .privacy-note {
+    color: #58718f;
+  }
+
+  .planner-sidebar .step-list li::after {
+    background: #cdddf1;
+  }
+
+  .planner-sidebar .step-list li > span {
+    color: #1769e0;
+    border-color: #9fc4f8;
+  }
+
+  .planner-sidebar .privacy-note {
+    border-color: #d7e5f5;
+    background: #f3f8ff;
+  }
+
+  .planner-sidebar .eyebrow {
+    color: #165cb8;
+    border-color: #cfe1ff;
+    background: #eef5ff;
   }
 
   .execution-web__main {
@@ -4003,6 +4737,185 @@ body,
   font-size: 13px;
 }
 
+.evidence-review-card:focus-visible,
+.planning-issue-card:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.22);
+  outline-offset: 3px;
+}
+
+.planning-issue-card {
+  padding: 17px;
+  color: var(--web-ink);
+  border: 1px solid #f0c078;
+  border-radius: 8px;
+  background: #fffaf2;
+  box-shadow: var(--web-shadow);
+}
+
+.planning-issue-card.is-rejected {
+  border-color: #efbbb4;
+  background: #fff7f6;
+}
+
+.planning-issue-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--web-amber);
+}
+
+.planning-issue-card.is-rejected .planning-issue-card__head {
+  color: #b4473e;
+}
+
+.planning-issue-card__head > svg {
+  flex: 0 0 auto;
+}
+
+.planning-issue-card__head > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.planning-issue-card__head strong {
+  color: var(--web-ink);
+  font-size: 11px;
+}
+
+.planning-issue-card__head small {
+  color: var(--web-muted);
+  font-size: 7px;
+  overflow-wrap: anywhere;
+}
+
+.planning-issue-card p,
+.planning-issue-card li {
+  color: var(--web-muted);
+  font-size: 9px;
+  line-height: 1.65;
+}
+
+.planning-issue-card p {
+  margin: 10px 0 0;
+}
+
+.planning-issue-card ul {
+  margin: 9px 0 0;
+  padding-left: 18px;
+}
+
+.planning-issue-card li + li {
+  margin-top: 4px;
+}
+
+.planning-issue-card > button {
+  min-height: 44px;
+  margin-top: 12px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--web-blue-dark);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 750;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.planning-issue-card > button:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.22);
+  outline-offset: 2px;
+}
+
+.recommendation-error-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  padding: 24px;
+  display: grid;
+  place-items: center;
+  background: rgba(24, 32, 43, 0.42);
+  backdrop-filter: blur(3px);
+}
+
+.recommendation-error-dialog {
+  width: min(520px, 100%);
+  padding: 22px;
+  color: var(--web-ink);
+  border: 1px solid #f0c9c4;
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 18px 52px rgba(24, 32, 43, 0.2);
+}
+
+.recommendation-error-dialog > header {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 44px;
+  align-items: start;
+  gap: 12px;
+}
+
+.recommendation-error-dialog__icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  color: #a23b32;
+  border-radius: 8px;
+  background: #fff0ee;
+}
+
+.recommendation-error-dialog h2 {
+  margin: 1px 0 7px;
+  font-size: 18px;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.recommendation-error-dialog p {
+  margin: 0;
+  color: var(--web-muted);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.recommendation-error-dialog__close {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--web-muted);
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.recommendation-error-dialog__close:hover {
+  color: var(--web-ink);
+  background: #f2f4f7;
+}
+
+.recommendation-error-dialog__close:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.22);
+  outline-offset: 1px;
+}
+
+.recommendation-error-dialog__actions {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.recommendation-error-dialog__actions .button {
+  min-height: 44px;
+}
+
 .trusted-plan {
   margin-top: 0;
   padding: 28px;
@@ -4238,4 +5151,86 @@ body,
   }
 
   .recommendation-actions .button { width: 100%; }
+}
+
+.app-shell {
+  background-image:
+    linear-gradient(rgba(23, 105, 224, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 105, 224, 0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.app-shell--compact {
+  background-image:
+    linear-gradient(rgba(23, 105, 224, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 105, 224, 0.028) 1px, transparent 1px);
+}
+
+/* Final blue-white overrides for legacy collaboration and confirmation surfaces. */
+.confirmation-card,
+.confirmation-edit-panel,
+.member-flow-guide,
+.member-answer-card,
+.conflict-review,
+.conflict-review.is-ready,
+.change-proposal-card,
+.proposal-panel-toggle,
+.parent-place-memory__days article,
+.recommendation-place-memory li {
+  border-color: #d5e4f6;
+  background: #f8fbff;
+}
+
+.confirmation-edit-grid button,
+.member-answer-card--goal,
+.answer-hints article,
+.question-field-cards label {
+  border-color: #d5e4f6;
+  background: #ffffff;
+}
+
+.confirmation-edit-grid button > span,
+.member-answer-card--goal > svg,
+.conflict-review__heading > span,
+.conflict-review__icon,
+.parent-place-memory > header > div,
+.recommendation-place-memory header {
+  color: #1769e0;
+  background: #eaf2ff;
+}
+
+.confirmation-edit-grid button > span,
+.member-answer-card--goal > svg {
+  background: #eaf2ff;
+}
+
+.confirmation-edit-grid button:hover,
+.proposal-panel-toggle:hover,
+.collaboration-refresh-button:hover:not(:disabled) {
+  border-color: #8db8f4;
+  background: #edf5ff;
+}
+
+.proposal-status--approved,
+.proposal-status--pending,
+.parent-day-status--actual_recorded,
+.evidence-review-row > button.is-confirmed {
+  color: #165cb8;
+  border-color: #bad6fb;
+  background: #edf5ff;
+}
+
+.parent-place-memory__days article,
+.recommendation-place-memory li {
+  border-left-color: #2a7df1;
+}
+
+@media (hover: none) {
+  .app-shell,
+  .app-shell--compact {
+    background-image:
+      linear-gradient(rgba(23, 105, 224, 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(23, 105, 224, 0.025) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
 }

@@ -23,6 +23,7 @@ class TravelMode(StrEnum):
     TRANSIT = "TRANSIT"
     DRIVING = "DRIVING"
     BICYCLING = "BICYCLING"
+    TAXI = "TAXI"
 
 
 class FacilityType(StrEnum):
@@ -39,7 +40,7 @@ class FacilityEvidenceStatus(StrEnum):
 
 
 class Provenance(BaseModel):
-    provider: Literal["AMAP"] = "AMAP"
+    provider: Literal["AMAP", "APP_ESTIMATE"] = "AMAP"
     sourceStatus: SourceStatus
     fetchedAt: datetime
     isStale: bool = False

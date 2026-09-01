@@ -509,18 +509,21 @@ def test_both_three_and_four_task_shapes_return_one_candidate() -> None:
     assert type(three) is CandidatePlan and len(three.tasks) == 3
 
 
-@pytest.mark.parametrize("count", [2, 5])
-def test_task_count_outside_three_to_four_is_rejected(count: int) -> None:
+@pytest.mark.parametrize("count", [2, 7])
+def test_task_count_outside_three_to_six_is_rejected(count: int) -> None:
     payload = _payload()
     facts = payload["request"]["taskFacts"]
     if count == 2:
         payload["request"]["taskFacts"] = facts[:2]
     else:
-        extra = deepcopy(facts[-1])
-        extra["taskId"] = "task-extra"
-        extra["route"]["routeId"] = "route-extra"
-        extra["order"] = 5
-        payload["request"]["taskFacts"] = [*facts, extra]
+        extras = []
+        for index in range(3):
+            extra = deepcopy(facts[-1])
+            extra["taskId"] = f"task-extra-{index + 1}"
+            extra["route"]["routeId"] = f"route-extra-{index + 1}"
+            extra["order"] = len(facts) + index + 1
+            extras.append(extra)
+        payload["request"]["taskFacts"] = [*facts, *extras]
 
     with pytest.raises(ValidationError):
         _request(payload)

@@ -1,6 +1,6 @@
 import { Heart, LogIn, LogOut, MapPin, Save, UserRound } from 'lucide-react'
-import { useEffect, useState, type FormEvent } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useState, type FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   loginAccount,
   registerAccount,
@@ -8,7 +8,6 @@ import {
 } from '../api/accountApi'
 import { AppShell } from '../components/AppShell'
 import type { CurrentUser } from '../domain/account'
-import { safeReturnPath } from '../services/accountReturnPath'
 import { useAccountSession } from '../session/useAccountSession'
 
 type AccountMode = 'login' | 'register'
@@ -39,9 +38,7 @@ function profileValues(user: CurrentUser): ProfileDraft {
 }
 
 export function AccountPage() {
-  const location = useLocation()
   const navigate = useNavigate()
-  const returnTo = safeReturnPath(location.search)
   const { user, isInitializing, setCurrentUser, logout } = useAccountSession()
   const [mode, setMode] = useState<AccountMode>('login')
   const [email, setEmail] = useState('')
@@ -53,12 +50,6 @@ export function AccountPage() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const profile = user ? profileDraft ?? profileValues(user) : null
-
-  useEffect(() => {
-    if (user && returnTo) {
-      navigate(returnTo, { replace: true })
-    }
-  }, [navigate, returnTo, user])
 
   function switchMode(nextMode: AccountMode) {
     setMode(nextMode)
@@ -87,11 +78,7 @@ export function AccountPage() {
       setProfileDraft(null)
       setRegisterDisplayName('')
       setPassword('')
-      if (returnTo) {
-        navigate(returnTo, { replace: true })
-        return
-      }
-      setNotice(mode === 'login' ? '已登录' : '账户已创建')
+      setNotice(mode === 'login' ? '已登录，请完成画像后继续绑定模型。' : '账户已创建，请完成画像后继续绑定模型。')
     } catch (caught) {
       setError(errorMessage(caught, '账户请求失败，请稍后重试'))
     } finally {
@@ -119,7 +106,7 @@ export function AccountPage() {
       })
       setCurrentUser(response.data)
       setProfileDraft(null)
-      setNotice('画像已更新')
+      navigate('/model-settings', { replace: true })
     } catch (caught) {
       setError(errorMessage(caught, '画像保存失败，请稍后重试'))
     } finally {

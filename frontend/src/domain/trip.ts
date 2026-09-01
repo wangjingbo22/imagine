@@ -145,7 +145,7 @@ export type SourceStatus =
   | 'UNKNOWN'
 
 export interface Provenance {
-  provider: 'AMAP'
+  provider: 'AMAP' | 'APP_ESTIMATE'
   sourceStatus: SourceStatus
   fetchedAt: string
   isStale: boolean
@@ -194,7 +194,7 @@ export interface AddressResolution {
   provenance: Provenance
 }
 
-export type TravelMode = 'WALKING' | 'TRANSIT' | 'DRIVING' | 'BICYCLING'
+export type TravelMode = 'WALKING' | 'TRANSIT' | 'DRIVING' | 'BICYCLING' | 'TAXI'
 
 export interface RouteStep {
   instruction: string | null

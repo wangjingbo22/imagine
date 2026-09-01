@@ -169,16 +169,89 @@ def test_s3_t006_unknown_and_estimated_prices_are_not_live_zero() -> None:
     assert unknown.amountCents is None
     assert unknown.provenance.sourceStatus is SourceStatus.UNKNOWN
 
-    estimate = _route_price(
+    driving = _route_price(
         {"route": {"taxi_cost": "23.50"}},
-        {},
+        {"tolls": "4.75"},
         TravelMode.DRIVING,
         online,
     )
-    assert estimate.amountCents == 2_350
-    assert estimate.amountCents != 0
-    assert estimate.kind == "TAXI_ESTIMATE"
-    assert estimate.provenance.sourceStatus is SourceStatus.ESTIMATED
+    assert driving.amountCents == 475
+    assert driving.kind == "ROAD_TOLLS"
+    assert driving.provenance.sourceStatus is SourceStatus.ONLINE
+
+    taxi = _route_price(
+        {"route": {"taxi_cost": "23.50"}},
+        {"tolls": "4.75"},
+        TravelMode.TAXI,
+        online,
+    )
+    assert taxi.amountCents == 2_350
+    assert taxi.kind == "TAXI_ESTIMATE"
+    assert taxi.provenance.sourceStatus is SourceStatus.ESTIMATED
+
+    bicycle = _route_price(
+        {},
+        {"duration": str(31 * 60)},
+        TravelMode.BICYCLING,
+        online,
+    )
+    assert bicycle.amountCents == 450
+    assert bicycle.kind == "SHARED_BICYCLE_ESTIMATE"
+    assert bicycle.provenance.provider == "APP_ESTIMATE"
+    assert bicycle.provenance.sourceStatus is SourceStatus.ESTIMATED
+
+    unknown_driving = _route_price({}, {}, TravelMode.DRIVING, online)
+    assert unknown_driving.amountCents is None
+    assert unknown_driving.kind == "ROAD_TOLLS"
+    assert unknown_driving.provenance.sourceStatus is SourceStatus.UNKNOWN
+
+    unknown_taxi = _route_price({}, {}, TravelMode.TAXI, online)
+    assert unknown_taxi.amountCents is None
+    assert unknown_taxi.kind == "TAXI_ESTIMATE"
+    assert unknown_taxi.provenance.sourceStatus is SourceStatus.UNKNOWN
+
+    unknown_bicycle = _route_price({}, {}, TravelMode.BICYCLING, online)
+    assert unknown_bicycle.amountCents is None
+    assert unknown_bicycle.kind == "SHARED_BICYCLE_ESTIMATE"
+    assert unknown_bicycle.provenance.provider == "APP_ESTIMATE"
+    assert unknown_bicycle.provenance.sourceStatus is SourceStatus.UNKNOWN
+
+
+class _StubRouteClient(AmapClient):
+    def __init__(self) -> None:
+        self.request_log: list[tuple[str, dict[str, Any]]] = []
+
+    async def _get(
+        self,
+        path: str,
+        parameters: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.request_log.append((path, dict(parameters)))
+        return {"status": "1"}
+
+
+@pytest.mark.asyncio
+async def test_s3_t006_taxi_reuses_amap_driving_route_endpoint() -> None:
+    client = _StubRouteClient()
+    point = GeoPoint(longitude=116.4, latitude=39.9)
+
+    await client.plan_route(
+        city_code="110000",
+        origin=point,
+        destination=GeoPoint(longitude=116.5, latitude=39.95),
+        mode=TravelMode.TAXI,
+        strategy=None,
+    )
+
+    assert client.request_log == [
+        (
+            "/v3/direction/driving",
+            {
+                "origin": "116.400000,39.900000",
+                "destination": "116.500000,39.950000",
+            },
+        )
+    ]
 
 
 class _RecordingAmapClient(AmapClient):

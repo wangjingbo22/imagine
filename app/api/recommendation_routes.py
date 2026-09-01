@@ -15,6 +15,7 @@ from app.application.recommendation_service import (
     RecommendationOrchestrationService,
     TrustedRecommendationService,
     project_collaboration_recommendation_trip,
+    required_meal_kinds,
 )
 from app.core.errors import AppError
 from app.domain.collaboration import TripFlowKind
@@ -47,10 +48,18 @@ def _mark_private_organizer_response(response: Response) -> None:
 def _provider_search_terms(
     must_visit: list[str],
     interests: list[str],
+    *,
+    include_dining: bool,
 ) -> tuple[str, ...]:
     terms: list[str] = []
     seen: set[str] = set()
-    for value in [*must_visit, *interests, "景点"]:
+    prioritized = [
+        *must_visit,
+        *(["美食街", "餐厅"] if include_dining else []),
+        *interests,
+        "景点",
+    ]
+    for value in prioritized:
         normalized = value.strip().casefold()
         if not normalized or normalized in seen:
             continue
@@ -109,12 +118,13 @@ async def _provider_places_for_term(
     """
 
     city_context = city_resolution.cityContext
+    place_types = ["050000"] if keywords.strip() == "餐厅" else []
     search_places = getattr(provider, "search_places", None)
     if citywide and callable(search_places):
         result = await search_places(
             city_context,
             keywords=keywords,
-            types=[],
+            types=place_types,
             page=1,
             page_size=25,
         )
@@ -127,7 +137,7 @@ async def _provider_places_for_term(
             center=center,
             radius_meters=PROVIDER_SEARCH_RADIUS_METERS,
             keywords=keywords,
-            types=[],
+            types=place_types,
             page=1,
             page_size=25,
         )
@@ -136,7 +146,7 @@ async def _provider_places_for_term(
     result = await provider.search_places(
         city_context,
         keywords=keywords,
-        types=[],
+        types=place_types,
         page=1,
         page_size=25,
     )
@@ -377,7 +387,13 @@ async def recommendations(
             for value in must_visit
             if value.strip()
         }
-        for keywords in _provider_search_terms(must_visit, interests):
+        meal_kinds = required_meal_kinds(trip)
+        searched_dining_probe = not meal_kinds
+        for keywords in _provider_search_terms(
+            must_visit,
+            interests,
+            include_dining=bool(meal_kinds),
+        ):
             provider_places.extend(await _provider_places_for_term(
                 request.app.state.location_service,
                 city_resolution=city,
@@ -385,6 +401,8 @@ async def recommendations(
                 keywords=keywords,
                 citywide=keywords.strip().casefold() in required_search_terms,
             ))
+            if keywords.strip() in {"美食街", "餐厅"}:
+                searched_dining_probe = True
             if parent_place_memory:
                 remembered_ids = {
                     _normalized_place_identity(item.place_id)
@@ -412,6 +430,7 @@ async def recommendations(
                 if error.code not in {
                     "HARD_MUST_VISIT_FACT_MISSING",
                     "INSUFFICIENT_TRUSTED_PROVIDER_CANDIDATES",
+                    "INSUFFICIENT_TRUSTED_DINING_CANDIDATES",
                 }:
                     raise AppError(
                         code=error.code,
@@ -419,6 +438,8 @@ async def recommendations(
                         http_status=error.http_status,
                     ) from error
             else:
+                if not searched_dining_probe:
+                    continue
                 break
         try:
             issuance = orchestration.issue_provider_candidate_facts(

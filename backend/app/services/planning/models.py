@@ -81,7 +81,7 @@ class CandidatePlanRequest(ContractModel):
     trip: Trip
     start_location: CandidateEndpointFact
     end_location: CandidateEndpointFact
-    task_facts: tuple[CandidateTaskFact, ...] = Field(min_length=3, max_length=4)
+    task_facts: tuple[CandidateTaskFact, ...] = Field(min_length=3, max_length=6)
     confirmed_constraints: tuple[Constraint, ...]
 
     @model_validator(mode="after")
@@ -213,7 +213,7 @@ class CandidatePlan(ContractModel):
     city_code: Annotated[str, Field(min_length=1, max_length=64)]
     day_index: Literal[0]
     date: date
-    tasks: tuple[CandidateTask, ...] = Field(min_length=3, max_length=4)
+    tasks: tuple[CandidateTask, ...] = Field(min_length=3, max_length=6)
     metrics: CandidatePlanMetrics
     constraint_results: tuple[CandidateConstraintResult, ...] = Field(min_length=1)
     warnings: tuple[CandidatePlanWarning, ...]

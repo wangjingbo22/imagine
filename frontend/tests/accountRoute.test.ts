@@ -9,8 +9,13 @@ test('account page is reachable from the application router and shell', async ()
 
   assert.match(app, /<Route\s+path=["']\/account["']/)
   assert.match(app, /AccountPage/)
+  assert.match(app, /function RequireAccount/)
+  assert.match(app, /<RequireAccount><HomePage \/><\/RequireAccount>/)
+  assert.match(app, /<RequireAccount><ConversationPlannerPage \/><\/RequireAccount>/)
   assert.match(shell, /const accountPath =/)
   assert.match(shell, /to=\{accountPath\}/)
+  assert.match(shell, /className="topbar__model-link"/)
+  assert.match(shell, /绑定模型/)
 })
 
 test('account API uses the session cookie and the account contract paths', async () => {
@@ -25,6 +30,35 @@ test('account API uses the session cookie and the account contract paths', async
   assert.match(client, /credentials:\s*["']include["']/)
   assert.match(client, /import\.meta\.env\?\.PROD/)
   assert.match(client, /\? ''\s*:\s*resolveApiBaseUrl/)
+})
+
+test('model settings show the server error instead of masking failed API Key storage', async () => {
+  const page = await readFile(new URL('../src/pages/ModelSettingsPage.tsx', import.meta.url), 'utf8')
+
+  assert.match(page, /import \{ ApiError \} from '\.\.\/api\/client'/)
+  assert.match(page, /error instanceof ApiError\) return error\.message/)
+  assert.match(page, /保存失败：\$\{saveErrorMessage\(error\)\}/)
+  assert.match(page, /await saveModelSettings[\s\S]*navigate\('\/', \{ replace: true \}\)/)
+})
+
+test('recommendation loading presents staged analysis instead of an empty status area', async () => {
+  const page = await readFile(new URL('../src/pages/RecommendationPage.tsx', import.meta.url), 'utf8')
+  const styles = await readFile(new URL('../src/styles/future-system.css', import.meta.url), 'utf8')
+
+  assert.match(page, /LIVE ANALYSIS/)
+  assert.match(page, /正在编排行程候选/)
+  assert.match(page, /恢复已确认的出行事实/)
+  assert.match(page, /计算路线与预算可行性/)
+  assert.match(styles, /\.recommendation-loading__steps/)
+  assert.match(styles, /@keyframes recommendationScan/)
+})
+
+test('application shell has no pointer-tracking grid effect', async () => {
+  const shell = await readFile(new URL('../src/components/AppShell.tsx', import.meta.url), 'utf8')
+  const styles = await readFile(new URL('../src/styles/white-web.css', import.meta.url), 'utf8')
+
+  assert.doesNotMatch(shell, /onPointerMove|onPointerLeave|grid-focus/)
+  assert.doesNotMatch(styles, /grid-focus|Pointer-aware grid/)
 })
 
 test('account page provides authentication and profile actions through the shared session', async () => {
@@ -124,14 +158,12 @@ test('an HTTP 200 body code 401 is not treated as an invalid account session', a
   assert.doesNotMatch(provider, /error\.code === 401/)
 })
 
-test('account return path is allowlisted before resuming an invitation', async () => {
-  const [page, returnPath] = await Promise.all([
-    readFile(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8'),
-    readFile(new URL('../src/services/accountReturnPath.ts', import.meta.url), 'utf8'),
-  ])
+test('account flow requires profile confirmation before model binding', async () => {
+  const page = await readFile(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8')
 
-  assert.match(returnPath, /returnTo === '\/parent-join'/)
-  assert.match(page, /navigate\(returnTo, \{ replace: true \}\)/)
+  assert.match(page, /完成画像后继续绑定模型/)
+  assert.match(page, /navigate\('\/model-settings', \{ replace: true \}\)/)
+  assert.doesNotMatch(page, /navigate\(returnTo/)
   assert.doesNotMatch(page, /window\.location\s*=/)
 })
 

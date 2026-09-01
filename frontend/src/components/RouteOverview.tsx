@@ -21,8 +21,9 @@ interface RouteOverviewProps {
 const modeLabels: Record<TravelMode, string> = {
   WALKING: '步行',
   TRANSIT: '公共交通',
-  DRIVING: '驾车',
+  DRIVING: '自驾',
   BICYCLING: '骑行',
+  TAXI: '打车',
 }
 
 const routeColors: Record<TravelMode, string> = {
@@ -30,6 +31,7 @@ const routeColors: Record<TravelMode, string> = {
   TRANSIT: '#7c3aed',
   DRIVING: '#0891b2',
   BICYCLING: '#059669',
+  TAXI: '#dc6b2f',
 }
 
 function position(point: GeoPoint): AMapPosition {

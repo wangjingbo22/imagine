@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowRight,
   ArrowUp,
@@ -9,6 +10,7 @@ import {
   MapPin,
   RefreshCw,
   ShieldCheck,
+  X,
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -18,6 +20,7 @@ import { AppShell } from '../components/AppShell'
 import { loadAmapPlan } from '../services/amapPlan'
 import { planningDraftFromConfirmedTrip } from '../services/collaborationDraft'
 import { getStoredOrganizerToken } from '../services/organizerStorage'
+import { isDiningPlaceLike } from '../services/itineraryPlaces'
 import {
   clearRecommendationSession,
   confirmRecommendationSelection,
@@ -76,7 +79,7 @@ function restoreRecommendationDraft(
       stored.providerFactDigest !== bundle.providerFactDigest ||
       !Array.isArray(stored.selectedFactRefIds) ||
       stored.selectedFactRefIds.length < 2 ||
-      stored.selectedFactRefIds.length > 3 ||
+      stored.selectedFactRefIds.length > 5 ||
       stored.selectedFactRefIds.some((factRefId) => typeof factRefId !== 'string') ||
       new Set(stored.selectedFactRefIds).size !== stored.selectedFactRefIds.length
     ) {
@@ -183,6 +186,9 @@ export function RecommendationPage() {
   const trustedPlan = bundle?.trustedPlan
   const parentPlaceMemory = bundle?.parentPlaceMemory ?? []
   const selectedFactRefs = new Set(selectedTasks.map((task) => task.factRefId))
+  const mealAwarePlan = trustedPlan?.tasks.some((task) =>
+    isDiningPlaceLike(task.name, task.category),
+  ) ?? false
 
   function applySelectedTasks(nextTasks: readonly RecommendationCandidate[]) {
     if (!bundle) return
@@ -213,9 +219,31 @@ export function RecommendationPage() {
     applySelectedTasks(nextTasks)
   }
 
+  function moveDestination(index: number, direction: -1 | 1) {
+    if (!mealAwarePlan) {
+      const destination = index + direction
+      return destination >= 0 && destination < selectedTasks.length ? destination : -1
+    }
+    const diningSlot = isDiningPlaceLike(
+      selectedTasks[index]?.name ?? '',
+      selectedTasks[index]?.category,
+    )
+    for (
+      let destination = index + direction;
+      destination >= 0 && destination < selectedTasks.length;
+      destination += direction
+    ) {
+      const candidate = selectedTasks[destination]
+      if (isDiningPlaceLike(candidate.name, candidate.category) === diningSlot) {
+        return destination
+      }
+    }
+    return -1
+  }
+
   function movePlace(index: number, direction: -1 | 1) {
-    const destination = index + direction
-    if (destination < 0 || destination >= selectedTasks.length) return
+    const destination = moveDestination(index, direction)
+    if (destination < 0) return
     const nextTasks = [...selectedTasks]
     const movedTask = nextTasks[index]
     nextTasks[index] = nextTasks[destination]
@@ -288,6 +316,58 @@ export function RecommendationPage() {
   return (
     <AppShell compact showBackButton={false}>
       <main className="recommendation-layout">
+        {error && (
+          <div className="recommendation-error-overlay">
+            <section
+              aria-describedby="recommendation-error-message"
+              aria-labelledby="recommendation-error-title"
+              aria-modal="true"
+              className="recommendation-error-dialog"
+              role="alertdialog"
+            >
+              <header>
+                <span className="recommendation-error-dialog__icon" aria-hidden="true">
+                  <AlertTriangle size={22} />
+                </span>
+                <div>
+                  <h2 id="recommendation-error-title">
+                    {bundle ? '方案暂时无法生成' : '推荐加载失败'}
+                  </h2>
+                  <p id="recommendation-error-message">{error}</p>
+                </div>
+                <button
+                  aria-label="关闭提示"
+                  autoFocus
+                  className="recommendation-error-dialog__close"
+                  onClick={() => setError('')}
+                  title="关闭"
+                  type="button"
+                >
+                  <X size={18} />
+                </button>
+              </header>
+              <div className="recommendation-error-dialog__actions">
+                {bundle ? (
+                  <button
+                    className="button button--soft"
+                    onClick={() => setError('')}
+                    type="button"
+                  >
+                    返回调整地点
+                  </button>
+                ) : (
+                  <button
+                    className="button button--primary"
+                    onClick={() => void load(true)}
+                    type="button"
+                  >
+                    <RefreshCw size={16} />重新加载
+                  </button>
+                )}
+              </div>
+            </section>
+          </div>
+        )}
         {parentTripId && (
           <button
             className="parent-trip-return"
@@ -305,16 +385,14 @@ export function RecommendationPage() {
           </header>
 
           {loading && (
-            <p className="recommendation-loading" role="status">
-              <LoaderCircle className="spin-icon" size={18} /> 正在整理推荐地点…
-            </p>
-          )}
-          {error && (
-            <section className="draft-confirmation" role="alert">
-              <p className="form-error">{error}</p>
-              <button className="button button--soft" type="button" onClick={() => void load(true)}>
-                <RefreshCw size={16} />重试
-              </button>
+            <section className="recommendation-loading" role="status" aria-live="polite">
+              <div className="recommendation-loading__signal"><LoaderCircle className="spin-icon" size={19} /><span>LIVE ANALYSIS</span></div>
+              <div className="recommendation-loading__copy"><h2>正在编排行程候选</h2><p>系统正在校验地点、路线距离、时间窗口与关怀限制。</p></div>
+              <ol className="recommendation-loading__steps">
+                <li><span>01</span><strong>恢复已确认的出行事实</strong><i /></li>
+                <li><span>02</span><strong>筛选符合约束的地点候选</strong><i /></li>
+                <li><span>03</span><strong>计算路线与预算可行性</strong><i /></li>
+              </ol>
             </section>
           )}
           {bundle && parentPlaceMemory.length > 0 && (
@@ -363,8 +441,14 @@ export function RecommendationPage() {
                           >
                             {bundle.candidates
                               .filter((candidate) => (
-                                candidate.factRefId === place.factRefId ||
-                                !selectedFactRefs.has(candidate.factRefId)
+                                (
+                                  candidate.factRefId === place.factRefId ||
+                                  !selectedFactRefs.has(candidate.factRefId)
+                                ) && (
+                                  !mealAwarePlan ||
+                                  isDiningPlaceLike(candidate.name, candidate.category) ===
+                                    isDiningPlaceLike(place.name, place.category)
+                                )
                               ))
                               .map((candidate) => (
                                 <option key={candidate.factRefId} value={candidate.factRefId}>
@@ -380,7 +464,7 @@ export function RecommendationPage() {
                     <div className="recommendation-location__actions" aria-label={`调整第 ${index + 1} 个地点的顺序`}>
                       <button
                         aria-label={`将第 ${index + 1} 个地点上移`}
-                        disabled={building || index === 0}
+                        disabled={building || moveDestination(index, -1) < 0}
                         onClick={() => movePlace(index, -1)}
                         title="上移"
                         type="button"
@@ -389,7 +473,7 @@ export function RecommendationPage() {
                       </button>
                       <button
                         aria-label={`将第 ${index + 1} 个地点下移`}
-                        disabled={building || index === selectedTasks.length - 1}
+                        disabled={building || moveDestination(index, 1) < 0}
                         onClick={() => movePlace(index, 1)}
                         title="下移"
                         type="button"

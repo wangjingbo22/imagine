@@ -66,6 +66,7 @@ def _app(tmp_path: Path, *, secure_cookie: bool = False):
             plan_version_db_path=tmp_path / "planning.sqlite3",
             amap_cache_db_path=tmp_path / "amap.sqlite3",
             account_session_db_path=tmp_path / "accounts.sqlite3",
+            account_api_key_encryption_key="MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
             auth_cookie_secure=secure_cookie,
         ),
         service=object(),  # type: ignore[arg-type]
@@ -163,6 +164,39 @@ async def test_unconfigured_account_cannot_generate_trip_drafts(tmp_path: Path):
     assert registered.status_code == 200
     assert response.status_code == 403
     assert response.json()["code"] == "ACCOUNT_MODEL_CONFIGURATION_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_account_accepts_custom_model_name_and_https_api_url(tmp_path: Path):
+    _, client = await _client(tmp_path)
+    async with client:
+        registered = await client.post(
+            "/api/v1/account/register",
+            json={
+                "email": "custom-model@example.com",
+                "password": PASSWORD,
+                "displayName": "Custom model",
+            },
+        )
+        saved = await client.put(
+            "/api/v1/account/me/model-settings",
+            json={
+                "model": "gpt-4.1-mini",
+                "apiKey": "custom-api-key-value",
+                "baseUrl": "https://models.example.com/v1",
+            },
+        )
+        restored = await client.get("/api/v1/account/me/model-settings")
+
+    assert registered.status_code == 200
+    assert saved.status_code == 200
+    assert restored.status_code == 200
+    assert restored.json()["data"] == {
+        "configured": True,
+        "model": "gpt-4.1-mini",
+        "keyHint": "••••alue",
+        "baseUrl": "https://models.example.com/v1",
+    }
 
 
 @pytest.mark.asyncio

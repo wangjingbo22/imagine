@@ -45,6 +45,12 @@ import {
   selectedPlacesFromSignedFactSet,
   type ConfirmedRecommendationSelection,
 } from './recommendationSelection'
+import {
+  isDiningPlaceLike,
+  isLodgingPlaceLike,
+  requiredMealSlots,
+  type MealSlot,
+} from './itineraryPlaces'
 
 export type AmapPlanningPhase = 'CITY' | 'PLACES' | 'ROUTES' | 'PLAN'
 
@@ -71,6 +77,7 @@ export interface PlanningIssue {
   code: string
   message: string
   review: CandidatePlanReview | null
+  details: Array<Record<string, unknown>>
 }
 
 export interface AmapReplanCandidateResult {
@@ -113,7 +120,8 @@ const interestKeywords: Record<string, string> = {
   博物馆: '博物馆',
 }
 
-const fallbackQueries = ['旅游景点', '博物馆', '公园', '餐饮服务']
+const activityFallbackQueries = ['旅游景点', '博物馆', '公园']
+const mealSearchQueries = ['美食街', '餐饮服务']
 const planningRadiusMeters = 25_000
 // The student's AMap quota is effectively one request per second. Keep every
 // browser-driven Provider operation below that limit so non-cached cities do
@@ -212,9 +220,16 @@ async function collectPlaces(
   city: CityResolution,
   searchCenter: GeoPoint,
   options: AmapPlanOptions,
+  mealSlots: readonly MealSlot[] = [],
 ) {
   const requestedQueries = searchQueries(draft, options.extraQueries)
-  const queries = requestedQueries.length > 0 ? requestedQueries : fallbackQueries.slice(0, 3)
+  const baseQueries = requestedQueries.length > 0 ? requestedQueries : activityFallbackQueries
+  const requiredMealQueries = mealSlots.length > 0 ? mealSearchQueries : []
+  const queries = unique([
+    ...baseQueries,
+    ...requiredMealQueries,
+  ])
+  const fallbackQueries = [...activityFallbackQueries, ...requiredMealQueries]
   const fragments = avoidFragments(draft)
   const excludedIds = new Set(options.excludePlaceIds ?? [])
   const buckets: Place[][] = []
@@ -233,6 +248,7 @@ async function collectPlaces(
       buckets.push(result.filter((place) =>
         directDistanceMeters(searchCenter, place.location) <= planningRadiusMeters &&
         !excludedIds.has(place.placeId) &&
+        !isLodgingPlaceLike(place.name, place.category) &&
         !isAvoided(place, fragments),
       ))
       successfulQueries.push(query)
@@ -258,6 +274,7 @@ async function collectPlaces(
         ))).filter((place) =>
           directDistanceMeters(searchCenter, place.location) <= planningRadiusMeters &&
           !excludedIds.has(place.placeId) &&
+          !isLodgingPlaceLike(place.name, place.category) &&
           !isAvoided(place, fragments),
         ),
       )
@@ -273,11 +290,11 @@ async function collectPlaces(
     throw lastSearchError
   }
 
-  const selected: Place[] = []
+  const available: Place[] = []
   const seenIds = new Set<string>()
   const seenPlaces = new Set<string>()
   const maxBucketSize = Math.max(0, ...buckets.map((bucket) => bucket.length))
-  for (let row = 0; row < maxBucketSize && selected.length < 4; row += 1) {
+  for (let row = 0; row < maxBucketSize && available.length < 12; row += 1) {
     for (const bucket of buckets) {
       const place = bucket[row]
       if (!place || seenIds.has(place.placeId) || seenPlaces.has(placeIdentity(place))) {
@@ -285,15 +302,50 @@ async function collectPlaces(
       }
       seenIds.add(place.placeId)
       seenPlaces.add(placeIdentity(place))
-      selected.push(place)
-      if (selected.length === 4) break
+      available.push(place)
+      if (available.length === 12) break
     }
   }
 
-  if (selected.length < 3) {
+  const targetTaskCount = 3 + mealSlots.length
+  const dining = available.filter((place) => isDiningPlaceLike(place.name, place.category))
+  const activities = orderByShortestNextSegment(
+    available.filter((place) => !isDiningPlaceLike(place.name, place.category)),
+  ).slice(0, 3)
+  if (dining.length < mealSlots.length) {
     throw new Error(
-      `高德仅返回 ${selected.length} 个可用且未命中避开条件的同城地点，至少需要 3 个才能生成真实计划。`,
+      `高德未返回足够的真实餐饮地点，无法安排${mealSlots.map((slot) => slot.label).join('和')}。`,
     )
+  }
+  if (activities.length < targetTaskCount - mealSlots.length) {
+    throw new Error(
+      `高德仅返回 ${activities.length} 个可用游览地点，无法组成真实单日计划。`,
+    )
+  }
+  const nearestDining = (
+    candidates: readonly Place[],
+    anchor: Place,
+  ) => [...candidates].sort((left, right) => (
+    directDistanceMeters(left.location, anchor.location) -
+      directDistanceMeters(right.location, anchor.location) ||
+    left.placeId.localeCompare(right.placeId)
+  ))[0]
+  let selected: Place[]
+  if (mealSlots.length === 2) {
+    const lunch = nearestDining(dining, activities[1])
+    const dinner = nearestDining(
+      dining.filter((place) => place.placeId !== lunch.placeId),
+      activities[2],
+    )
+    selected = [activities[0], activities[1], lunch, activities[2], dinner]
+  } else if (mealSlots[0]?.kind === 'LUNCH') {
+    const lunch = nearestDining(dining, activities[1])
+    selected = [activities[0], activities[1], lunch, activities[2]]
+  } else if (mealSlots[0]?.kind === 'DINNER') {
+    const dinner = nearestDining(dining, activities[2])
+    selected = [...activities, dinner]
+  } else {
+    selected = orderByShortestNextSegment(activities).slice(0, 3)
   }
   return { places: selected, queries: successfulQueries }
 }
@@ -438,10 +490,48 @@ export function defaultModeForWalkingRoute(
     : 'DRIVING'
 }
 
-export function orderByShortestNextSegment(places: Place[], seed: GeoPoint) {
+const comfortableWalkDistanceMeters = 1_800
+const practicalBicycleDistanceMeters = 8_000
+const longDistanceDrivingMeters = 20_000
+
+export function routeModeCandidates(
+  directDistance: number,
+  maxWalkMeters: number,
+  cyclingAllowed = false,
+): TravelMode[] {
+  const walkThreshold = Math.min(maxWalkMeters, comfortableWalkDistanceMeters)
+  if (directDistance <= walkThreshold) {
+    return unique([
+      'WALKING',
+      cyclingAllowed ? 'BICYCLING' : 'TRANSIT',
+      'TRANSIT',
+      'DRIVING',
+    ]) as TravelMode[]
+  }
+  if (directDistance >= longDistanceDrivingMeters) {
+    return unique([
+      'DRIVING',
+      'TRANSIT',
+      cyclingAllowed ? 'BICYCLING' : 'WALKING',
+      'WALKING',
+    ]) as TravelMode[]
+  }
+  if (cyclingAllowed && directDistance <= practicalBicycleDistanceMeters) {
+    return ['BICYCLING', 'TRANSIT', 'DRIVING', 'WALKING']
+  }
+  return unique([
+    'TRANSIT',
+    'DRIVING',
+    cyclingAllowed ? 'BICYCLING' : 'WALKING',
+    'WALKING',
+  ]) as TravelMode[]
+}
+
+export function orderByShortestNextSegment(places: Place[], seed?: GeoPoint) {
   const ordered: Place[] = []
   const remaining = [...places]
-  let origin = seed
+  let origin = seed ?? remaining[0]?.location
+  if (!origin) return ordered
   while (remaining.length > 0) {
     let nearestIndex = 0
     let nearestDistance = Number.POSITIVE_INFINITY
@@ -551,8 +641,9 @@ function routeLabel(route: ProviderRoute) {
   const labels: Record<TravelMode, string> = {
     WALKING: '步行',
     TRANSIT: '公共交通',
-    DRIVING: '打车路线',
+    DRIVING: '自驾',
     BICYCLING: '骑行',
+    TAXI: '打车',
   }
   return `${labels[route.mode]} ${route.distanceMeters} 米 · ${Math.max(1, Math.round(route.durationSeconds / 60))} 分钟`
 }
@@ -603,7 +694,7 @@ function previewFromCandidate(
       order: fact.order,
       title: fact.title,
       category: fact.category,
-      timeRange: `${fact.startAt} — ${fact.endAt}`,
+      timeRange: `${fact.startAt.slice(0, 5)} — ${fact.endAt.slice(0, 5)}`,
       durationMinutes: Math.ceil(
         (secondsSinceMidnight(fact.endAt) - secondsSinceMidnight(fact.startAt)) / 60,
       ),
@@ -629,6 +720,39 @@ function previewFromCandidate(
   }
 }
 
+function previewFromStored(
+  stored: StoredPlanVersion,
+  request: CandidatePlanRequest,
+): PlanSnapshot {
+  const preview = previewFromCandidate(request, stored.version)
+  const byTaskId = new globalThis.Map(preview.tasks.map((task) => [task.id, task]))
+  return {
+    ...preview,
+    id: stored.planId,
+    totalCostCents: stored.metrics.totalCostCents,
+    bufferCents: stored.metrics.bufferCents,
+    totalWalkMeters: stored.metrics.totalWalkMeters,
+    transferCount: stored.metrics.transferCount,
+    validationStatus: stored.metrics.validationStatus,
+    tasks: stored.days[0].tasks.map((task, index) => ({
+      id: task.taskId,
+      order: task.order,
+      title: task.title,
+      category: task.category,
+      timeRange: task.timeRange
+        .replace(/(\d{2}:\d{2}):\d{2}/g, '$1')
+        .replace('-', ' — '),
+      durationMinutes: task.durationMinutes,
+      transport: task.transport,
+      costCents: task.costCents,
+      priceKnown: true,
+      walkMeters: task.walkMeters,
+      note: task.note,
+      status: index === 0 ? 'current' as const : 'upcoming' as const,
+      coordinates: byTaskId.get(task.taskId)?.coordinates ?? [50, 50],
+    })),
+  }
+}
 function countUnknownPrices(request: CandidatePlanRequest) {
   return request.taskFacts.reduce(
     (count, fact) => count +
@@ -668,6 +792,84 @@ export function candidatePlanningIssue(error: unknown): PlanningIssue | null {
       ? '服务端发现价格、设施或来源证据仍为未知；补齐可信事实前不能确认该计划。'
       : `服务端硬约束校验未通过：${error.message}`,
     review,
+    details: error.details,
+  }
+}
+
+async function submitCandidatePlan(
+  tripId: string,
+  candidateRequest: CandidatePlanRequest,
+  organizerToken?: string | null,
+) {
+  let registeredPlan: StoredPlanVersion | null = null
+  let planningIssue: PlanningIssue | null = null
+  let plan = previewFromCandidate(candidateRequest, 1)
+  try {
+    registeredPlan = (await tripApi.generatePlanVersion(
+      tripId,
+      candidateRequest,
+      organizerToken,
+    )).data
+    plan = previewFromStored(registeredPlan, candidateRequest)
+  } catch (error) {
+    planningIssue = candidatePlanningIssue(error)
+    if (!planningIssue) throw error
+    if (planningIssue.code === 'CANDIDATE_PLAN_REJECTED') {
+      plan = { ...plan, validationStatus: 'FAIL' }
+    }
+  }
+  return { registeredPlan, planningIssue, plan }
+}
+
+export async function changeAmapPlanRoute(
+  tripId: string,
+  candidateRequest: CandidatePlanRequest,
+  evidence: LocationEvidence,
+  routeIndex: number,
+  mode: Extract<TravelMode, 'DRIVING' | 'BICYCLING' | 'TAXI'>,
+  organizerToken?: string | null,
+): Promise<AmapPlanResult> {
+  const targetFact = candidateRequest.taskFacts[routeIndex]
+  if (!targetFact || !evidence.routes[routeIndex]) {
+    throw new Error('没有找到需要调整的路线段，请刷新页面后重试。')
+  }
+  const origin = routeIndex === 0
+    ? candidateRequest.startLocation.location
+    : candidateRequest.taskFacts[routeIndex - 1].place.location
+  const route = await providerCall(() => requestFirstRoute(
+    tripId,
+    evidence.city.cityContext,
+    origin,
+    targetFact.place.location,
+    mode,
+    organizerToken,
+  ))
+  if (!hasCompleteRouteRiskFacts(route)) {
+    throw new Error(`高德返回的${routeLabel(route)}缺少完整路线事实，不能用于计划。`)
+  }
+
+  const places = candidateRequest.taskFacts.map((fact) => fact.place)
+  const routes = candidateRequest.taskFacts.map((fact, index) =>
+    index === routeIndex ? route : fact.route,
+  )
+  const rebuiltRequest = buildCandidateRequestFromConfirmedTrip(
+    candidateRequest.trip,
+    candidateRequest.startLocation,
+    candidateRequest.endLocation,
+    places,
+    routes,
+  )
+  const submitted = await submitCandidatePlan(tripId, rebuiltRequest, organizerToken)
+  return {
+    evidence: { ...evidence, routes },
+    plan: submitted.plan,
+    candidateRequest: rebuiltRequest,
+    candidatePreview: null,
+    registeredPlan: submitted.registeredPlan,
+    planningIssue: submitted.planningIssue,
+    knownCostCents: submitted.plan.totalCostCents,
+    unknownPriceCount: countUnknownPrices(rebuiltRequest),
+    recommendationTrace: null,
   }
 }
 
@@ -685,6 +887,7 @@ export function candidatePreviewIssue(preview: CandidatePlanPreview): PlanningIs
       ? suggestions.join(' ')
       : '候选路线未通过服务端预览校验。',
     review: null,
+    details: [],
   }
 }
 
@@ -827,17 +1030,26 @@ async function createAmapPlan(
         selection,
         options.organizerToken,
       )
-    : await collectPlaces(
+      : await collectPlaces(
         tripId,
         draft,
         city,
         endpoints.startLocation.location,
         options,
+        requiredMealSlots(
+          confirmedTrip.days[0].timeWindow.start,
+          confirmedTrip.days[0].timeWindow.end,
+        ),
       )
-  const intermediatePlaces = orderByShortestNextSegment(
-    collected.places,
-    endpoints.startLocation.location,
-  ).slice(0, 3)
+  const intermediatePlaces = selection || requiredMealSlots(
+    confirmedTrip.days[0].timeWindow.start,
+    confirmedTrip.days[0].timeWindow.end,
+  ).length > 0
+    ? collected.places
+    : orderByShortestNextSegment(
+        collected.places,
+        endpoints.startLocation.location,
+      ).slice(0, 3)
   const places = appendConfirmedReturnPlace(
     intermediatePlaces,
     endpoints.returnPlace,
@@ -886,6 +1098,8 @@ async function createAmapPlan(
     1,
     candidatePreview.validationStatus,
   )
+  const registeredPlan: StoredPlanVersion | null = null
+  const planningIssue = candidatePreviewIssue(candidatePreview)
   const unknownPriceCount = countUnknownPrices(candidateRequest)
   return {
     evidence: {
@@ -897,8 +1111,8 @@ async function createAmapPlan(
     plan,
     candidateRequest,
     candidatePreview,
-    registeredPlan: null,
-    planningIssue: candidatePreviewIssue(candidatePreview),
+    registeredPlan,
+    planningIssue,
     knownCostCents: plan.totalCostCents,
     unknownPriceCount,
     recommendationTrace: selection ?? null,

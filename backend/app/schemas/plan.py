@@ -80,7 +80,7 @@ class PlanTask(ContractModel):
 class PlanDay(ContractModel):
     day_index: Annotated[int, Field(ge=0)]
     date: date
-    tasks: list[PlanTask] = Field(min_length=3, max_length=4)
+    tasks: list[PlanTask] = Field(min_length=3, max_length=6)
 
     @model_validator(mode="after")
     def validate_task_order(self) -> "PlanDay":
