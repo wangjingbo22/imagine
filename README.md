@@ -2,162 +2,135 @@
 
 # 行知旅伴
 
-<p>面向国内城市、支持预算与关怀约束的单日旅行规划，并扩展到父行程协作的旅行 Agent 原型。</p>
+### 面向国内城市的受约束旅行规划 AI Agent
+
+把自然语言需求、同行偏好、日期、预算与关怀限制组织为可确认的行程，结合高德地点与路线事实，由服务端完成约束校验后生成可执行的日计划。
 
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.116%2B-009688?logo=fastapi&logoColor=white)
 ![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=20232a)
 ![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
-![Sprint 3 Alpha](https://img.shields.io/badge/Stage-Sprint%203%20Alpha-6f42c1)
 
-[🌐 公网演示](https://imagine-1-31o2.onrender.com/) · [API 健康检查](https://imagine-mp7v.onrender.com/api/v1/health)
+[公网体验](https://imagine-1-31o2.onrender.com/) · [本地启动](#本地启动) · [部署说明](deploy/README.md)
 
-[项目简介](#项目简介) · [功能特性](#功能特性) · [快速开始](#快速开始) · [路线图](#路线图) · [项目文档](#项目文档)
+[产品概览](#产品概览) · [适用场景](#适用场景) · [Agent 工作流](#agent-工作流) · [核心能力](#核心能力) · [产品演示](#产品演示) · [快速开始](#快速开始) · [项目结构](#项目结构) · [测试](#测试)
 
 </div>
 
-<p align="center">
-  <img src="docs/assets/readme/hero-home.png" alt="行知旅伴项目首页，展示预算约束、关怀出行与高德事实核验流程" width="1100">
-</p>
+## 产品概览
 
-> 当前阶段：**Sprint 3 Alpha** —— 单日核心闭环和 S2-T032 多人闭环保持稳定；Sprint 3 已加入账户会话、账户级 AI 设置、父行程多人协作、两日/三日入口、预算账本以及后端质量门禁。
+行知旅伴不是只展示路线的网页。前端负责收集和呈现行程信息；服务端把需求、地点与路线事实、预算和关怀约束放进同一条受约束的规划流程，形成可确认、可执行、可记录的日计划。
 
-> 当前基线：`main@a5d77b0`。S3 本地功能和质量门禁已有专项验收记录；S2-T032 仍为 `LOCAL_AUTOMATION_PASS / PUBLIC_UAT_NOT_RUN`，S3-T004 真实 Render/设备验收尚未完成。
+对于多日出行，系统以父行程协调城市、日期、成员与每日预算，再让每一天进入独立的单日规划和执行流程。这样既能管理一趟多日旅行，也不会把尚未具备的“全局自动排程”写成已经完成的能力。
 
-> 公网说明：Web 与 API 已通过 HTTPS 提供。公网环境是独立部署的演示快照，功能与健康检查返回的 `buildSha` 可能暂时落后于当前 `main`，不能替代本地提交和验收记录。
+## 适用场景
 
-## 项目简介
+| 场景 | 行知旅伴提供的流程 |
+| --- | --- |
+| 单人单日 | 用对话确认目的地、时间、预算、兴趣与关怀需求，生成并执行当日计划。 |
+| 多人单日 | 成员分别确认偏好与限制，组织者处理冲突后进入共享的日计划流程。 |
+| 单人多日 | 创建父行程并分配每日预算，按天进入单日规划。 |
+| 多人多日 | 在父行程中协调成员、日期和每日预算，再分别规划和执行每一天。 |
 
-行知旅伴面向国内城市的单日旅行规划场景，并提供父行程的多人协作与逐日入口。用户可以用自然语言输入城市、日期、预算、兴趣、地点和关怀需求，系统结合高德地点与路线事实，由服务端进行确定性约束校验，形成可执行的单日计划。
+## Agent 工作流
 
-在执行过程中，系统记录任务状态和实际消费；实际消费变化可发起服务端重规划评估。服务端读取 CURRENT V1、可信规划事实与执行事件，并在未完成后缀仍可行时生成单个确定性候选 Plan V2，由用户决定接受或拒绝；无可行方案时继续保留 CURRENT V1。
+行知旅伴是一个**受约束的旅行规划 AI Agent**：AI 用于整理非权威的自然语言需求和辅助解释，外部地点与路线事实来自高德，最终计划必须通过服务端的确定性校验并由用户确认。
 
-Sprint 2 在此基础上增加 2—3 人草稿修订、邀请与成员确认、硬冲突复核、候选层公平评分，以及一次定位证据、任务照片、旅行回忆和迟到/疲劳调整等能力。这里的边界很明确：**百炼大模型只提供候选字段或只读解释，高德提供地点/路线事实，最终结果由行知旅伴服务端确定性校验**。未配置 `BAILIAN_API_KEY` 或百炼暂时不可用时，系统会进入固定问题、本地规则或不可用说明，不让模型输出直接绕过确认、白名单和约束。
-
-Sprint 3 在此基础上加入账户注册、登录与资料、账户级模型和 API Key 设置、父行程多人协作、2 日/3 日父行程入口、预算来源账本，以及后端全量质量门禁。多日扩展目前主要提供父行程聚合和逐日进入单日 Trip 的入口；两日 `Trip` 草稿 Schema 已独立持久化，但多日计划生成、确认和执行尚未扩展为统一主链。
-
-## 功能特性
-
-- 百炼 Qwen 自然语言字段提取、本地规则降级与逐项歧义确认
-- 显式起终点输入与有限自然语言提取
-- 普通、亲子、低体力、行动辅助四类关怀画像
-- 2—3 人草稿修订、成员邀请、独立确认与结构化硬冲突复核
-- 高德城市、POI、路线距离、时长与来源事实
-- 步行、换乘、休息、时间和预算的确定性校验
-- 多人候选层满意度向量、HARD 排除与最低公平分优先的唯一排序
-- 服务端签发并确认 Plan V1
-- 开始、完成、跳过和实际消费执行事件
-- 一次定位证据、确定性到达判断与统一完成事件
-- 每站照片压缩、EXIF 移除、替换/删除与基础旅行回忆
-- 执行中迟到/疲劳的百炼草稿、10 秒固定表单降级与确定性临时约束（S2-T019/T020）
-- 迟到/疲劳事件驱动的冻结前缀、后缀重规划、四域 HARD 重验与零写入无解结果（S2-T021）
-- 服务端候选 Plan V2、结构化 Diff、百炼只读解释降级与原子接受/拒绝（S2-T022）
-- 计划费用、实际费用、任务状态与版本历史基础总结
-- 账户注册、登录、资料管理与账户级 AI 模型设置
-- 父行程组织者/成员协作、邀请兑换、资料隔离与逐日单日行程入口
-- 2 日/3 日父行程预算汇总、费用来源状态与手动修正展示
-- S3-T003 后端全量测试、核心域覆盖率、固定硬约束和 P0/P1 质量门禁
-
-## 使用流程
-
-```text
-单人主链：自然语言需求 → 关怀确认 → 高德事实 → 确定性校验 → Plan V1
-          → 执行与实际消费 → 单次后缀重规划评估 → Plan V2 决策 → 旅行总结
-
-多人本地闭环：组织者建草稿 → 邀请成员 → 各自确认 → 冲突复核
-              → GROUP 候选规划与公平评分 → 唯一推荐
-              → 共享 Plan V1 → 执行/到达/照片 → LATE/FATIGUE → Plan V2 → 回忆
+```
+旅行目标与约束
+    -> 需求整理与确认
+    -> 高德地点、路线事实查询
+    -> 时间、预算、步行、换乘、休息等约束校验
+    -> 签发可确认的 Plan V1
+    -> 执行记录与实际消费
+    -> 可行时评估后续调整，并由用户决定是否接受 Plan V2
 ```
 
-多人链路已在本地 ASGI/SQLite/stub 集成测试中贯通。正式推荐编排仍依赖生产级路线候选构建器；当前默认装配未提供该依赖，不能据此宣称生产推荐和公网闭环已完成。
+这条边界保证模型输出不会直接绕过用户确认、路线事实或硬约束。未配置大模型服务时，系统会使用本地规则完成可用的需求整理与确认流程。
+
+## 核心能力
+
+- 对话式收集旅行目标、城市、日期、起终点、预算、兴趣与关怀需求。
+- 基于高德地点和路线事实核对距离、时长、来源信息与路线段。
+- 在服务端统一校验预算、时间窗口、步行、换乘与休息等约束，生成可确认的 Plan V1。
+- 支持开始、完成、跳过、实际消费等执行记录，并对后续行程进行调整评估。
+- 支持多人偏好确认、冲突复核与共享行程的协作入口。
+- 支持父行程管理多日日期框架、每日预算、跨日地点记忆与逐日进入单日行程。
 
 ## 产品演示
 
-首屏由当前 `main` 的项目首页直接截取；业务状态图由当前前端结合无敏感信息的本地验收 Fixture 渲染，用于稳定复现 UI 能力。图片不代表公网数据或公网验收结果；T032 的本地测试已覆盖多人 Plan V1、执行、V2 和回忆，但仍不能替代公网连续链路。
+以下界面使用脱敏的本地演示数据采集，展示产品流程，不代表公网实例中的实时用户数据。
 
-### 多人候选与公平推荐
-
-<p align="center">
-  <img src="docs/assets/readme/collaboration-review.png" alt="行知旅伴两人成员公平评分、照顾点与妥协说明页面" width="1100">
-</p>
-
-候选层按最低成员分优先排序，并同时展示各成员得分、照顾点和妥协说明。多人推荐结果可在本地闭环中进入共享 GROUP Plan V1 及后续执行链；生产级路线候选构建和公网验收仍待完成。
-
-### 执行总结与旅途回忆
+### 1. 从需求确认开始
 
 <p align="center">
-  <img src="docs/assets/readme/execution-memory.png" alt="行知旅伴旅行总结、费用、事件、版本历史与旅途回忆页面" width="1100">
+  <img src="docs/assets/readme/trip-intake.png" alt="行知旅伴的对话式旅行需求确认页面" width="1200">
 </p>
 
-单人执行闭环会汇总任务完成数、实际费用、服务端事件与版本历史；任务照片存在时进入回忆时间线，无照片时保留明确空态。路线相关视图已接入高德地点、路线事实、道路底图、地点标记和真实 Polyline；公网入口是独立演示快照，应与当前 `main` 的本地验收状态分别核对。
+### 2. 核验路线并确认日计划
 
-## 技术架构与技术栈
+<p align="center">
+  <img src="docs/assets/readme/plan-workspace.png" alt="行知旅伴的单日行程工作台，展示路线、预算、Agent 推荐理由和可信数据状态" width="1200">
+</p>
 
-```text
-React 19 + TypeScript + Vite 工作台
-                │ HTTP
-                ▼
-FastAPI API
-  ├─ 百炼 Qwen：需求/事件候选字段与只读解释（可选、失败时降级）
-  ├─ 高德 Web 服务适配：城市、POI、路线事实
-  ├─ 协作修订与推荐：邀请、确认、冲突、候选层公平排序
-  ├─ 确定性规划与重规划：约束、预算、路线、PlanVersion
-  ├─ 执行辅助：到达证据、照片、回忆、迟到/疲劳事件
-  └─ SQLite：Provider 缓存、协作修订与业务状态
+### 3. 用父行程管理多日出行
+
+<p align="center">
+  <img src="docs/assets/readme/parent-trip.png" alt="行知旅伴的三日父行程页面，展示每日预算、日计划状态和跨日地点记忆" width="1200">
+</p>
+
+## 技术架构
+
+```
+React 19 + TypeScript + Vite
+             |
+             | HTTP
+             v
+FastAPI
+  |- 自然语言需求整理与辅助解释（可选）
+  |- 高德城市、地点、地理编码与路线事实
+  |- 约束校验、计划版本与执行事件
+  \-- SQLite 行程、账户与 Provider 缓存
 ```
 
-| 层次 | 技术 | 作用 |
-| --- | --- | --- |
-| 前端 | React 19、TypeScript、Vite | 响应式 Web 工作台、协作确认、推荐、计划与执行展示 |
-| 后端 | Python 3.11+、FastAPI、Pydantic | API、协作契约、确定性规划、PlanVersion 与执行事件 |
-| 自然语言模型 | 阿里云百炼 OpenAI 兼容接口 | 提取需求/事件候选字段，生成非权威差异说明 |
-| 外部事实 | 高德 Web 服务 | 城市、地点、路线距离、时长和来源事实 |
-| 本地持久化 | SQLite | Provider 缓存、草稿修订、协作状态、计划版本、媒体和执行事件 |
-| 质量保障 | pytest、Node test、TypeScript、Vite | 后端回归、前端测试与生产构建 |
+| 层次 | 技术与职责 |
+| --- | --- |
+| 前端 | React、TypeScript、Vite；提供需求确认、路线工作台、执行记录和父行程界面。 |
+| 后端 | Python、FastAPI、Pydantic；负责 API、约束校验、计划版本、协作与执行状态。 |
+| AI 能力 | 阿里云百炼 OpenAI 兼容接口；用于需求整理和说明，不直接决定最终计划。 |
+| 外部事实 | 高德 Web 服务；提供城市、地点、地理编码、距离与路线时长。 |
+| 本地数据 | SQLite；保存行程、计划版本、协作状态、账户会话和 Provider 缓存。 |
 
 ## 快速开始
 
-### 环境要求
+### 公网体验
 
-- Python 3.11 或更高版本
-- Node 22
-- 高德开放平台 Web 服务 Key（后端本地调用需要）
-- 阿里云百炼 API Key（启用在线大模型识别时需要；不配置则使用本地规则）
+- Web 工作台：[https://imagine-1-31o2.onrender.com/](https://imagine-1-31o2.onrender.com/)
+- API 健康检查：[https://imagine-mp7v.onrender.com/api/v1/health](https://imagine-mp7v.onrender.com/api/v1/health)
 
-### 1. 启动后端
+公网服务是独立部署的演示快照，可能与当前仓库版本不同。请勿在演示环境输入真实 API Key、密码或其他敏感信息。
 
-在仓库根目录执行：
+### 本地启动
+
+**环境要求**
+
+- Python 3.11+
+- Node.js 22+
+- 高德 Web 服务 Key：需要查询真实地点和路线时配置
+- 高德 Web 端 JS API Key 与安全密钥：需要显示真实地图时配置
+- 阿里云百炼 API Key：可选；未配置时使用本地规则
+
+在仓库根目录打开第一个 PowerShell 终端：
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
-```
-
-编辑根目录 `.env`，填写高德 Web 服务 Key。要演示在线大模型识别，还要填写一枚新建且未泄露的百炼 Key；其余配置可保留 `.env.example` 默认值：
-
-```env
-AMAP_WEB_SERVICE_KEY=你的Web服务Key
-BAILIAN_API_KEY=你的百炼APIKey
-BAILIAN_MODEL=qwen3.7-plus
-```
-
-启动后访问 `http://127.0.0.1:8000/api/v1/health`。返回
-`"naturalLanguageParser":"BAILIAN_CONFIGURED"` 表示当前进程已按 Secret 装配百炼客户端；
-若为 `DETERMINISTIC_RULES`，说明 Key 未配置。配置状态不等同于网络调用成功，
-一次解析响应中的 `recognitionSource:"BAILIAN"` 才能证明该请求真实获得了模型结果；
-`DEGRADED_RULES` 表示模型调用失败并已安全降级。
-
-启动 API：
-
-```powershell
 uvicorn app.main:app --reload
 ```
 
-### 2. 启动前端
-
-另开一个终端，在仓库根目录执行：
+在根目录 `.env` 中配置后端服务所需的 Key，再打开第二个 PowerShell 终端启动前端：
 
 ```powershell
 Set-Location frontend
@@ -166,45 +139,45 @@ npm ci
 npm run dev
 ```
 
-`frontend/.env.example` 已提供本地 API 地址及工作流开关；复制后填写两项前端高德凭据：
-
-```env
-VITE_API_BASE_URL=http://127.0.0.1:8000
-VITE_AMAP_JS_API_KEY=你的Web端（JS API）Key
-VITE_AMAP_SECURITY_JS_CODE=你的安全密钥
-VITE_USE_MOCK_API=false
-VITE_USE_PLAN_VERSION_API=true
-VITE_USE_WORKFLOW_API=true
-```
-
-前端通过后端调用高德 Web 服务：城市解析、同城 POI 检索和逐段路线规划均使用真实接口；路线总览另用高德 Web 端 JS API 显示道路底图、地点标记和路线轨迹。后端 `AMAP_WEB_SERVICE_KEY` 与前端 `VITE_AMAP_JS_API_KEY` 不是同一个 Key。根目录和前端的真实 `.env` 均受 Git 忽略，不能提交；只提交空值 `.env.example` 供同伴复制。
-
-启动后可访问：
+启动后访问：
 
 - Web 工作台：<http://localhost:5173>
 - API：<http://127.0.0.1:8000>
-- Swagger：<http://127.0.0.1:8000/docs>
+- OpenAPI：<http://127.0.0.1:8000/docs>
 
-### API Key 安全边界
+## 环境配置
 
-- 高德 Web Service Key 只放在后端根目录 `.env`。
-- 百炼 API Key 也只放在后端根目录 `.env` 或部署平台 Secret 中。
-- 高德 Web端（JS API）Key 和安全密钥只放在本地 `frontend/.env`。
-- 两类 Key 用途不同，均不得写入源码、截图或提交到 Git。
-- `.env` 使用本地副本；测试默认使用模拟高德响应，不需要真实 Key。
-- 仓库历史中出现过课堂调试凭据；旧凭据必须在平台撤销并换新，删除当前文件不能替代密钥轮换。
+| 配置项 | 用途 |
+| --- | --- |
+| `AMAP_WEB_SERVICE_KEY` | 后端查询城市、地点和路线事实。 |
+| `BAILIAN_API_KEY` | 可选的自然语言需求整理能力；不配置时使用本地规则。 |
+| `VITE_AMAP_JS_API_KEY` | 前端显示高德地图；与后端 Web Service Key 不是同一类 Key。 |
+| `VITE_AMAP_SECURITY_JS_CODE` | 高德 Web 端 JS API 的安全密钥。 |
+| `ACCOUNT_API_KEY_ENCRYPTION_KEY` | 部署环境中加密账户绑定 Key 的服务端密钥。 |
 
-## 测试与质量
+真实配置只放在本地 `.env` 或部署平台 Secret 中，不要提交到仓库、截图或日志。完整部署说明见 [deploy/README.md](deploy/README.md)。
 
-在仓库根目录运行 S3-T003 后端质量门禁：
+## 项目结构
 
-```powershell
-python tools/s3_t003_quality_gate.py
+```
+app/                 领域模型、应用服务与配置
+backend/             FastAPI 路由、服务适配与后端测试
+frontend/            React 工作台、页面、组件与前端测试
+docs/                设计、测试与产品演示资源
+deploy/              容器与公网部署说明
 ```
 
-该命令运行后端全量测试，检查固定硬约束样例零违规、规划/关怀/校验/预算/重规划五域覆盖率均不低于 75%，并阻断未关闭的 P0/P1。机器可读结果写入 `.quality-reports/s3-t003/`；日常聚焦调试仍可直接使用 `python -m pytest <test-path>`。
+接口契约见 [frontend/src/api/API.md](frontend/src/api/API.md)。
 
-再进入 `frontend`，运行前端测试、静态检查和生产构建：
+## 测试
+
+后端：
+
+```powershell
+python -m pytest
+```
+
+前端：
 
 ```powershell
 Set-Location frontend
@@ -212,113 +185,3 @@ npm test
 npm run lint
 npm run build
 ```
-
-这些命令对应当前仓库的 `pyproject.toml` 与 `frontend/package.json`；测试结果应以最近一次本地验证输出或对应提交记录为准，不在首页硬编码易过时的通过数量。
-
-T032 专项范围和验收边界见 [多人本地/公网验收说明](docs/testing/s2_t032_multiplayer_public_acceptance.md)、[T032 追溯记录](docs/traceability/sprint2/lin_canhan_s2_t032_day3.md) 和 [证据目录说明](docs/testing/evidence/s2_t032/README.md)。当前专项结论为 `LOCAL_AUTOMATION_PASS / PUBLIC_UAT_NOT_RUN`；全量回归、构建和公网结果应以最新命令输出及脱敏证据为准。
-
-## 路线图
-
-勾选项表示已在稳定提交状态中验证；未完成项保持未勾选。
-
-### Sprint 1：单人单日稳定基线
-
-- [x] 自然语言需求与关怀画像确认
-- [x] 百炼自然语言候选字段提取与确定性校验回填
-- [x] 高德地点/路线事实接入
-- [x] 服务端确定性 Plan V1 校验、签发与确认
-- [x] 执行事件与实际消费记录
-- [x] 单候选 Plan V2、V1/V2 Diff、接受与拒绝
-- [x] 计划费用、实际费用和版本历史基础总结
-- [x] 显式起终点输入与有限自然语言提取
-- [x] 高德道路底图、地点标记与真实路线 Polyline
-- [x] S1-T017 费用事件驱动的服务端重规划（单个确定性后缀候选、最多一次 V2）
-- [x] T018 显式多候选校验、最小扰动排序与选中 V2 签发
-- [ ] 服务端自主生成多个候选
-- [x] 公网 HTTPS API 健康检查
-- [x] 公网 HTTPS Web 演示快照
-
-### Sprint 2：多人候选协作与执行辅助
-
-- [x] 2—3 人严格需求契约、草稿修订、邀请与成员独立确认
-- [x] 结构化硬冲突复核、权限范围与重新确认门禁
-- [x] GROUP 候选规划、逐成员 HARD 校验、公平评分与唯一排序
-- [x] GROUP canonical Trip、共享 Plan V1、本地执行/到达、Plan V2 与 MemoryTimeline 集成链
-- [ ] 正式 recommendations 编排中的生产级 `RouteCandidateBuilderPort`
-- [x] 一次定位证据、确定性到达判断与统一完成事件服务端链
-- [ ] 浏览器一次性定位交互与公网移动设备验收
-- [x] 任务照片压缩、隐私处理、替换、删除与数量守卫
-- [x] 迟到/疲劳草稿、确认事件、确定性后缀重规划与专用决策接口
-- [ ] 执行页迟到/疲劳完整交互与公网 E2E
-- [x] 基础旅行回忆、照片展示与确定性 MemoryTimeline 接口
-
-### Sprint 3：质量与交付
-
-- [x] S3-T003 后端全量测试、五域覆盖率、零硬冲突与 P0/P1 自动化门禁
-- [x] S3-T005/T006 三城完整本地链路与西安/杭州高德在线烟测
-- [x] S3-T007 两日 DRAFT Schema 与隔离 SQLite 快照持久化
-- [x] S3-T009 账户注册/登录/资料与会话安全的本地验证
-- [x] S3-T010/T012/T013 父行程多人协作、2 日/3 日逐日入口与 Alpha 本地验收
-- [x] S3-T011/T014 预算账本与账户级 AI 设置本地功能验证
-- [x] 后端测试、前端 lint/build 基础 CI 配置
-- [ ] 多日计划生成、确认与执行主链
-- [ ] S3-T004 Render 公网发布、真实设备验收与三次连续演示
-- [ ] 账户持久化重启、账户级模型公网调用和答辩证据补齐
-
-## 团队成员与迭代协作
-
-四名成员均参与开发、联调、测试和代码管理；模块主责只表示 Sprint 1 的首要推进责任，不构成固定技术岗位壁垒。PO、SM、QA 均为兼任职责。
-
-| 成员 | Gitee 账号 | Sprint 1 主责模块 | Scrum 兼任职责 |
-| --- | --- | --- | --- |
-| 陈梓元 | `c_z_yy` | Agent 后端与主链编排 | PO |
-| 林粲涵 | `rasz12345` | 规划、约束与路线风险 | QA |
-| 张琪 | `fangfangxiao` | 高德 Provider、数据与 API | QA |
-| 王敬博 | `wangjingbo` | 响应式 Web 与工作台 | SM |
-
-## 项目文档
-
-- [V2.3 项目规划书](doc/行知旅伴_旅行规划Agent_Scrum项目规划_V2.3.docx)
-- [V2.3 产品待办列表](doc/行知旅伴_V2.3_产品待办列表_含负责人.xlsx)
-- [V2.3 Sprint 1 待办列表](doc/行知旅伴_V2.3_Sprint1待办列表_含负责人.xlsx)
-- [V2.3 Sprint 2 新需求修订版待办列表](doc/行知旅伴_V2.3_Sprint2待办列表_含负责人_新增需求修订版.xlsx)
-- [API 合同与当前接口](frontend/src/api/API.md)
-- [部署说明](deploy/README.md)
-- [Sprint 1 验收记录](docs/testing/2026-08-25-wang-jingbo-sprint1-acceptance.md)
-- [S1-T017 事件驱动重规划验收](docs/testing/evidence/s1_t017/clean-slice-acceptance.md)
-- [Sprint 1 评审记录](docs/reviews/2026-08-25-wang-jingbo-sprint1-review.md)
-- [Sprint 1 追溯入口](docs/traceability/sprint1/wang_jingbo_sprint1.md)
-- [Sprint 2 主线合并后独立验收](docs/testing/2026-08-27-s2-t001-post-main-integration-acceptance-report.md)
-- [Sprint 2 主线合并后产品一致性复核](docs/reviews/2026-08-27-s2-t001-post-main-final-conformance-review.md)
-- [Sprint 2 追溯目录](docs/traceability/sprint2/)
-- [S2-T032 多人公网闭环验收说明](docs/testing/s2_t032_multiplayer_public_acceptance.md)
-- [S2-T032 验收证据目录](docs/testing/evidence/s2_t032/README.md)
-- [迟到/疲劳重规划规则](docs/rules/s2_t021_t022_execution_replanning.md)
-- [S3-T003 质量门禁与 T002 接入说明](docs/quality/README.md)
-- [S3-T005/T006 城市与高德验证](docs/testing/2026-08-31-s3-t005-t006-local-verification.md)
-- [S3-T007 两日 Trip 验收](docs/testing/2026-09-01-s3-t007-independent-acceptance.md)
-- [S3-T009 账户验收](docs/testing/2026-09-01-s3-t009-independent-acceptance.md)
-- [S3-T013 Alpha 本地验收](docs/testing/2026-09-01-s3-t013-alpha-acceptance.md)
-- [Sprint 3 追溯目录](docs/traceability/sprint3/)
-- [AI 使用说明](doc/ai_usage.md)
-
-## 已知限制、安全说明与明确不做事项
-
-当前版本明确保留以下边界：
-
-- 高德负责地点与路线事实，行知旅伴服务端负责确定性约束校验；不把高德描述成整套旅行计划生成器。
-- 百炼只参与需求/事件字段提取和可选 Diff 文案解释，不负责路线生成、预算裁决、关怀约束或 PlanVersion 状态变更；当前没有 LangGraph 运行时编排。
-- 起终点只支持显式输入和有限自然语言表达，复杂自由表达仍需用户确认。
-- T017 与 S2-T021 当前都只从可信事实生成一个确定性后缀候选；T018 可以校验并排序调用方显式提交的多个候选。S2 推荐模块已具备百炼白名单提议、确定性枚举和公平排序，但生产级 `RouteCandidateBuilderPort` 尚未装配，因此服务端自主真实路线多候选 E2E 仍未完成。
-- S2-T021 已具备确认事件、可信事实恢复、事件感知后缀、冻结、四域重验、零写入无解和 readiness 绑定决策；地点、路线、价格及设施事实不会被规划器改写。
-- 2—3 人的 GROUP Trip、共享 V1、执行、调整、V2 和 MemoryTimeline 已完成本地集成；正式推荐编排仍受 `RouteCandidateBuilderPort` 装配状态限制，公网三会话链仍未验收。
-- 一次定位的证据、到达判断和完成事件服务端链已经存在，但浏览器真实定位交互与移动设备公网验收仍待完成；系统明确不做持续 GPS。
-- 任务照片与回忆属于课程原型能力，媒体保存在 SQLite；公网 Render 使用临时文件系统时，未挂载 Persistent Disk 的数据会在重新部署或实例替换后丢失。
-- 两日 `Trip` 目前是独立的 DRAFT Schema 和快照持久化合同，不进入现有单日确认、规划和执行主链；父行程的 2 日/3 日能力通过逐日单日入口提供。
-- 账户支持资料和账户级模型设置，但邮箱验证、找回密码、OAuth、RBAC、防暴力破解和公网重启留存仍未完成或不在本轮范围内；用户绑定 Key 依赖稳定的 `ACCOUNT_API_KEY_ENCRYPTION_KEY` 和 `/app/data` 持久盘。
-- 预算账本展示来源、未知费用和手动修正，不提供支付能力；账户级模型调用仍需真实部署环境和平台额度验证。
-- 公网 HTTPS Web 与 API 当前可访问，但它们是独立部署快照；应通过健康检查的 `buildSha` 判断版本，不把公网可访问性等同于最新 `main` 已部署，也不展示没有可核验运行页的 build 徽章。
-
-明确不做：持续 GPS、视频剪辑、全国无障碍保证、优惠券/跑腿，以及第三方批量抓取。
-
-提交问题或复现本地行为时，请同时说明 Python/Node 版本、启动配置和是否使用模拟 Provider；不要上传 `.env`、真实 Key 或含敏感信息的截图。
