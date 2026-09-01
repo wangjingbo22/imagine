@@ -9,7 +9,6 @@ from app.domain.parent_trip import (
     ParentTripCreateRequest,
     ParentTripDayLinkRequest,
     ParentTripInvitationCreateRequest,
-    ParentTripInvitationRedeemRequest,
     ParentTripMemberProfileUpdate,
 )
 
@@ -134,22 +133,6 @@ def create_invitation(
             organizer_token=organizer_token(x_parent_trip_token),
             expected_sync_version=payload.expected_sync_version,
             expires_in_hours=payload.expires_in_hours,
-            idempotency_key=idempotency_key(request),
-        )
-    )
-
-
-@router.post("/api/v3/parent-trip-invitations/redeem")
-def redeem_invitation(
-    payload: ParentTripInvitationRedeemRequest,
-    request: Request,
-    response: Response,
-    current: ParentTripService = Depends(service),
-) -> ApiResponse:
-    no_store(response)
-    return ApiResponse(
-        data=current.redeem_invitation(
-            token=payload.token,
             idempotency_key=idempotency_key(request),
         )
     )

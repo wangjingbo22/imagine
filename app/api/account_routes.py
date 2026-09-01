@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request, Response
 
 from app.application.account_service import AccountService
+from app.application.parent_trip_service import ParentTripService
+from app.core.errors import AppError
 from app.domain.account import (
     CurrentUser,
     LoginRequest,
@@ -11,6 +13,7 @@ from app.domain.account import (
     RegisterRequest,
 )
 from app.domain.models import ApiResponse
+from app.domain.parent_trip import ParentTripInvitationRedeemRequest
 
 
 ACCOUNT_COOKIE_NAME = "account_session"
@@ -23,8 +26,28 @@ def get_account_service(request: Request) -> AccountService:
     return request.app.state.account_service
 
 
+def get_parent_trip_service(request: Request) -> ParentTripService:
+    return request.app.state.parent_trip_service
+
+
 def _token(request: Request) -> str | None:
     return request.cookies.get(ACCOUNT_COOKIE_NAME)
+
+
+def _idempotency_key(request: Request) -> str:
+    value = request.headers.get("Idempotency-Key")
+    if (
+        value is None
+        or not 16 <= len(value) <= 128
+        or any(ord(character) < 32 or ord(character) > 126 for character in value)
+    ):
+        raise AppError(
+            "IDEMPOTENCY_KEY_REQUIRED",
+            "Idempotency-Key 必须是 16 至 128 个 printable ASCII 字符。",
+            422,
+            False,
+        )
+    return value
 
 
 def _set_cookie(response: Response, token: str, request: Request) -> None:
@@ -104,3 +127,24 @@ async def update_profile(
 ) -> ApiResponse[CurrentUser]:
     _no_store(response)
     return ApiResponse(data=service.update_profile(_token(request), payload))
+
+
+@router.post("/parent-trip-invitations/redeem")
+async def redeem_parent_trip_invitation(
+    payload: ParentTripInvitationRedeemRequest,
+    request: Request,
+    response: Response,
+    account_service: AccountService = Depends(get_account_service),
+    parent_trip_service: ParentTripService = Depends(get_parent_trip_service),
+) -> ApiResponse:
+    _no_store(response)
+    user = account_service.current_user(_token(request))
+    return ApiResponse(
+        data=parent_trip_service.redeem_invitation(
+            token=payload.token,
+            idempotency_key=_idempotency_key(request),
+            account_user_id=user.user_id,
+            display_name=user.display_name,
+            interests=user.interests,
+        )
+    )

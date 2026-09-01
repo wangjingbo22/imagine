@@ -13,6 +13,7 @@ import {
   redeemParentTripInvitation,
   updateParentTripMemberProfile,
 } from '../api/parentTripApi'
+import { ApiError } from '../api/client'
 import { AppShell } from '../components/AppShell'
 import type { ParentTripSyncView } from '../domain/parentTrip'
 import {
@@ -99,6 +100,13 @@ export function ParentTripMemberPage() {
       })
       .catch((caught: unknown) => {
         if (cancelled) return
+        if (
+          caught instanceof ApiError &&
+          caught.code === 'ACCOUNT_SESSION_REQUIRED'
+        ) {
+          navigate('/account?returnTo=%2Fparent-join', { replace: true })
+          return
+        }
         setPhase('ERROR')
         setError(caught instanceof Error ? caught.message : '加入父行程失败。')
       })
@@ -186,6 +194,10 @@ export function ParentTripMemberPage() {
       setError('兴趣标签不能重复。')
       return
     }
+    if (interests.length > 8 || interests.some((item) => item.length > 80)) {
+      setError('兴趣最多填写 8 项，每项最多 80 个字符。')
+      return
+    }
     if (
       budgetCapCents !== null &&
       (!Number.isFinite(budgetCapCents) || budgetCapCents < 0)
@@ -253,9 +265,9 @@ export function ParentTripMemberPage() {
       <form className="parent-member-profile" onSubmit={(event) => void saveProfile(event)}>
         <header><UserRound size={21} /><div><h2>我的资料</h2><span>版本 {ownProfile.profileVersion}</span></div></header>
         <label htmlFor="parent-member-nickname">昵称</label>
-        <input id="parent-member-nickname" maxLength={40} value={profile.nickname} onChange={(event) => setProfileDraft({ ...profile, nickname: event.target.value })} />
+        <input id="parent-member-nickname" maxLength={80} value={profile.nickname} onChange={(event) => setProfileDraft({ ...profile, nickname: event.target.value })} />
         <label htmlFor="parent-member-interests">兴趣标签</label>
-        <input id="parent-member-interests" maxLength={240} value={profile.interests} onChange={(event) => setProfileDraft({ ...profile, interests: event.target.value })} />
+        <input id="parent-member-interests" maxLength={647} value={profile.interests} onChange={(event) => setProfileDraft({ ...profile, interests: event.target.value })} />
         <label htmlFor="parent-member-budget">个人预算上限（元）</label>
         <input id="parent-member-budget" type="number" min="0" step="0.01" value={profile.budgetCapYuan} onChange={(event) => setProfileDraft({ ...profile, budgetCapYuan: event.target.value })} />
         <button className="button button--primary" type="submit" disabled={saving || !dirty}><Save size={17} />{saving ? '保存中' : '保存资料'}</button>

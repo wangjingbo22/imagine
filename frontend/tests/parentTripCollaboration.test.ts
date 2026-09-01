@@ -21,7 +21,7 @@ test('T010 uses isolated capability headers and optimistic sync versions', async
   assert.match(api, /X-Parent-Member-Session/)
   assert.match(api, /Idempotency-Key/)
   assert.match(api, /expectedSyncVersion/)
-  assert.match(api, /\/api\/v3\/parent-trip-invitations\/redeem/)
+  assert.match(api, /\/api\/v1\/account\/parent-trip-invitations\/redeem/)
   assert.match(api, /\/member-profile/)
   assert.match(api, /must|必须且只能提供一种身份凭证/)
 })
@@ -59,6 +59,8 @@ test('T010 strips the bearer invitation from the URL before redemption', async (
   assert.ok(redemptionIndex > stripIndex)
   assert.match(page, /storeParentMemberSession/)
   assert.match(page, /clearPendingInvitation/)
+  assert.match(page, /ACCOUNT_SESSION_REQUIRED/)
+  assert.match(page, /\/account\?returnTo=%2Fparent-join/)
 })
 
 

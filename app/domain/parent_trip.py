@@ -65,9 +65,9 @@ class ParentTripInvitationRedeemRequest(CollaborationModel):
 class ParentTripMemberProfileUpdate(CollaborationModel):
     schema_version: Literal["1.0"]
     expected_sync_version: int = Field(ge=1)
-    nickname: str = Field(min_length=1, max_length=40)
-    interests: list[Annotated[str, Field(min_length=1, max_length=40)]] = Field(
-        default_factory=list, max_length=12
+    nickname: str = Field(min_length=1, max_length=80)
+    interests: list[Annotated[str, Field(min_length=1, max_length=80)]] = Field(
+        default_factory=list, max_length=8
     )
     budget_cap_cents: int | None = Field(default=None, ge=0, le=100_000_000)
 

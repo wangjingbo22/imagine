@@ -50,6 +50,14 @@ test('account page only treats an invalid session as signed out', async () => {
   assert.match(page, /账户状态读取失败，请刷新重试/)
 })
 
+test('account return path is allowlisted before resuming an invitation', async () => {
+  const page = await readFile(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8')
+
+  assert.match(page, /returnTo === '\/parent-join'/)
+  assert.match(page, /navigate\(returnTo, \{ replace: true \}\)/)
+  assert.doesNotMatch(page, /window\.location\s*=/)
+})
+
 test('account inputs keep a visible keyboard focus indicator', async () => {
   const styles = await readFile(new URL('../src/styles/white-web.css', import.meta.url), 'utf8')
 

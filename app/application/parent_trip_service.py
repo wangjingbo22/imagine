@@ -48,6 +48,7 @@ class ParentTripService:
             "PARENT_TRIP_DAY_NOT_FOUND": 404,
             "PARENT_INVITATION_UNAVAILABLE": 404,
             "PARENT_INVITATION_EXPIRED": 410,
+            "PARENT_INVITATION_ACCOUNT_MISMATCH": 403,
             "PARENT_TRIP_PERMISSION_REQUIRED": 403,
             "PARENT_MEMBER_PERMISSION_REQUIRED": 403,
             "PARENT_MEMBER_SESSION_REQUIRED": 401,
@@ -66,6 +67,8 @@ class ParentTripService:
             "PARENT_INVITATION_UNAVAILABLE": "父行程邀请不存在或已失效。",
             "PARENT_INVITATION_EXPIRED": "父行程邀请已过期。",
             "PARENT_INVITATION_ALREADY_REDEEMED": "父行程邀请已经被其他会话使用。",
+            "PARENT_INVITATION_ACCOUNT_MISMATCH": "该邀请已由其他账号兑换。",
+            "PARENT_ACCOUNT_ALREADY_MEMBER": "当前账号已经加入该父行程。",
             "PARENT_MEMBER_SESSION_REQUIRED": "缺少父行程成员会话凭证。",
             "PARENT_MEMBER_SESSION_INVALID": "父行程成员会话无效。",
             "PARENT_MEMBER_SESSION_EXPIRED": "父行程成员会话已过期。",
@@ -317,11 +320,17 @@ class ParentTripService:
         *,
         token: str,
         idempotency_key: str,
+        account_user_id: UUID,
+        display_name: str,
+        interests: list[str],
     ) -> ParentTripInvitationRedeemed:
         try:
             row, session_secret = self.repository.redeem_invitation(
                 token=token,
                 idempotency_key=idempotency_key,
+                account_user_id=account_user_id,
+                display_name=display_name,
+                interests=interests,
             )
         except ParentTripStoreError as error:
             raise self._error(error) from error

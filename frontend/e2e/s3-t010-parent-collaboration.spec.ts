@@ -10,12 +10,28 @@ async function assertNoHorizontalOverflow(page: Page) {
 }
 
 
+async function registerInvitedMember(
+  page: Page,
+  invitationUrl: string,
+  profile: { displayName: string; email: string },
+) {
+  await page.goto(invitationUrl)
+  await expect(page).toHaveURL(/\/account\?returnTo=%2Fparent-join$/)
+  await page.getByRole('button', { name: '注册' }).click()
+  await page.getByLabel('显示名称').fill(profile.displayName)
+  await page.getByLabel('邮箱').fill(profile.email)
+  await page.getByLabel('密码').fill('t010-account-password')
+  await page.getByRole('button', { name: '创建账户' }).click()
+}
+
+
 test('S3-T010 three people collaborate through isolated polling sessions', async ({
   browser,
   page: organizer,
 }, testInfo) => {
   test.setTimeout(90_000)
-  const title = `T010 同行 ${Date.now().toString().slice(-6)}`
+  const runId = Date.now()
+  const title = `T010 同行 ${runId.toString().slice(-6)}`
   const memberOneContext = await browser.newContext({
     locale: 'zh-CN',
     reducedMotion: 'reduce',
@@ -41,7 +57,10 @@ test('S3-T010 three people collaborate through isolated polling sessions', async
     const firstInvitation = await invitationInput.inputValue()
 
     const memberOne = await memberOneContext.newPage()
-    await memberOne.goto(firstInvitation)
+    await registerInvitedMember(memberOne, firstInvitation, {
+      displayName: '小林账号',
+      email: `t010-member-one-${runId}@example.com`,
+    })
     await expect(memberOne).toHaveURL(/\/parent-trips\/[0-9a-f-]{36}\/member$/)
     await expect(memberOne.getByRole('heading', { name: title })).toBeVisible()
     await memberOne.getByLabel('昵称').fill('小林')
@@ -59,7 +78,10 @@ test('S3-T010 three people collaborate through isolated polling sessions', async
     const secondInvitation = await invitationInput.inputValue()
 
     const memberTwo = await memberTwoContext.newPage()
-    await memberTwo.goto(secondInvitation)
+    await registerInvitedMember(memberTwo, secondInvitation, {
+      displayName: '阿岚账号',
+      email: `t010-member-two-${runId}@example.com`,
+    })
     await expect(memberTwo).toHaveURL(/\/parent-trips\/[0-9a-f-]{36}\/member$/)
     await memberTwo.getByLabel('昵称').fill('阿岚')
     await memberTwo.getByLabel('兴趣标签').fill('美食')

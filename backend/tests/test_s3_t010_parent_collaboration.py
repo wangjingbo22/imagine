@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 from uuid import uuid4
 
@@ -6,6 +7,10 @@ import pytest
 
 from app.core.config import Settings
 from app.main import create_app
+from app.infrastructure.parent_trip_store import SqliteParentTripRepository
+
+
+PASSWORD = "correct-horse-battery-staple"
 
 
 def settings(database_path: Path) -> Settings:
@@ -13,7 +18,36 @@ def settings(database_path: Path) -> Settings:
         _env_file=None,
         plan_version_db_path=database_path,
         amap_cache_db_path=database_path.with_name("amap.sqlite3"),
+        account_session_db_path=database_path.with_name("accounts.sqlite3"),
     )
+
+
+async def register_account(
+    client: httpx.AsyncClient,
+    *,
+    email: str,
+    display_name: str,
+    interests: list[str],
+) -> dict[str, object]:
+    registered = await client.post(
+        "/api/v1/account/register",
+        json={
+            "email": email,
+            "password": PASSWORD,
+            "displayName": display_name,
+        },
+    )
+    assert registered.status_code == 200, registered.text
+    updated = await client.put(
+        "/api/v1/account/me/profile",
+        json={
+            "displayName": display_name,
+            "homeCity": "杭州",
+            "interests": interests,
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    return updated.json()["data"]
 
 
 async def create_parent(
@@ -66,7 +100,7 @@ async def redeem(
     idempotency_key: str,
 ) -> dict[str, object]:
     response = await client.post(
-        "/api/v3/parent-trip-invitations/redeem",
+        "/api/v1/account/parent-trip-invitations/redeem",
         headers={"Idempotency-Key": idempotency_key},
         json={"schemaVersion": "1.0", "token": invitation_token},
     )
@@ -151,6 +185,26 @@ async def test_three_people_poll_with_isolated_profiles_and_version_guard(
 
         first_token = str(first_data["invitationUrl"]).rsplit("/", 1)[-1]
         second_token = str(second_data["invitationUrl"]).rsplit("/", 1)[-1]
+        unauthenticated = await client.post(
+            "/api/v1/account/parent-trip-invitations/redeem",
+            headers={"Idempotency-Key": "redeem-member-no-account"},
+            json={"schemaVersion": "1.0", "token": first_token},
+        )
+        assert unauthenticated.status_code == 401
+        assert unauthenticated.json()["code"] == "ACCOUNT_SESSION_REQUIRED"
+        legacy_redeem = await client.post(
+            "/api/v3/parent-trip-invitations/redeem",
+            headers={"Idempotency-Key": "redeem-member-legacy-path"},
+            json={"schemaVersion": "1.0", "token": first_token},
+        )
+        assert legacy_redeem.status_code == 404
+
+        first_account = await register_account(
+            client,
+            email="xiaolin@example.com",
+            display_name="小林账号",
+            interests=["园林", "摄影"],
+        )
         first_member = await redeem(
             client,
             first_token,
@@ -166,19 +220,55 @@ async def test_three_people_poll_with_isolated_profiles_and_version_guard(
             first_member_replay["memberSessionToken"]
             == first_member["memberSessionToken"]
         )
+        first_initial = await client.get(
+            f"/api/v3/parent-trips/{parent_id}/sync",
+            headers={
+                "X-Parent-Member-Session": str(first_member["memberSessionToken"])
+            },
+        )
+        assert first_initial.status_code == 200, first_initial.text
+        assert first_initial.json()["data"]["visibleProfiles"][0]["nickname"] == "小林账号"
+        assert first_initial.json()["data"]["visibleProfiles"][0]["interests"] == [
+            "园林",
+            "摄影",
+        ]
+        duplicate_account = await client.post(
+            "/api/v1/account/parent-trip-invitations/redeem",
+            headers={"Idempotency-Key": "redeem-member-two-duplicate"},
+            json={"schemaVersion": "1.0", "token": second_token},
+        )
+        assert duplicate_account.status_code == 409
+        assert duplicate_account.json()["code"] == "PARENT_ACCOUNT_ALREADY_MEMBER"
         consumed = await client.post(
-            "/api/v3/parent-trip-invitations/redeem",
+            "/api/v1/account/parent-trip-invitations/redeem",
             headers={"Idempotency-Key": "redeem-member-one-other"},
             json={"schemaVersion": "1.0", "token": first_token},
         )
         assert consumed.status_code == 409
         assert consumed.json()["code"] == "PARENT_INVITATION_ALREADY_REDEEMED"
+
+        logged_out = await client.post("/api/v1/account/logout")
+        assert logged_out.status_code == 200
+        second_account = await register_account(
+            client,
+            email="alan@example.com",
+            display_name="阿岚账号",
+            interests=["美食"],
+        )
+        mismatched_replay = await client.post(
+            "/api/v1/account/parent-trip-invitations/redeem",
+            headers={"Idempotency-Key": "redeem-member-one-0001"},
+            json={"schemaVersion": "1.0", "token": first_token},
+        )
+        assert mismatched_replay.status_code == 403
+        assert mismatched_replay.json()["code"] == "PARENT_INVITATION_ACCOUNT_MISMATCH"
         second_member = await redeem(
             client,
             second_token,
             "redeem-member-two-0002",
         )
         assert first_member["participantId"] != second_member["participantId"]
+        assert first_account["userId"] != second_account["userId"]
 
         first_session = str(first_member["memberSessionToken"])
         second_session = str(second_member["memberSessionToken"])
@@ -253,6 +343,17 @@ async def test_three_people_poll_with_isolated_profiles_and_version_guard(
             second_session,
         ):
             assert secret.encode("ascii") not in stored_database
+        with sqlite3.connect(database_path) as connection:
+            account_bindings = connection.execute(
+                """SELECT account_user_id FROM parent_trip_members
+                WHERE parent_trip_id=? AND role='MEMBER'
+                ORDER BY participant_id""",
+                (parent_id,),
+            ).fetchall()
+        assert {row[0] for row in account_bindings} == {
+            first_account["userId"],
+            second_account["userId"],
+        }
 
         ambiguous = await client.get(
             f"/api/v3/parent-trips/{parent_id}/sync",
@@ -278,3 +379,34 @@ async def test_three_people_poll_with_isolated_profiles_and_version_guard(
         assert restored_sync["syncVersion"] == 7
         assert restored_sync["visibleProfiles"][0]["nickname"] == "小林"
         assert restored_sync["parentTrip"]["days"][0]["budgetCents"] == 40_000
+
+
+def test_existing_parent_collaboration_database_migrates_account_binding(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "legacy-parent.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("""CREATE TABLE parent_trip_members (
+            parent_trip_id TEXT NOT NULL,
+            participant_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            access_status TEXT NOT NULL,
+            nickname TEXT NOT NULL,
+            interests_json TEXT NOT NULL,
+            budget_cap_cents INTEGER,
+            profile_version INTEGER NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(parent_trip_id, participant_id)
+        )""")
+
+    SqliteParentTripRepository(database_path)
+
+    with sqlite3.connect(database_path) as connection:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(parent_trip_members)")
+        }
+        indexes = {
+            row[1] for row in connection.execute("PRAGMA index_list(parent_trip_members)")
+        }
+    assert "account_user_id" in columns
+    assert "ux_parent_trip_members_parent_account" in indexes

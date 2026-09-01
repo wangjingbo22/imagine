@@ -85,7 +85,7 @@ export async function redeemParentTripInvitation(input: {
   idempotencyKey: string
 }): Promise<ParentTripInvitationRedeemed> {
   return (await request<ParentTripInvitationRedeemed>(
-    '/api/v3/parent-trip-invitations/redeem',
+    '/api/v1/account/parent-trip-invitations/redeem',
     {
       method: 'POST',
       headers: { 'Idempotency-Key': input.idempotencyKey },

@@ -4,7 +4,7 @@
 
 **Traceability：** PBI-18-B / AC-18-B / S3-T010
 
-**交付基线：** `main@17485d230ad5b5fda0745bb67a207b468e821000`
+**融合基线：** `main@7647a4e`（S3-T007 + S3-T009）
 
 **状态：** `LOCAL_AUTOMATION_PASS / PUBLIC_UAT_NOT_RUN`
 
@@ -17,6 +17,8 @@
 - 复用 S3-T012 的 2–3 天同城父行程，最多三人：一名组织者和两名成员。
 - 组织者凭证、邀请 token、成员会话三者独立。SQLite 只保存 SHA-256 哈希，不保存可复用明文 token。
 - 邀请创建与兑换均要求 `Idempotency-Key`；邀请只能兑换一次，同键重试返回同一结果。
+- 邀请兑换同时要求 S3-T009 账号会话；账号标识成员，邀请 token 授予当前父行程权限，任一条件都不能替代另一条件。
+- 同一账号在一个父行程只能绑定一个席位；账号显示名称和兴趣初始化成员资料，个人预算仍按父行程独立维护。
 - 组织者同步可见父行程内全部资料；成员同步和资料更新只能读取、修改自己的参与者行。
 - 邀请创建和资料更新携带 `expectedSyncVersion`。旧版本写入返回 HTTP 409，防止轮询期间静默覆盖。
 - 前端固定每 5 秒调用同步接口；不创建 WebSocket、SSE、聊天或投票通道。
@@ -28,7 +30,7 @@
 | 方法与路径 | 身份与用途 |
 | --- | --- |
 | `POST /api/v3/parent-trips/{parentTripId}/invitations` | `X-Parent-Trip-Token`；组织者创建一个成员席位和邀请 |
-| `POST /api/v3/parent-trip-invitations/redeem` | 邀请 token；兑换独立成员会话 |
+| `POST /api/v1/account/parent-trip-invitations/redeem` | 账号 Cookie + 邀请 token；绑定账号并兑换独立成员会话 |
 | `GET /api/v3/parent-trips/{parentTripId}/sync` | 组织者 token 或成员 session 二选一；返回权限裁剪后的同步快照 |
 | `PUT /api/v3/parent-trips/{parentTripId}/member-profile` | `X-Parent-Member-Session`；成员只更新自己的昵称、兴趣和预算上限 |
 
@@ -40,6 +42,7 @@
 | --- | --- |
 | 组织者创建父行程和邀请 | T012 回归覆盖父行程；T010 HTTP 测试覆盖两份邀请、幂等重试和第三名上限 |
 | 成员加入并维护独立资料 | 两个邀请兑换为不同 session；成员 A/B 分别更新昵称、兴趣和预算上限 |
+| 账号与邀请双重授权 | 未登录拒绝兑换；账号画像初始化资料；重复账号占位和换账号幂等重放均被拒绝 |
 | 成员资料隔离 | 成员 A 响应不含成员 B，成员 B 响应不含成员 A；组织者可见三人 |
 | 短轮询同步资料、预算、子 Trip 状态 | 前端常量冻结为 5000 ms；同步 DTO 包含父预算和每日 `childStatus` |
 | 刷新与服务重启可恢复 | 相同 SQLite 重新创建应用后，成员 session、资料和同步版本保持可读 |
@@ -47,9 +50,9 @@
 
 ## 依赖与边界
 
-S3-T012 已提供父行程聚合。当前 `main` 尚无 S3-T009 账号登录实现，因此本交付使用父行程专属 capability session 完成成员身份隔离；公开 DTO 不依赖浏览器随机身份，T009 后续可把账号 ID 绑定到该 session 边界，无需修改 T010 HTTP DTO。
+S3-T012 提供父行程聚合，S3-T009 提供账号身份。兑换入口位于 `/api/v1/account`，因此作用域为该路径的 HttpOnly Cookie 可以被浏览器发送；原匿名 `/api/v3/parent-trip-invitations/redeem` 已移除。兑换后仍使用父行程专属 capability session 完成权限隔离，账号 Cookie 本身不能访问同步或资料更新接口。旧 T010 SQLite 会自动补充可空 `account_user_id` 和父行程内唯一索引。
 
-本记录不宣称公网三浏览器、真实账号绑定或验收签字已经完成。公开环境 UAT 应在 T009 接入后另行记录。
+本记录不宣称公网三浏览器、跨设备真实账号 UAT 或验收签字已经完成，公开环境仍需另行验收。
 
 ## 本地验证
 
@@ -61,4 +64,4 @@ S3-T012 已提供父行程聚合。当前 `main` 尚无 S3-T009 账号登录实�
 
 后端验收覆盖邀请、兑换、权限隔离、乐观并发、token 不泄漏、`no-store` 和服务重启恢复；前端验收覆盖路由、能力头、URL 清理、`sessionStorage`、5 秒轮询及组织者/成员交互入口。
 
-本次本地结果：父行程聚焦套件 `8 passed`；S3-T003 全量门禁 `783 passed, 2 skipped` 且状态 `PASS`；前端 `97 passed`，build 通过，lint 仅保留 `ConversationPlannerPage.tsx` 中两条既有 warning；Playwright 真实三人链路在 375px 和 1366px 项目均通过并完成截图审查。两条后端 skip 仍是未启用在线开关时的真实高德烟测，不属于 T010。
+本次 T007/T009/T010 融合后的本地结果：T007/T009/T010/T012 聚焦套件 `41 passed`；S3-T003 全量门禁 `816 passed, 2 skipped` 且状态 `PASS`；前端 `107 passed`，build 通过，lint 仅保留 `ConversationPlannerPage.tsx` 中两条既有 warning；Playwright 真实三浏览器链路在 375px、768px、1366px 和 1440px 四个项目均通过并完成截图审查。两条后端 skip 仍是未启用在线开关时的真实高德烟测，不属于 T010。

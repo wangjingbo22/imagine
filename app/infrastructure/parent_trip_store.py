@@ -62,6 +62,7 @@ class SqliteParentTripRepository:
             connection.execute("""CREATE TABLE IF NOT EXISTS parent_trip_members (
                 parent_trip_id TEXT NOT NULL,
                 participant_id TEXT NOT NULL,
+                account_user_id TEXT,
                 role TEXT NOT NULL CHECK(role IN ('ORGANIZER', 'MEMBER')),
                 access_status TEXT NOT NULL CHECK(access_status IN
                     ('ORGANIZER_ACTIVE', 'INVITED', 'MEMBER_ACTIVE')),
@@ -73,6 +74,19 @@ class SqliteParentTripRepository:
                 PRIMARY KEY(parent_trip_id, participant_id),
                 FOREIGN KEY(parent_trip_id) REFERENCES parent_trips(parent_trip_id)
             )""")
+            member_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(parent_trip_members)")
+            }
+            if "account_user_id" not in member_columns:
+                connection.execute(
+                    "ALTER TABLE parent_trip_members ADD COLUMN account_user_id TEXT"
+                )
+            connection.execute("""CREATE UNIQUE INDEX IF NOT EXISTS
+                ux_parent_trip_members_parent_account
+                ON parent_trip_members(parent_trip_id, account_user_id)
+                WHERE account_user_id IS NOT NULL
+            """)
             connection.execute("""CREATE TABLE IF NOT EXISTS parent_trip_invitations (
                 invitation_id TEXT PRIMARY KEY,
                 parent_trip_id TEXT NOT NULL,
@@ -438,9 +452,13 @@ class SqliteParentTripRepository:
         *,
         token: str,
         idempotency_key: str,
+        account_user_id: UUID,
+        display_name: str,
+        interests: list[str],
     ) -> tuple[dict[str, object], str]:
         now = self._clock()
         token_hash = self._hash(token)
+        account_text = str(account_user_id)
         session_secret = self._derived_secret(token, f"parent-session:{idempotency_key}")
         with closing(self._connect()) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -456,10 +474,19 @@ class SqliteParentTripRepository:
                     raise ParentTripStoreError("PARENT_INVITATION_EXPIRED")
                 parent_trip_id = UUID(invitation["parent_trip_id"])
                 self._ensure_collaboration(connection, parent_trip_id)
+                member = connection.execute(
+                    """SELECT * FROM parent_trip_members
+                    WHERE parent_trip_id=? AND participant_id=?""",
+                    (invitation["parent_trip_id"], invitation["participant_id"]),
+                ).fetchone()
+                if member is None:
+                    raise ParentTripStoreError("PARENT_INVITATION_UNAVAILABLE")
 
                 if invitation["status"] == "REDEEMED":
                     if invitation["redeemed_idempotency_key"] != idempotency_key:
                         raise ParentTripStoreError("PARENT_INVITATION_ALREADY_REDEEMED")
+                    if member["account_user_id"] != account_text:
+                        raise ParentTripStoreError("PARENT_INVITATION_ACCOUNT_MISMATCH")
                     session = connection.execute(
                         "SELECT * FROM parent_trip_member_sessions WHERE session_id=?",
                         (invitation["redeemed_session_id"],),
@@ -475,6 +502,20 @@ class SqliteParentTripRepository:
                         "expires_at": session["expires_at"],
                         "sync_version": sync_version,
                     }, session_secret
+
+                if member["account_user_id"] not in (None, account_text):
+                    raise ParentTripStoreError("PARENT_INVITATION_ACCOUNT_MISMATCH")
+                existing_membership = connection.execute(
+                    """SELECT participant_id FROM parent_trip_members
+                    WHERE parent_trip_id=? AND account_user_id=? AND participant_id<>?""",
+                    (
+                        invitation["parent_trip_id"],
+                        account_text,
+                        invitation["participant_id"],
+                    ),
+                ).fetchone()
+                if existing_membership is not None:
+                    raise ParentTripStoreError("PARENT_ACCOUNT_ALREADY_MEMBER")
 
                 session_id = uuid4()
                 session_expires_at = now + timedelta(days=30)
@@ -505,9 +546,14 @@ class SqliteParentTripRepository:
                     ),
                 )
                 connection.execute(
-                    """UPDATE parent_trip_members SET access_status='MEMBER_ACTIVE', updated_at=?
+                    """UPDATE parent_trip_members
+                    SET account_user_id=?, access_status='MEMBER_ACTIVE', nickname=?,
+                        interests_json=?, updated_at=?
                     WHERE parent_trip_id=? AND participant_id=?""",
                     (
+                        account_text,
+                        display_name,
+                        json.dumps(interests, ensure_ascii=False),
                         now.isoformat(),
                         invitation["parent_trip_id"],
                         invitation["participant_id"],

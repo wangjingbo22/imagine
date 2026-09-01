@@ -1,5 +1,6 @@
 import { Heart, LogIn, LogOut, MapPin, Save, UserRound } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   getCurrentUser,
   loginAccount,
@@ -12,6 +13,11 @@ import { AppShell } from '../components/AppShell'
 import type { CurrentUser } from '../domain/account'
 
 type AccountMode = 'login' | 'register'
+
+function safeReturnPath(search: string): string | null {
+  const returnTo = new URLSearchParams(search).get('returnTo')
+  return returnTo === '/parent-join' ? returnTo : null
+}
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError || error instanceof Error ? error.message : fallback
@@ -33,6 +39,9 @@ function profileValues(user: CurrentUser) {
 }
 
 export function AccountPage() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const returnTo = safeReturnPath(location.search)
   const [mode, setMode] = useState<AccountMode>('login')
   const [user, setUser] = useState<CurrentUser | null>(null)
   const [email, setEmail] = useState('')
@@ -50,6 +59,10 @@ export function AccountPage() {
     void getCurrentUser()
       .then(({ data }) => {
         if (!active) return
+        if (returnTo) {
+          navigate(returnTo, { replace: true })
+          return
+        }
         setUser(data)
         const values = profileValues(data)
         setDisplayName(values.displayName)
@@ -69,7 +82,7 @@ export function AccountPage() {
         if (active) setLoading(false)
       })
     return () => { active = false }
-  }, [])
+  }, [navigate, returnTo])
 
   function switchMode(nextMode: AccountMode) {
     setMode(nextMode)
@@ -92,6 +105,10 @@ export function AccountPage() {
       setHomeCity(values.homeCity)
       setInterests(values.interests)
       setPassword('')
+      if (returnTo) {
+        navigate(returnTo, { replace: true })
+        return
+      }
       setNotice(mode === 'login' ? '已登录' : '账户已创建')
     } catch (caught) {
       setError(errorMessage(caught, '账户请求失败，请稍后重试'))
