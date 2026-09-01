@@ -6,6 +6,7 @@ from math import ceil
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from app.application.amap_service import (
@@ -189,9 +190,30 @@ class _RecordingAmapClient(AmapClient):
         self,
         path: str,
         parameters: dict[str, Any],
+        *,
+        retry_attempts: int | None = None,
     ) -> dict[str, Any]:
         self.request_log.append((path, dict(parameters)))
-        return await super()._get(path, parameters)
+        return await super()._get(path, parameters, retry_attempts=retry_attempts)
+
+
+@pytest.mark.asyncio
+async def test_recording_amap_client_forwards_route_retry_override() -> None:
+    client = _RecordingAmapClient(
+        api_key="test-key",
+        base_url="https://restapi.amap.com",
+        timeout_seconds=1,
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json={"status": "1"})
+        ),
+    )
+    try:
+        payload = await client._get("/v3/direction/driving", {}, retry_attempts=1)
+    finally:
+        await client.close()
+
+    assert payload["status"] == "1"
+    assert client.request_log == [("/v3/direction/driving", {})]
 
 
 def _hard_constraint(
