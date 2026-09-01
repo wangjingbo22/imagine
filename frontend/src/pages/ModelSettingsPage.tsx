@@ -18,7 +18,21 @@ export function ModelSettingsPage() {
     return '保存失败，请检查网络连接后重试。'
   }
 
-  useEffect(() => { void getModelSettings().then(({ data }) => { if (data.model) setModel(data.model); if (data.baseUrl) setBaseUrl(data.baseUrl); if (data.keyHint) setNotice(`已绑定账户 API Key（${data.keyHint}）`) }).catch(() => navigate('/account?returnTo=%2Fmodel-settings', { replace: true })) }, [navigate])
+  useEffect(() => {
+    void getModelSettings()
+      .then(({ data }) => {
+        if (data.model) setModel(data.model)
+        if (data.baseUrl) setBaseUrl(data.baseUrl)
+        if (data.configured) setNotice('已绑定账户模型设置。')
+      })
+      .catch((error: unknown) => {
+        if (error instanceof ApiError && error.code === 'ACCOUNT_SESSION_REQUIRED') {
+          navigate('/account?returnTo=%2Fmodel-settings', { replace: true })
+          return
+        }
+        setNotice('暂时无法读取模型设置，请重试。')
+      })
+  }, [navigate])
   async function save() {
     if (!apiKey.trim()) { setNotice('请先填写 API Key。'); return }
     if (!model.trim()) { setNotice('请填写模型名称。'); return }

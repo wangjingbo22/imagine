@@ -130,7 +130,6 @@ test('account logout clears only shared account session artifacts after server l
   assert.match(page, /await logout\(\)/)
   assert.match(provider, /logoutAccount/)
   assert.match(provider, /await logoutAccount\(\)\s*\n\s*clearCurrentUser\(\)/)
-  assert.match(provider, /clearUserLlmSettings/)
   assert.match(provider, /clearAccountBoundParentTripMemberSessions/)
   assert.match(parentTripCollaboration, /clearAccountBoundParentTripMemberSessions/)
   assert.match(parentTripCollaboration, /parent-trip-member-session:/)

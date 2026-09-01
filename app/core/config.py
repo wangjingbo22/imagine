@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     def validate_production_cookie_security(self) -> "Settings":
         if self.app_environment == "production" and not self.auth_cookie_secure:
             raise ValueError("AUTH_COOKIE_SECURE must be true in production")
+        if (
+            self.app_environment == "production"
+            and self.account_api_key_encryption_key is None
+        ):
+            raise ValueError(
+                "ACCOUNT_API_KEY_ENCRYPTION_KEY must be configured in production"
+            )
         return self
 
     @property

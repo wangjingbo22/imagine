@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+import ipaddress
 from urllib.parse import urlparse
 from cryptography.fernet import Fernet, InvalidToken
 from collections.abc import Callable
@@ -130,18 +131,40 @@ class AccountService:
     def model_settings(self, token: str | None) -> ModelSettingsView:
         user = self.current_user(token)
         stored = self.repository.get_model_settings(user.user_id)
-        return ModelSettingsView(configured=stored is not None, model=stored[0] if stored else None, key_hint=("••••" + self._decrypt(stored[1])[-4:]) if stored else None, base_url=stored[2] if stored else None)
+        return ModelSettingsView(
+            configured=stored is not None,
+            model=stored[0] if stored else None,
+            base_url=stored[2] if stored else None,
+        )
 
     def update_model_settings(self, token: str | None, payload: ModelSettingsUpdateRequest) -> ModelSettingsView:
         user = self.current_user(token)
         if self._cipher is None:
             raise AppError("ACCOUNT_KEY_STORAGE_UNAVAILABLE", "服务端未配置 API Key 加密密钥", 503, False)
         parsed = urlparse(payload.base_url)
-        if parsed.scheme != "https" or not parsed.netloc:
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+        ):
             raise AppError("ACCOUNT_MODEL_BASE_URL_INVALID", "模型 API 地址必须是 HTTPS URL", 422, False)
+        if parsed.query or parsed.fragment or parsed.port not in (None, 443):
+            raise AppError("ACCOUNT_MODEL_BASE_URL_FORBIDDEN", "该地址不在允许的公共 HTTPS 服务范围内", 422, False)
+        try:
+            ipaddress.ip_address(parsed.hostname)
+        except ValueError:
+            pass
+        else:
+            raise AppError("ACCOUNT_MODEL_BASE_URL_FORBIDDEN", "该地址不在允许的公共 HTTPS 服务范围内", 422, False)
         base_url = payload.base_url.rstrip("/")
-        self.repository.save_model_settings(user.user_id, model=payload.model, encrypted_api_key=self._cipher.encrypt(payload.api_key.encode()).decode(), base_url=base_url)
-        return ModelSettingsView(configured=True, model=payload.model, key_hint="••••" + payload.api_key[-4:], base_url=base_url)
+        api_key = payload.api_key.get_secret_value()
+        self.repository.save_model_settings(user.user_id, model=payload.model, encrypted_api_key=self._cipher.encrypt(api_key.encode()).decode(), base_url=base_url)
+        return ModelSettingsView(
+            configured=True,
+            model=payload.model,
+            base_url=base_url,
+        )
 
     def delete_model_settings(self, token: str | None) -> None:
         self.repository.delete_model_settings(self.current_user(token).user_id)

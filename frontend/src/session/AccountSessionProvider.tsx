@@ -10,7 +10,6 @@ import { getCurrentUser, logoutAccount } from '../api/accountApi'
 import { ApiError } from '../api/client'
 import type { CurrentUser } from '../domain/account'
 import { clearAccountBoundParentTripMemberSessions } from '../services/parentTripCollaboration'
-import { clearUserLlmSettings } from '../services/userLlmSettings'
 import { AccountSessionContext, type AccountSessionValue } from './AccountSessionContext'
 
 function isSessionRequired(error: unknown): boolean {
@@ -26,11 +25,6 @@ function sessionErrorMessage(error: unknown): string {
 }
 
 function clearAccountSessionArtifacts(): void {
-  try {
-    clearUserLlmSettings()
-  } catch {
-    // Storage may be unavailable, but a successful server logout must still clear memory.
-  }
   clearAccountBoundParentTripMemberSessions()
 }
 

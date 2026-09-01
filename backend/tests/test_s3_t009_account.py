@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from app.core.config import Settings
+from app.domain.collaboration import QUESTION_IDS
 from app.main import create_app
 from app.application.account_service import AccountService
 
@@ -22,10 +23,18 @@ def test_production_requires_secure_account_cookie():
     with pytest.raises(ValueError, match="AUTH_COOKIE_SECURE"):
         Settings(_env_file=None, app_environment="production")
 
+    with pytest.raises(ValueError, match="ACCOUNT_API_KEY_ENCRYPTION_KEY"):
+        Settings(
+            _env_file=None,
+            app_environment="production",
+            auth_cookie_secure=True,
+        )
+
     production = Settings(
         _env_file=None,
         app_environment="production",
         auth_cookie_secure=True,
+        account_api_key_encryption_key="MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
     )
     assert production.auth_cookie_secure is True
 
@@ -167,6 +176,38 @@ async def test_unconfigured_account_cannot_generate_trip_drafts(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_unconfigured_account_cannot_start_model_backed_conversation(tmp_path: Path):
+    _, client = await _client(tmp_path)
+    raw_text = "北京 2026-12-01 09:00 到 18:00 北京站往返 500元"
+    async with client:
+        registered = await client.post(
+            "/api/v1/account/register",
+            json={
+                "email": "conversation-without-model@example.com",
+                "password": PASSWORD,
+                "displayName": "Unconfigured conversation",
+            },
+        )
+        response = await client.post(
+            "/api/v2/trips/conversations",
+            headers={"Idempotency-Key": "conversation-without-model-0001"},
+            json={
+                "schemaVersion": "1.0",
+                "referenceDate": "2026-09-02",
+                "naturalLanguageRequest": raw_text,
+                "answers": [
+                    {"questionId": question_id, "answer": raw_text}
+                    for question_id in QUESTION_IDS
+                ],
+            },
+        )
+
+    assert registered.status_code == 200
+    assert response.status_code == 403
+    assert response.json()["code"] == "ACCOUNT_MODEL_CONFIGURATION_REQUIRED"
+
+
+@pytest.mark.asyncio
 async def test_account_accepts_custom_model_name_and_https_api_url(tmp_path: Path):
     _, client = await _client(tmp_path)
     async with client:
@@ -194,9 +235,52 @@ async def test_account_accepts_custom_model_name_and_https_api_url(tmp_path: Pat
     assert restored.json()["data"] == {
         "configured": True,
         "model": "gpt-4.1-mini",
-        "keyHint": "••••alue",
         "baseUrl": "https://models.example.com/v1",
     }
+
+
+@pytest.mark.asyncio
+async def test_account_model_settings_reject_unsafe_key_and_url_inputs(tmp_path: Path):
+    _, client = await _client(tmp_path)
+    async with client:
+        await client.post(
+            "/api/v1/account/register",
+            json={
+                "email": "settings-validation@example.com",
+                "password": PASSWORD,
+                "displayName": "Settings validation",
+            },
+        )
+        control_key = await client.put(
+            "/api/v1/account/me/model-settings",
+            json={
+                "model": "gpt-4.1-mini",
+                "apiKey": "valid-key\nnot-allowed",
+                "baseUrl": "https://models.example.com/v1",
+            },
+        )
+        query_url = await client.put(
+            "/api/v1/account/me/model-settings",
+            json={
+                "model": "gpt-4.1-mini",
+                "apiKey": "valid-api-key-value",
+                "baseUrl": "https://models.example.com/v1?token=not-allowed",
+            },
+        )
+        ip_url = await client.put(
+            "/api/v1/account/me/model-settings",
+            json={
+                "model": "gpt-4.1-mini",
+                "apiKey": "valid-api-key-value",
+                "baseUrl": "https://127.0.0.1/v1",
+            },
+        )
+
+    assert control_key.status_code == 422
+    assert query_url.status_code == 422
+    assert query_url.json()["code"] == "ACCOUNT_MODEL_BASE_URL_FORBIDDEN"
+    assert ip_url.status_code == 422
+    assert ip_url.json()["code"] == "ACCOUNT_MODEL_BASE_URL_FORBIDDEN"
 
 
 @pytest.mark.asyncio
