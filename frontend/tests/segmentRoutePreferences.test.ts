@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { ApiError } from '../src/api/client.ts'
 import type {
@@ -13,6 +13,7 @@ import type {
   GeoPoint,
   Place,
   ProviderRoute,
+  PlanSnapshot,
   TravelMode,
 } from '../src/domain/trip.ts'
 import {
@@ -30,6 +31,9 @@ const pickerPath = fileURLToPath(
   new URL('../src/components/SegmentRouteModePicker.tsx', import.meta.url),
 )
 const pickerSource = existsSync(pickerPath) ? readFileSync(pickerPath, 'utf8') : ''
+const stateTransitionPath = fileURLToPath(
+  new URL('../src/services/segmentRouteReplacementState.ts', import.meta.url),
+)
 
 const provenance = {
   provider: 'AMAP' as const,
@@ -195,6 +199,34 @@ const passingPreview: CandidatePlanPreview = {
   warnings: [],
 }
 
+function planSnapshotFor(base: CandidatePlanRequest): PlanSnapshot {
+  return {
+    id: 'candidate-plan',
+    version: 1,
+    cityName: base.trip.cityContext.cityName,
+    totalCostCents: 6_000,
+    bufferCents: 39_000,
+    totalWalkMeters: 2_000,
+    transferCount: 0,
+    validationStatus: 'PASS',
+    tasks: base.taskFacts.map((fact, index) => ({
+      id: fact.taskId,
+      order: fact.order,
+      title: fact.title,
+      category: fact.category,
+      timeRange: `${fact.startAt.slice(0, 5)}—${fact.endAt.slice(0, 5)}`,
+      durationMinutes: 60,
+      transport: `${fact.route.mode} ${fact.route.distanceMeters}`,
+      costCents: 1_500,
+      priceKnown: true,
+      walkMeters: fact.route.distanceMeters,
+      note: fact.note,
+      status: index === 0 ? 'current' as const : 'upcoming' as const,
+      coordinates: [index * 10, index * 10] as [number, number],
+    })),
+  }
+}
+
 test('workspace exposes safe per-segment mode controls with retry and V1 lockout', () => {
   assert.match(workspaceSource, /SegmentRouteModePicker/)
   assert.match(pickerSource, /DRIVING/)
@@ -206,10 +238,100 @@ test('workspace exposes safe per-segment mode controls with retry and V1 lockout
   assert.match(workspaceSource, /setCandidateRequest/)
   assert.match(workspaceSource, /setProviderPlan/)
   assert.match(workspaceSource, /setLocationEvidence/)
-  assert.match(workspaceSource, /setRestoredPlan\(null\)/)
   assert.match(workspaceSource, /segmentErrors/)
   assert.match(workspaceSource, /retrySegment/)
   assert.match(workspaceSource, /storedCurrentPlan\?\.version === 1/)
+})
+
+test('local schedule failure renders its returned route as FAIL without accepting stale candidate facts', async (t) => {
+  const originalFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = originalFetch })
+  const { base } = fixture()
+  const impossible = route(
+    'route-local-failure',
+    base.taskFacts[0].place.location,
+    base.taskFacts[1].place.location,
+    'DRIVING',
+    24 * 60 * 60,
+    100_000,
+  )
+  globalThis.fetch = (async () => ok({ cityCode: '110100', routes: [impossible], provenance })) as typeof fetch
+  const localResult = await replaceAmapPlanSegment(base.trip.tripId, base, 1, 'DRIVING')
+  assert.equal(localResult.candidateRequest, null)
+
+  const transitionModule = existsSync(stateTransitionPath)
+    ? await import(pathToFileURL(stateTransitionPath).href)
+    : null
+  assert.ok(transitionModule, 'local schedule failures need a real Workspace state transition')
+  const applyResult = (transitionModule as {
+    applySegmentReplacementResult: (state: unknown, result: unknown) => {
+      kind: 'SUCCESS' | 'LOCAL_FAILURE'
+      state: {
+        candidateRequest: CandidatePlanRequest
+        providerPlan: PlanSnapshot
+        locationEvidence: { routes: ProviderRoute[] }
+        persistedPlanId: string | null
+        planningIssue: { message: string } | null
+        localFailure: { segmentIndex: number; route: ProviderRoute; message: string } | null
+      }
+    }
+  }).applySegmentReplacementResult
+  const initial = {
+    candidateRequest: base,
+    providerPlan: planSnapshotFor(base),
+    locationEvidence: {
+      city: { cityContext: base.trip.cityContext, provenance },
+      places: base.taskFacts.map((fact) => fact.place),
+      routes: base.taskFacts.map((fact) => fact.route),
+      queries: ['fixture'],
+    },
+    persistedPlanId: 'issued-v1',
+    restoredPlan: planSnapshotFor(base),
+  }
+  const failed = applyResult(initial, localResult)
+
+  assert.equal(failed.kind, 'LOCAL_FAILURE')
+  assert.equal(failed.state.locationEvidence.routes[1].routeId, localResult.evidence.route.routeId)
+  assert.equal(failed.state.providerPlan.validationStatus, 'FAIL')
+  assert.equal(failed.state.persistedPlanId, null)
+  assert.equal(failed.state.planningIssue?.message, localResult.preview.constraintResults[0].suggestion)
+  assert.equal(failed.state.localFailure?.route.routeId, localResult.evidence.route.routeId)
+  assert.equal(failed.state.candidateRequest, base)
+  assert.equal(failed.state.providerPlan.totalCostCents, initial.providerPlan.totalCostCents)
+  assert.equal(failed.state.providerPlan.tasks[1].durationMinutes, initial.providerPlan.tasks[1].durationMinutes)
+  assert.equal(failed.state.providerPlan.tasks[1].costCents, initial.providerPlan.tasks[1].costCents)
+
+  const valid = route(
+    'route-recovered-transit',
+    base.taskFacts[0].place.location,
+    base.taskFacts[1].place.location,
+    'TRANSIT',
+    1_200,
+    2_400,
+  )
+  globalThis.fetch = (async (input) => {
+    const url = String(input)
+    if (url.endsWith('/api/v1/routes/plan')) {
+      return ok({ cityCode: '110100', routes: [valid], provenance })
+    }
+    if (url.endsWith(`/api/v1/trips/${base.trip.tripId}/plan-previews/validate`)) {
+      return ok(passingPreview)
+    }
+    throw new Error(`unexpected request: ${url}`)
+  }) as typeof fetch
+  const successResult = await replaceAmapPlanSegment(
+    base.trip.tripId,
+    failed.state.candidateRequest,
+    1,
+    'TRANSIT',
+  )
+  const recovered = applyResult(failed.state, successResult)
+
+  assert.equal(recovered.kind, 'SUCCESS')
+  assert.equal(recovered.state.localFailure, null)
+  assert.equal(recovered.state.locationEvidence.routes[1].mode, 'TRANSIT')
+  assert.equal(recovered.state.candidateRequest.taskFacts[1].route.routeId, valid.routeId)
+  assert.equal(recovered.state.providerPlan.validationStatus, 'PASS')
 })
 
 test('nearest-neighbor ordering starts from the confirmed coordinate and does not mutate input', () => {

@@ -37,3 +37,20 @@
 
 - The front-end linter retains four pre-existing warnings outside Task 4. No new lint warning is reported for the Task 4 files.
 - This environment requires `npm.cmd` because direct PowerShell invocation of `npm` is prohibited by execution policy.
+
+## Review Fix: Local Schedule Failure State
+
+The Task 4 review found that `replaceAmapPlanSegment` can return a local schedule `FAIL` with an actual route but no rebuilt candidate. The initial Workspace integration incorrectly handled that non-throwing result like a provider request failure, retaining a stale PASS display and persisted-plan eligibility.
+
+- Added `frontend/src/services/segmentRouteReplacementState.ts`, the real pure transition used by Workspace for both successful and local-failure replacement results.
+- Local schedule failure now replaces the selected evidence route with `result.evidence.route`, marks the displayed plan `FAIL`, clears persisted-plan and restored-plan state, clears review state, and exposes the exact local failure message.
+- The prior valid candidate remains only as a recovery base. It is not displayed as the selected route and cannot pass confirmation while the local `FAIL` planning issue is active.
+- No route duration, costs, schedule, or totals are synthesized from the unschedulable route. The prior display facts remain unchanged except for explicit `FAIL` validation; `locationEvidence` carries the actual returned route.
+- Provider request errors still leave the currently displayed state intact and produce the retry-only segment error. A local schedule failure instead permits choosing a different mode; a later successful replacement clears the local failure.
+
+### Review-Fix TDD and Verification
+
+1. Added behavior-level test `local schedule failure renders its returned route as FAIL without accepting stale candidate facts` before the transition helper existed.
+2. Full RED run: `npm.cmd --prefix frontend test` produced 126 passed and 1 failed. The failure was the expected assertion that the real Workspace state transition did not exist.
+3. Full GREEN run: `npm.cmd --prefix frontend test` produced 127 passed and 0 failed. The test uses the actual unschedulable `AmapSegmentReplacementResult`, verifies replacement evidence, `FAIL`/no-persisted eligibility/message/no-fabrication semantics, and verifies recovery by selecting `TRANSIT` from the retained base.
+4. `npm.cmd --prefix frontend run lint` exited 0 with the same four unrelated existing warnings; `npm.cmd --prefix frontend run build` exited 0; `git diff --check` exited 0 with only LF-to-CRLF notices.

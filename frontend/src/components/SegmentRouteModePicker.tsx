@@ -4,6 +4,7 @@ interface SegmentRouteModePickerProps {
   route: ProviderRoute
   pending: boolean
   error: string
+  notice?: string
   disabled?: boolean
   onSelect: (mode: TravelMode) => void
   onRetry: () => void
@@ -20,6 +21,7 @@ export function SegmentRouteModePicker({
   route,
   pending,
   error,
+  notice = '',
   disabled = false,
   onSelect,
   onRetry,
@@ -28,6 +30,8 @@ export function SegmentRouteModePicker({
     ? '正在更新这段路线。'
     : error
       ? `路线更新失败：${error}`
+      : notice
+        ? notice
       : disabled
         ? '当前 Plan V1 正在执行，路线方式已锁定。'
         : '选择路线方式后，将重新校验整份候选计划。'

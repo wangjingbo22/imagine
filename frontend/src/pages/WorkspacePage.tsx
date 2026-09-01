@@ -33,7 +33,6 @@ import { RouteOverview } from '../components/RouteOverview'
 import { SegmentRouteModePicker } from '../components/SegmentRouteModePicker'
 import { TaskPhotoCard } from '../components/TaskPhotoCard'
 import type {
-  CandidatePlanPreview,
   CandidatePlanRequest,
   CandidatePlanReview,
   CandidateReviewItem,
@@ -43,7 +42,6 @@ import type {
   PlanSnapshot,
   PlanningConstraint,
   PlanVersionDiff,
-  ProviderRoute,
   Provenance,
   SourceStatus,
   StoredPlanVersion,
@@ -65,6 +63,10 @@ import {
   type AmapPlanResult,
   type LocationEvidence,
 } from '../services/amapPlan'
+import {
+  applySegmentReplacementResult,
+  type LocalSegmentRouteFailure,
+} from '../services/segmentRouteReplacementState'
 import {
   compileGroupAssistanceConstraints,
   planningCareFromConstraints,
@@ -282,54 +284,6 @@ function toDisplayPlan(plan: StoredPlanVersion): PlanSnapshot {
   }
 }
 
-function routeWalkingMeters(route: ProviderRoute) {
-  if (route.mode === 'WALKING') return route.distanceMeters
-  return route.walkingDistanceMeters ?? 0
-}
-
-function minutesBetween(startAt: string, endAt: string) {
-  const toMinutes = (value: string) => {
-    const [hours = '0', minutes = '0'] = value.split(':')
-    return Number(hours) * 60 + Number(minutes)
-  }
-  return Math.max(0, toMinutes(endAt) - toMinutes(startAt))
-}
-
-function displayCandidatePlan(
-  previous: PlanSnapshot,
-  candidate: CandidatePlanRequest,
-  preview: CandidatePlanPreview,
-): PlanSnapshot {
-  const metrics = preview.metrics
-  return {
-    ...previous,
-    totalCostCents: metrics?.totalCostCents ?? previous.totalCostCents,
-    bufferCents: metrics?.knownBudgetBufferCents ?? previous.bufferCents,
-    totalWalkMeters: metrics?.totalWalkMeters ?? previous.totalWalkMeters,
-    transferCount: metrics?.transferCount ?? previous.transferCount,
-    validationStatus: preview.validationStatus,
-    tasks: candidate.taskFacts.map((fact, index) => {
-      const priorTask = previous.tasks[index]
-      const knownCosts = [fact.place.priceReference.amountCents, fact.route.priceReference.amountCents]
-      const costCents = knownCosts.reduce<number>((total, amount) => total + (amount ?? 0), 0)
-      return {
-        ...priorTask,
-        id: fact.taskId,
-        order: fact.order,
-        title: fact.title,
-        category: fact.category,
-        timeRange: `${fact.startAt.slice(0, 5)}—${fact.endAt.slice(0, 5)}`,
-        durationMinutes: minutesBetween(fact.startAt, fact.endAt),
-        transport: `${routeModeLabels[fact.route.mode]} ${fact.route.distanceMeters} 米 · 约${Math.max(1, Math.round(fact.route.durationSeconds / 60))} 分钟`,
-        costCents,
-        priceKnown: knownCosts.every((amount) => amount !== null),
-        walkMeters: routeWalkingMeters(fact.route),
-        note: fact.note,
-      }
-    }),
-  }
-}
-
 function planningFactsRecoveryMessage(error: unknown) {
   if (!(error instanceof ApiError)) {
     return '服务端规划事实恢复失败；请返回“新建行程”重新生成可信计划。'
@@ -446,6 +400,7 @@ export function WorkspacePage() {
     message: string
     mode: TravelMode
   }>>({})
+  const [localSegmentFailure, setLocalSegmentFailure] = useState<LocalSegmentRouteFailure | null>(null)
 
   const applyTripState = useCallback((state: TripPlanState) => {
     const current = state.currentPlan
@@ -812,30 +767,28 @@ export function WorkspacePage() {
         mode,
         organizerToken,
       )
-      if (!result.candidateRequest) {
-        const reason = result.preview.constraintResults
-          .map((item) => item.suggestion)
-          .find((item): item is string => Boolean(item)) ?? '路线变更未通过计划校验。'
-        throw new Error(reason)
+      if (!locationEvidence) {
+        throw new Error('当前没有可替换的路线证据。')
       }
+      const transition = applySegmentReplacementResult({
+        candidateRequest,
+        providerPlan: activePlan,
+        locationEvidence,
+        persistedPlanId,
+        restoredPlan,
+        planningIssue,
+        localFailure: localSegmentFailure,
+      }, result)
 
-      const nextCandidate = result.candidateRequest
-      const nextPlan = displayCandidatePlan(activePlan, nextCandidate, result.preview)
-      const nextEvidence = locationEvidence && {
-        ...locationEvidence,
-        routes: locationEvidence.routes.map((route, routeIndex) =>
-          routeIndex === index ? result.evidence.route : route,
-        ),
-      }
-
-      setCandidateRequest(nextCandidate)
-      setProviderPlan(nextPlan)
-      if (nextEvidence) setLocationEvidence(nextEvidence)
-      setRestoredPlan(null)
-      setPlanningIssue(null)
+      setCandidateRequest(transition.state.candidateRequest)
+      setProviderPlan(transition.state.providerPlan)
+      setLocationEvidence(transition.state.locationEvidence)
+      setRestoredPlan(transition.state.restoredPlan)
+      setPlanningIssue(transition.state.planningIssue)
       setCandidateReview(null)
       setReviewValues({})
-      setPersistedPlanId(null)
+      setPersistedPlanId(transition.state.persistedPlanId)
+      setLocalSegmentFailure(transition.state.localFailure)
     } catch (error) {
       const message = error instanceof Error ? error.message : '路线更新失败，请重试。'
       setSegmentErrors((current) => ({
@@ -1784,10 +1737,15 @@ export function WorkspacePage() {
                         <SegmentRouteModePicker
                           disabled={hasExecutingPlanV1}
                           error={segmentErrors[index]?.message ?? ''}
+                          notice={localSegmentFailure?.segmentIndex === index
+                            ? localSegmentFailure.message
+                            : ''}
                           onRetry={() => void retrySegment(index)}
                           onSelect={(mode) => void replaceSegment(index, mode)}
                           pending={pendingSegmentIndex === index}
-                          route={candidateRequest?.taskFacts[index]?.route ?? route}
+                          route={localSegmentFailure?.segmentIndex === index
+                            ? localSegmentFailure.route
+                            : candidateRequest?.taskFacts[index]?.route ?? route}
                         />
                       </div>
                     ))}
