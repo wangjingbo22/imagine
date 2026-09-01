@@ -13,6 +13,8 @@ from app.application.collaboration_service import CollaborationService
 from app.core.errors import AppError
 from app.domain.collaboration import (
     IssueCode,
+    MemberChangeProposalCreateRequest,
+    MemberChangeProposalReviewRequest,
     ParticipantConfirmationStatus,
     ParticipantConversationRequest,
     ParticipantMutationRequest,
@@ -143,6 +145,92 @@ def _member_request(version: int) -> ParticipantConversationRequest:
         naturalLanguageRequest="我想把个人预算改为三百元",
         answers=[{"questionId": key, "answer": "已回答"} for key in question_ids],
     )
+
+
+def _member_session(harness: ReadyHarness) -> str:
+    """为审批闭环测试创建真实成员会话，覆盖邀请与身份隔离逻辑。"""
+    invitation = harness.repository.create_invitation(
+        trip_id=harness.revision.trip_id,
+        participant_id=harness.revision.member_bindings["member-2"],
+        organizer_token=harness.organizer_token,
+        expected_version=3,
+        idempotency_key="proposal-invite-0001",
+        expires_in_hours=72,
+    )
+    assert invitation.invitation_url is not None
+    redeemed = harness.repository.redeem_invitation(
+        invitation.invitation_url.rsplit("/", 1)[1],
+        "proposal-redeem-01",
+    )
+    assert redeemed.participant_session_token is not None
+    return redeemed.participant_session_token
+
+
+def test_rejected_member_proposal_keeps_original_revision(tmp_path) -> None:
+    """拒绝只记录审批结论，绝不能悄悄改变组织者原计划。"""
+    harness = _ready_harness(tmp_path)
+    member_token = _member_session(harness)
+    member_view = harness.service.create_member_change_proposal(
+        session_token=member_token,
+        request=MemberChangeProposalCreateRequest(
+            schemaVersion="1.0", baseRevision=1, expectedVersion=4,
+            fieldPath="trip.startTime", proposedValue="10:30",
+            reason="成员上午十点才能到达集合地点",
+        ),
+    )
+
+    state = harness.service.review_member_change_proposal(
+        trip_id=harness.revision.trip_id,
+        proposal_id=member_view.change_proposals[0].proposal_id,
+        organizer_token=harness.organizer_token,
+        request=MemberChangeProposalReviewRequest(
+            schemaVersion="1.0", baseRevision=1,
+            expectedVersion=member_view.collaboration_version,
+            decision="REJECT", organizerNote="集合时间无法调整",
+        ),
+        idempotency_key="proposal-reject-0001",
+    )
+
+    assert state.current_revision == 1
+    assert state.change_proposals[0].status.value == "REJECTED"
+    assert harness.revisions.relaxation_calls == 0
+
+
+def test_approved_member_proposal_advances_shared_revision(tmp_path) -> None:
+    """批准必须形成新修订，并把新的共同事实返回给成员与组织者。"""
+    harness = _ready_harness(tmp_path)
+    member_token = _member_session(harness)
+    member_view = harness.service.create_member_change_proposal(
+        session_token=member_token,
+        request=MemberChangeProposalCreateRequest(
+            schemaVersion="1.0", baseRevision=1, expectedVersion=4,
+            fieldPath="trip.budgetCents", proposedValue=45_000,
+            reason="大家同意增加同行行程总预算",
+        ),
+    )
+    # 假端口模拟 T002 对 SET_SHARED_FIELD 的结果：预算更新且修订号连续增加。
+    harness.revisions.current = replace(
+        revision_with_trip_budget(harness.revision, 45_000),
+        revision=2,
+        source_digest="b" * 64,
+    )
+
+    state = harness.service.review_member_change_proposal(
+        trip_id=harness.revision.trip_id,
+        proposal_id=member_view.change_proposals[0].proposal_id,
+        organizer_token=harness.organizer_token,
+        request=MemberChangeProposalReviewRequest(
+            schemaVersion="1.0", baseRevision=1,
+            expectedVersion=member_view.collaboration_version,
+            decision="APPROVE", organizerNote="批准预算调整",
+        ),
+        idempotency_key="proposal-approve-01",
+    )
+
+    assert state.current_revision == 2
+    assert state.change_proposals[0].status.value == "APPROVED"
+    assert state.can_plan is False
+    assert harness.revisions.relaxation_calls == 1
 
 
 def _dump(repository: SqliteCollaborationRepository) -> tuple[tuple[object, ...], ...]:

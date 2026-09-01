@@ -196,6 +196,31 @@ export type ParticipantProgress = {
   confirmedRevision: number | null
 }
 
+/** 成员对共同安排提出的建议。成员只能创建，组织者才拥有审批权限。 */
+export type MemberChangeProposal = {
+  proposalId: string
+  tripId: string
+  participantId: string
+  baseRevision: number
+  fieldPath: SharedTripProposalField
+  proposedValue: string | number | null
+  reason: string
+  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  organizerNote: string | null
+  createdAt: string
+  reviewedAt: string | null
+}
+
+/** 仅开放真正属于共同安排的字段，防止成员建议越权修改他人资料。 */
+export type SharedTripProposalField =
+  | 'trip.cityName'
+  | 'trip.travelDate'
+  | 'trip.startTime'
+  | 'trip.endTime'
+  | 'trip.startLocationText'
+  | 'trip.endLocationText'
+  | 'trip.budgetCents'
+
 export type MemberSessionView = {
   schemaVersion: '1.0'
   tripId: string
@@ -207,6 +232,7 @@ export type MemberSessionView = {
   accessStatus: ParticipantAccessStatus
   confirmationStatus: ConfirmationStatus
   confirmationItems: CollaborationIssue[]
+  changeProposals: MemberChangeProposal[]
 }
 
 export type CollaborationAggregate = {
@@ -227,6 +253,7 @@ export type CollaborationAggregate = {
   }
   participants: ParticipantProgress[]
   confirmationItems: CollaborationIssue[]
+  changeProposals: MemberChangeProposal[]
 }
 
 export function organizerRelaxations(issue: CollaborationIssue): RelaxationOption[] {

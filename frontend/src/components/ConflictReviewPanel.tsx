@@ -69,16 +69,31 @@ export function ConflictReviewPanel({ state, busy = false, onResolve }: Conflict
   const waitingMembers = state.participants.filter((item) => (
     item.role === 'MEMBER' && item.confirmationStatus !== 'CONFIRMED'
   ))
+  const organizerNeedsConfirmation = state.participants.some((item) => (
+    item.role === 'ORGANIZER' && item.confirmationStatus !== 'CONFIRMED'
+  ))
   return <section className={`conflict-review${ready ? ' is-ready' : ''}`} aria-live="polite" aria-busy={busy}>
     <header className="conflict-review__heading">
       <span aria-hidden="true">{ready ? <CheckCircle2 size={20} /> : <ShieldCheck size={20} />}</span>
       <div>
-        <h3>{ready ? '硬冲突已全部解决' : actionableIssues.length > 0 ? '多人硬冲突与确认项' : '等待成员独立填写'}</h3>
-        <p>{ready
-          ? '全员已在当前版本确认，可以进入 Provider 查询和唯一推荐。'
+        <h3>{ready
+          ? '全部确认完成'
           : actionableIssues.length > 0
-            ? `${actionableIssues.length} 项需要处理，另有 ${waitingMemberIssues.length} 项等待成员填写；完成前不会调用 Provider 或规划器。`
-            : `${waitingMembers.length} 位成员尚未完成自己的资料；全员确认前不会调用 Provider 或规划器。`}</p>
+            ? '多人确认项需要处理'
+            : waitingMembers.length > 0
+              ? '等待成员填写并确认'
+              : organizerNeedsConfirmation
+                ? '等待组织者确认最新安排'
+                : '正在核对最新状态'}</h3>
+        <p>{ready
+          ? '全员已确认当前版本，可以生成推荐方案。'
+          : actionableIssues.length > 0
+            ? `${actionableIssues.length} 项需要处理，另有 ${waitingMemberIssues.length} 项等待成员填写。`
+            : waitingMembers.length > 0
+              ? `${waitingMembers.length} 位成员尚未完成自己的资料。`
+              : organizerNeedsConfirmation
+                ? '成员已完成确认，请点击上方按钮确认审批后的最新共同安排。'
+                : '请刷新状态获取最新确认结果。'}</p>
       </div>
     </header>
     {!ready && waitingMembers.length > 0 && <div className="conflict-review__waiting-members">
@@ -94,7 +109,9 @@ export function ConflictReviewPanel({ state, busy = false, onResolve }: Conflict
       onResolve={onResolve}
     />)}
     {!ready && actionableIssues.length === 0 && waitingMembers.length === 0 && <p className="conflict-review__waiting" role="status">
-      当前没有硬冲突，仍需等待所有成员在最新版本重新确认。
+      {organizerNeedsConfirmation
+        ? '成员已经确认，请由组织者确认最新共同安排。'
+        : '当前没有需要处理的确认项，请刷新状态。'}
     </p>}
   </section>
 }
