@@ -12,6 +12,8 @@ type ConflictReviewPanelProps = {
   onResolve: (itemId: string, relaxationId: string) => void
 }
 
+const SHARED_BUDGET_CONFLICT_RULE = 'S2T003.BUDGET.CAP_BELOW_SHARED'
+
 function IssueCard({
   issue,
   busy,
@@ -24,6 +26,20 @@ function IssueCard({
   const organizerOptions = organizerRelaxations(issue)
   const memberOptions = participantRelaxations(issue)
   const participantIds = participantIdsForIssue(issue)
+  const sharedBudgetOption = issue.ruleId === SHARED_BUDGET_CONFLICT_RULE
+    ? organizerOptions[0]
+    : undefined
+
+  if (sharedBudgetOption) {
+    return <article className="conflict-review__budget-action" aria-label="共享预算冲突处理">
+      <button
+        className="button button--soft"
+        disabled={busy}
+        onClick={() => onResolve(issue.itemId, sharedBudgetOption.relaxationId)}
+        type="button"
+      >由组织者降低共享预算</button>
+    </article>
+  }
 
   return <article className="conflict-review__item" aria-labelledby={`issue-${issue.itemId}`}>
     <header>

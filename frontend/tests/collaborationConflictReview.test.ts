@@ -121,3 +121,11 @@ test('conflict view keeps the six-question mobile path and visible accessible st
   assert.match(pageSource, /role="alert"/)
   assert.match(pageSource, /aria-current=/)
 })
+
+test('shared budget conflict shows only the organizer budget action', () => {
+  assert.match(panelSource, /SHARED_BUDGET_CONFLICT_RULE = 'S2T003\.BUDGET\.CAP_BELOW_SHARED'/)
+  assert.match(panelSource, /if \(sharedBudgetOption\)/)
+  assert.match(panelSource, /aria-label="共享预算冲突处理"/)
+  assert.match(panelSource, />由组织者降低共享预算<\/button>/)
+  assert.match(cssSource, /\.conflict-review__budget-action \.button \{ width: min\(100%, 302px\); min-height: 52px/)
+})
