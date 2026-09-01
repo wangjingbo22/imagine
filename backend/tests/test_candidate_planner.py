@@ -350,6 +350,32 @@ def test_missing_facility_evidence_is_not_treated_as_pass() -> None:
     assert exc_info.value.code == "CANDIDATE_CONFIRMATION_REQUIRED"
 
 
+def test_ordinary_trip_does_not_require_unrequested_facility_confirmation() -> None:
+    payload = _payload()
+    request_payload = payload["request"]
+    profile = request_payload["trip"]["participants"][0]["assistanceProfile"]
+    profile["type"] = "ORDINARY"
+    profile["childAge"] = None
+    request_payload["confirmedConstraints"] = [
+        constraint
+        for constraint in request_payload["confirmedConstraints"]
+        if constraint["field"] != "return"
+    ]
+    for task in request_payload["taskFacts"]:
+        task["route"]["facilityEvidence"] = []
+    request = _request(payload)
+
+    candidate = generate_candidate_plan(request)
+
+    assert candidate.metrics.validation_status == "PASS"
+    assert all(item.code != "UNKNOWN_FACILITY" for item in candidate.warnings)
+    assert all(
+        not item.rule_id.startswith("T010.FACILITY.")
+        for item in candidate.constraint_results
+    )
+    assert candidate_to_proposed_plan_version(candidate, request).metrics.validation_status == "PASS"
+
+
 @pytest.mark.parametrize("shape", ["partial", "duplicate"])
 def test_partial_or_duplicate_facility_types_cannot_be_treated_as_pass(
     shape: str,

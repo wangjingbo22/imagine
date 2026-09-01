@@ -324,7 +324,7 @@ src/api/tripContract.ts
 - 冲突项公开字段固定为 `participantId/relatedParticipantIds/ruleId/reason/allowedRelaxations`。页面必须点名成员与规则，不能只显示一条笼统错误。
 - `POST /api/v2/trips/{tripId}/confirmation-items/{itemId}/resolve`：携带组织者凭证、`Idempotency-Key`，并提交当前 `baseRevision/expectedVersion/relaxationId`。
 - 组织者只能点击 `actorScope=ORGANIZER` 的选项；成员选项显示“需对应成员本人处理”，不得由前端绕过权限。
-- 页面只有在 `status=READY_TO_PLAN && canPlan=true && readinessDigest!=null` 时显示唯一推荐入口。冲突解决后若成员状态为 `NEEDS_RECONFIRMATION`，应继续显示等待重新确认，不得直接进入规划。
+- 页面只有在 `status=READY_TO_PLAN && canPlan=true && readinessDigest!=null` 时显示推荐方案入口。冲突解决后若成员状态为 `NEEDS_RECONFIRMATION`，应继续显示等待重新确认，不得直接进入规划。
 - 组织者创建入口已接入 T002 `TripDraftRevision` 生产实现；任何 revision、权限或 readiness 校验失败仍必须 fail-closed，前端不得伪造成功状态。
 - `POST /api/v2/trips/conversations` 的成功创建响应在 `data.recognition` 返回 `source`（`MODEL_PROPOSAL` 或 `REVIEWED_FIXED_QUESTIONS`）、`model`、`degradedReason` 和 `callCount`。模型成功时 `degradedReason` 必须为 `null`；六项复核降级时必须保留真实百炼失败码，页面不得显示百炼成功，但仍可继续既有组织者确认流程。未完成复核的失败响应仍使用 `FIXED_QUESTIONS` fallback 形状。
 - 组织者创建请求携带提交瞬间的 `referenceDate` 与可选 `referenceTime`；过去日期返回 HTTP 422 `TRIP_DATE_IN_PAST`，当天已过去的开始时间返回 HTTP 422 `TRIP_START_TIME_IN_PAST`，且不得写入 revision。

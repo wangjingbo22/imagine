@@ -766,9 +766,27 @@ def _place_matches_label(place: Place, label: str) -> bool:
     )
 
 
+def _explicit_place_label_matches(
+    *,
+    name: str,
+    provider_id: str,
+    label: str,
+) -> bool:
+    """Require an exact name or Provider ID before exempting a non-visit POI."""
+    expected = _normalized_text(label)
+    if not expected:
+        return False
+    return expected in {
+        _normalized_text(name),
+        _normalized_text(provider_id),
+    }
+
+
 _NON_VISIT_PLACE_TERMS = (
     "住宿服务", "宾馆酒店", "经济型连锁酒店", "酒店", "宾馆", "旅馆",
     "民宿", "客栈", "公寓酒店", "招待所", "停车场", "加油站",
+    "家居建材市场", "家具城", "家具卖场", "建材市场", "五金建材",
+    "装饰材料市场", "工业园", "产业园", "物流园", "仓储服务", "仓库",
 )
 
 
@@ -1022,12 +1040,20 @@ class TrustedRecommendationService:
                 continue
             if any(_place_matches_label(place, label) for label in avoided):
                 continue
-            # 非游览地点默认不进入 FactRef 白名单；若用户明确把它设为必去，
-            # 则保留该真实地点，避免过滤器覆盖用户的硬性意图。
-            is_required = any(
-                _place_matches_label(place, label) for label in required
+            # 非游览地点只有在名称或 Provider ID 被完整指定时才允许豁免。
+            # 例如“天坛”不能通过子串匹配把“天坛家具”误判成必去地点。
+            is_explicitly_required = any(
+                _explicit_place_label_matches(
+                    name=place.name,
+                    provider_id=place.placeId,
+                    label=label,
+                )
+                for label in required
             )
-            if not is_required and _is_non_visit_place(place.name, place.category):
+            if (
+                not is_explicitly_required
+                and _is_non_visit_place(place.name, place.category)
+            ):
                 continue
             amount = place.priceReference.amountCents
             if amount is not None and amount > budget_limit:
@@ -1100,8 +1126,18 @@ class TrustedRecommendationService:
                 or _normalized_text(place.name) in avoided
             ):
                 continue
-            is_required = any(_place_matches_label(place, label) for label in must_visit)
-            if not is_required and _is_non_visit_place(place.name, place.category):
+            is_explicitly_required = any(
+                _explicit_place_label_matches(
+                    name=place.name,
+                    provider_id=place.placeId,
+                    label=label,
+                )
+                for label in must_visit
+            )
+            if (
+                not is_explicitly_required
+                and _is_non_visit_place(place.name, place.category)
+            ):
                 continue
             seen.add(place.placeId)
             selected.append(CandidatePlace(

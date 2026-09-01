@@ -59,5 +59,5 @@ test('multi-day planning exposes and propagates cross-day place memory', async (
   assert.match(parentPage, /跨日地点记忆/)
   assert.match(parentPage, /placeMemory\.filter/)
   assert.match(selection, /parentPlaceMemory: ParentTripPlaceMemoryItem\[\]/)
-  assert.match(recommendation, /已排除 \{parentPlaceMemory\.length\}/)
+  assert.match(recommendation, /不会重复以下 \{parentPlaceMemory\.length\} 个地点/)
 })

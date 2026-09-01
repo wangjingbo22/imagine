@@ -5,9 +5,15 @@ import type { GeoPoint, Place } from '../src/domain/trip.ts'
 import {
   appendConfirmedReturnPlace,
   assertProviderFactSetMatchesSelection,
+  clearRecommendationSession,
   confirmRecommendationSelection,
   createLatestRecommendationRequestGate,
+  recommendationBundleStorageKey,
+  recommendationDraftStorageKey,
+  recommendationTraceStorageKey,
+  restoreRecommendationBundle,
   selectedPlacesFromSignedFactSet,
+  storeRecommendationBundle,
   type ProviderFactPlaceSet,
   type ProviderFactSetSummary,
   type RecommendationBundle,
@@ -57,6 +63,18 @@ function bundle(): RecommendationBundle {
       fetchedAt: provenance.fetchedAt,
       isStale: false,
     })),
+  }
+}
+
+function memoryStorage(): Storage {
+  const values = new Map<string, string>()
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => { values.set(key, value) },
+    removeItem: (key) => { values.delete(key) },
+    clear: () => { values.clear() },
+    key: (index) => [...values.keys()][index] ?? null,
+    get length() { return values.size },
   }
 }
 
@@ -137,6 +155,62 @@ test('confirmation freezes the exact FactRef IDs and trusted-plan order', () => 
   )
 })
 
+test('confirmation accepts organizer-edited signed candidates and preserves their order', () => {
+  const input = bundle()
+  const edited = [
+    { ...input.candidates[4], name: '浏览器篡改名称' },
+    input.candidates[3],
+    input.candidates[0],
+  ]
+  const selection = confirmRecommendationSelection(tripId, input, edited)
+
+  assert.deepEqual(
+    selection.selectedPlaces.map((item) => [item.placeId, item.name]),
+    [
+      ['poi-5', '地点5'],
+      ['poi-4', '地点4'],
+      ['poi-1', '地点1'],
+    ],
+  )
+  assert.deepEqual(
+    selectedPlacesFromSignedFactSet(placeSet(input), selection).map((item) => item.placeId),
+    ['poi-5', 'poi-4', 'poi-1'],
+  )
+})
+
+test('edited selections reject duplicate, unsigned and stale candidates', () => {
+  const duplicated = bundle()
+  assert.throws(
+    () => confirmRecommendationSelection(
+      tripId,
+      duplicated,
+      [duplicated.candidates[0], duplicated.candidates[0]],
+    ),
+    /重复地点/,
+  )
+
+  const unsigned = bundle()
+  assert.throws(
+    () => confirmRecommendationSelection(
+      tripId,
+      unsigned,
+      [unsigned.candidates[0], candidate(99)],
+    ),
+    /核验信息已失效/,
+  )
+
+  const stale = bundle()
+  stale.provenance[0] = { ...stale.provenance[0], isStale: true }
+  assert.throws(
+    () => confirmRecommendationSelection(
+      tripId,
+      stale,
+      [stale.candidates[0], stale.candidates[1]],
+    ),
+    /核验信息已失效/,
+  )
+})
+
 test('deterministic fallback keeps three intermediates and appends one return', () => {
   const selection = confirmRecommendationSelection(tripId, bundle())
   const points = Array.from({ length: 4 }, (_, index) => ({
@@ -161,7 +235,7 @@ test('missing trace, four intermediates or changed server facts fail closed', ()
   missingDigest.providerFactDigest = null
   assert.throws(
     () => confirmRecommendationSelection(tripId, missingDigest),
-    /摘要无效/,
+    /核验信息无效/,
   )
 
   const tooMany = bundle()
@@ -204,4 +278,46 @@ test('only the latest recommendation request may update the visible bundle', () 
 
   gate.invalidate()
   assert.equal(gate.isLatest(retryRequest), false)
+})
+
+test('signed recommendation session restores the same bundle and clears all related state', () => {
+  const storage = memoryStorage()
+  const input = bundle()
+  storeRecommendationBundle(storage, tripId, input)
+  storage.setItem(recommendationDraftStorageKey(tripId), '{"draft":true}')
+  storage.setItem(recommendationTraceStorageKey(tripId), '{"trace":true}')
+
+  assert.deepEqual(restoreRecommendationBundle(storage, tripId), input)
+  assert.ok(storage.getItem(recommendationBundleStorageKey(tripId)))
+
+  clearRecommendationSession(storage, tripId)
+  assert.equal(storage.getItem(recommendationBundleStorageKey(tripId)), null)
+  assert.equal(storage.getItem(recommendationDraftStorageKey(tripId)), null)
+  assert.equal(storage.getItem(recommendationTraceStorageKey(tripId)), null)
+})
+
+test('recommendation sessions from the old filtering policy are discarded', () => {
+  const storage = memoryStorage()
+  storage.setItem(recommendationBundleStorageKey(tripId), JSON.stringify({
+    schemaVersion: '1.0',
+    tripId,
+    bundle: bundle(),
+  }))
+
+  assert.equal(restoreRecommendationBundle(storage, tripId), null)
+  assert.equal(storage.getItem(recommendationBundleStorageKey(tripId)), null)
+})
+
+test('tampered recommendation session is discarded instead of being displayed', () => {
+  const storage = memoryStorage()
+  const input = bundle()
+  input.providerFactDigest = 'not-a-digest'
+  storage.setItem(recommendationBundleStorageKey(tripId), JSON.stringify({
+    schemaVersion: '1.1',
+    tripId,
+    bundle: input,
+  }))
+
+  assert.equal(restoreRecommendationBundle(storage, tripId), null)
+  assert.equal(storage.getItem(recommendationBundleStorageKey(tripId)), null)
 })

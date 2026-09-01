@@ -1432,50 +1432,6 @@ export function WorkspacePage() {
                   <div><Clock3 size={18} /><span>弹性时间<strong>45 分钟</strong></span></div>
                 </div>
               </section>
-              <section className="validation-card">
-                <div className="validation-card__head">
-                  <span><ShieldCheck size={21} /> 关怀校验</span>
-                  <strong className={!serverPlanReady ? 'needs-confirmation' : ''}>
-                    {serverPlanReady ? '服务端 PASS' : '待确认'}
-                  </strong>
-                </div>
-                {validationRules.map((rule) => (
-                  <div className="validation-row" key={rule}>
-                    <CheckCircle2 size={16} />
-                    <span>{rule}</span>
-                    <small>{serverPlanReady ? '服务端已复算' : '等待服务端确认'}</small>
-                  </div>
-                ))}
-                {facilityEvidence.length > 0 ? facilityEvidence.map((evidence, index) => (
-                  <div className="warning-row" key={`${evidence.referenceId}-${evidence.facilityType}-${index}`}>
-                    <MapPin size={16} />
-                    <span>
-                      {evidence.label}
-                      <small>
-                        {serverPlanReady
-                          ? '用户确认结果已保存，服务端已重新校验'
-                          : evidence.message}
-                      </small>
-                    </span>
-                    <small>
-                      {serverPlanReady
-                        ? '用户已确认'
-                        : facilityEvidenceNeedsConfirmation(evidence) ? '待确认' : evidence.status}
-                    </small>
-                  </div>
-                )) : (
-                  <div className="warning-row">
-                    <MapPin size={16} />
-                    <span>电梯、坡道、母婴室、无障碍入口<small>路线设施来源尚未返回</small></span>
-                    <small>待确认</small>
-                  </div>
-                )}
-                {planningIssue && (
-                  <p className="media-error">
-                    {planningIssue.message}（{planningIssue.code}）
-                  </p>
-                )}
-              </section>
               {candidateReview && (
                 <section className="evidence-review-card" aria-live="polite">
                   <div className="source-card__head">

@@ -125,9 +125,9 @@ test('cross-day place memory is visible on parent and recommendation pages', asy
     `/recommendation/${secondChildTripId}?parentTripId=${parentTripId}&dayIndex=1`,
     { waitUntil: 'domcontentloaded' },
   )
-  const recommendationMemory = page.getByLabel('本次跨日排除地点')
+  const recommendationMemory = page.getByLabel('其他日期已安排地点')
   await expect(recommendationMemory).toBeVisible()
-  await expect(recommendationMemory).toContainText('已排除 2 个其他日期地点')
+  await expect(recommendationMemory).toContainText('本日推荐不会重复以下 2 个地点')
   await expect(recommendationMemory).toContainText('第 1 天 · 2026-09-06')
   const recommendationPanel = page.locator('.recommendation-panel')
   await expect(recommendationPanel).toHaveClass(/is-revealed/)

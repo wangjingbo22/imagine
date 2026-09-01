@@ -75,7 +75,7 @@ export function ConflictReviewPanel({ state, busy = false, onResolve }: Conflict
       <div>
         <h3>{ready ? '硬冲突已全部解决' : actionableIssues.length > 0 ? '多人硬冲突与确认项' : '等待成员独立填写'}</h3>
         <p>{ready
-          ? '全员已在当前版本确认，可以进入 Provider 查询和唯一推荐。'
+          ? '全员已在当前版本确认，可以进入地点推荐。'
           : actionableIssues.length > 0
             ? `${actionableIssues.length} 项需要处理，另有 ${waitingMemberIssues.length} 项等待成员填写；完成前不会调用 Provider 或规划器。`
             : `${waitingMembers.length} 位成员尚未完成自己的资料；全员确认前不会调用 Provider 或规划器。`}</p>

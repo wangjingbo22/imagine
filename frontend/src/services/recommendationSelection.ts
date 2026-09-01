@@ -92,6 +92,70 @@ export interface ProviderFactPlaceSet {
 const digestPattern = /^[0-9a-f]{64}$/
 const trustedSourceStatuses = new Set<SourceStatus>(['ONLINE', 'VERIFIED_CACHE'])
 
+interface StoredRecommendationBundle {
+  schemaVersion: '1.1'
+  tripId: string
+  bundle: RecommendationBundle
+}
+
+export function recommendationBundleStorageKey(tripId: string) {
+  return `s2-recommendation-bundle:${tripId}`
+}
+
+export function recommendationDraftStorageKey(tripId: string) {
+  return `s2-recommendation-draft:${tripId}`
+}
+
+export function recommendationTraceStorageKey(tripId: string) {
+  return `s2-recommendation-trace:${tripId}`
+}
+
+/** Keep one signed recommendation stable while the user visits account pages. */
+export function storeRecommendationBundle(
+  storage: Storage,
+  tripId: string,
+  bundle: RecommendationBundle,
+) {
+  confirmRecommendationSelection(tripId, bundle)
+  const stored: StoredRecommendationBundle = {
+    schemaVersion: '1.1',
+    tripId,
+    bundle,
+  }
+  storage.setItem(recommendationBundleStorageKey(tripId), JSON.stringify(stored))
+}
+
+/** Restore only a complete, internally consistent signed recommendation. */
+export function restoreRecommendationBundle(
+  storage: Storage,
+  tripId: string,
+): RecommendationBundle | null {
+  const key = recommendationBundleStorageKey(tripId)
+  const raw = storage.getItem(key)
+  if (!raw) return null
+  try {
+    const stored = JSON.parse(raw) as Partial<StoredRecommendationBundle>
+    if (
+      stored.schemaVersion !== '1.1' ||
+      stored.tripId !== tripId ||
+      !stored.bundle
+    ) {
+      throw new Error('Stored recommendation bundle is invalid.')
+    }
+    confirmRecommendationSelection(tripId, stored.bundle)
+    return stored.bundle
+  } catch {
+    storage.removeItem(key)
+    return null
+  }
+}
+
+export function clearRecommendationSession(storage: Storage, tripId: string) {
+  storage.removeItem(recommendationBundleStorageKey(tripId))
+  storage.removeItem(recommendationDraftStorageKey(tripId))
+  storage.removeItem(recommendationTraceStorageKey(tripId))
+}
+
 /**
  * Keep only the newest asynchronous recommendation load authoritative.
  *
@@ -117,14 +181,14 @@ export function createLatestRecommendationRequestGate() {
 
 function requireOpaqueId(value: string | null | undefined, label: string) {
   const normalized = value?.trim() ?? ''
-  if (!normalized) throw new Error(`${label} 缺失，不能确认唯一推荐。`)
+  if (!normalized) throw new Error(`${label} 缺失，不能确认推荐方案。`)
   return normalized
 }
 
 function requireDigest(value: string | null | undefined) {
   const normalized = value?.trim() ?? ''
   if (!digestPattern.test(normalized)) {
-    throw new Error('Provider FactRef 摘要无效，不能确认唯一推荐。')
+    throw new Error('推荐地点的核验信息无效，请刷新后重试。')
   }
   return normalized
 }
@@ -139,14 +203,16 @@ function requireDigest(value: string | null | undefined) {
 export function confirmRecommendationSelection(
   tripId: string,
   bundle: RecommendationBundle,
+  selectedTasks?: readonly RecommendationCandidate[],
 ): ConfirmedRecommendationSelection {
   const normalizedTripId = requireOpaqueId(tripId, 'tripId')
   const factSetId = requireOpaqueId(bundle.factSetId, 'factSetId')
   const providerFactDigest = requireDigest(bundle.providerFactDigest)
   const plan = bundle.trustedPlan
-  if (!plan) throw new Error('服务端尚未生成唯一推荐，不能进入路线规划。')
-  if (plan.tasks.length < 2 || plan.tasks.length > 3) {
-    throw new Error('唯一推荐必须包含 2—3 个中间地点，另保留一个独立返程任务。')
+  if (!plan) throw new Error('服务端尚未生成推荐方案，不能进入路线规划。')
+  const tasks = selectedTasks ?? plan.tasks
+  if (tasks.length < 2 || tasks.length > 3) {
+    throw new Error('推荐方案必须包含 2—3 个中间地点，另保留一个独立返程任务。')
   }
 
   const candidateByFactRef = new Map(
@@ -157,11 +223,11 @@ export function confirmRecommendationSelection(
   )
   const seenFactRefs = new Set<string>()
   const seenPlaceIds = new Set<string>()
-  const selectedPlaces = plan.tasks.map((task) => {
+  const selectedPlaces = tasks.map((task) => {
     const factRefId = requireOpaqueId(task.factRefId, 'FactRef')
     const placeId = requireOpaqueId(task.placeId, 'Provider 地点 ID')
     if (seenFactRefs.has(factRefId) || seenPlaceIds.has(placeId)) {
-      throw new Error('唯一推荐包含重复地点，不能进入路线规划。')
+      throw new Error('推荐方案包含重复地点，请更换后再确认。')
     }
     const candidate = candidateByFactRef.get(factRefId)
     const provenance = provenanceByFactRef.get(factRefId)
@@ -170,17 +236,18 @@ export function confirmRecommendationSelection(
       candidate.placeId !== placeId ||
       !provenance ||
       provenance.providerObjectId !== placeId ||
-      !trustedSourceStatuses.has(provenance.sourceStatus)
+      !trustedSourceStatuses.has(provenance.sourceStatus) ||
+      provenance.isStale
     ) {
-      throw new Error(`唯一推荐地点 ${placeId} 无法回溯到已签发 FactRef。`)
+      throw new Error(`地点“${task.name || placeId}”的核验信息已失效，请刷新推荐。`)
     }
     seenFactRefs.add(factRefId)
     seenPlaceIds.add(placeId)
     return Object.freeze({
       factRefId,
       placeId,
-      name: task.name,
-      category: task.category,
+      name: candidate.name,
+      category: candidate.category,
     })
   })
 
@@ -213,7 +280,8 @@ export function assertProviderFactSetMatchesSelection(
       !reference ||
       reference.kind !== 'PLACE' ||
       reference.providerObjectId !== selected.placeId ||
-      !trustedSourceStatuses.has(reference.sourceStatus)
+      !trustedSourceStatuses.has(reference.sourceStatus) ||
+      reference.isStale
     ) {
       throw new Error(`FactRef ${selected.factRefId} 已失效，请刷新后重新确认。`)
     }
@@ -243,7 +311,8 @@ export function selectedPlacesFromSignedFactSet(
       payload.providerObjectId !== selected.placeId ||
       payload.place.placeId !== selected.placeId ||
       !digestPattern.test(payload.payloadDigest) ||
-      !trustedSourceStatuses.has(payload.place.provenance.sourceStatus)
+      !trustedSourceStatuses.has(payload.place.provenance.sourceStatus) ||
+      payload.place.provenance.isStale
     ) {
       throw new Error(`FactRef ${selected.factRefId} 的签发地点已失效，请刷新后重新确认。`)
     }

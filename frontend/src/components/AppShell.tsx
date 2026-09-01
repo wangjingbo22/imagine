@@ -7,9 +7,14 @@ import { BrandMark } from './BrandMark'
 
 interface AppShellProps extends PropsWithChildren {
   compact?: boolean
+  showBackButton?: boolean
 }
 
-export function AppShell({ children, compact = false }: AppShellProps) {
+export function AppShell({
+  children,
+  compact = false,
+  showBackButton = true,
+}: AppShellProps) {
   const location = useLocation()
   const navigate = useNavigate()
   const isHome = location.pathname === '/'
@@ -21,6 +26,10 @@ export function AppShell({ children, compact = false }: AppShellProps) {
     return () => { active = false }
   }, [location.pathname])
   const modelSettingsPath = user ? '/model-settings' : '/account?returnTo=%2Fmodel-settings'
+  const currentPath = `${location.pathname}${location.search}`
+  const accountPath = location.pathname.startsWith('/recommendation/')
+    ? `/account?returnTo=${encodeURIComponent(currentPath)}`
+    : '/account'
 
   /**
    * 返回按钮应恢复用户刚才所在的业务页面，而不是把所有流程都强制送回首页。
@@ -40,7 +49,7 @@ export function AppShell({ children, compact = false }: AppShellProps) {
     <div className={compact ? 'app-shell app-shell--compact' : 'app-shell'}>
       <header className="topbar">
         <div className="topbar__inner">
-          {isHome ? (
+          {isHome || !showBackButton ? (
             <BrandMark />
           ) : (
             <button
@@ -63,7 +72,7 @@ export function AppShell({ children, compact = false }: AppShellProps) {
               <CircleHelp size={19} />
             </button>
             <Link className="icon-button" to={modelSettingsPath} aria-label="模型设置" title="模型设置"><SlidersHorizontal size={18} /></Link>
-            <Link className="avatar" to="/account" aria-label={user ? `${user.displayName}的账户` : '账户'} title={user?.displayName ?? '账户'}>
+            <Link className="avatar" to={accountPath} aria-label={user ? `${user.displayName}的账户` : '账户'} title={user?.displayName ?? '账户'}>
               {user ? user.displayName.slice(0, 1).toUpperCase() : <UserRound size={16} />}
             </Link>
           </nav>

@@ -31,6 +31,7 @@ from app.services.planning import CandidatePlanRequest, generate_candidate_plan
 from app.services.recommendation import BuiltRouteCandidate, ProviderFactBundle
 from backend.tests.s2_t003_support import (
     FakeTripDraftRevisionPort,
+    revision_with_places,
     revision_with_trip_budget,
 )
 from backend.tests.test_s2_t003_collaboration_service import (
@@ -101,6 +102,11 @@ def _place(
 def _provider_pool() -> list[Place]:
     return [
         _place("poi-bund", "The Bund", category="architecture"),
+        _place(
+            "poi-furniture",
+            "天坛家具(实木)安贞店",
+            category="购物服务;家居建材市场;家具城",
+        ),
         _place("poi-architecture", "Shanghai Architecture Museum", category="architecture"),
         _place("poi-food", "Shanghai Food Market", category="food"),
         _place("poi-garden", "Yu Garden"),
@@ -435,6 +441,7 @@ async def test_ready_group_signs_six_to_eight_filtered_provider_fact_refs(
     assert "poi-bund" in selected_ids
     assert selected_ids.isdisjoint(
         {
+            "poi-furniture",
             "poi-avoid",
             "poi-over-budget",
             "poi-cross-city",
@@ -568,6 +575,50 @@ async def test_ready_group_signs_six_to_eight_filtered_provider_fact_refs(
         assert "data" not in denied.json()
     assert route_builder.calls == 0
     assert _count(database_path, "plan_versions") == 0
+
+
+@pytest.mark.asyncio
+async def test_short_must_visit_label_does_not_exempt_a_furniture_store(
+    tmp_path: Path,
+) -> None:
+    places = [
+        *_provider_pool(),
+        _place(
+            "poi-tianta-park",
+            "天坛公园",
+            category="风景名胜;公园广场;公园",
+        ),
+    ]
+    app, harness, _registry, _location, _route_builder, _database_path = _app(
+        tmp_path,
+        places,
+    )
+    changed = revision_with_places(
+        harness.revision,
+        must_visit=["天坛"],
+        avoid_places=[],
+    )
+    _advance_harness_revision(harness, changed)
+    _reconfirm_members(harness, ("member-1", "member-2"))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(
+            f"/api/v2/trips/{harness.revision.trip_id}/recommendations",
+            headers={
+                "X-Organizer-Token": harness.organizer_token,
+                "Idempotency-Key": "t030-tianta-furniture-collision",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    selected_ids = {
+        item["placeId"] for item in response.json()["data"]["candidates"]
+    }
+    assert "poi-tianta-park" in selected_ids
+    assert "poi-furniture" not in selected_ids
 
 
 @pytest.mark.asyncio
