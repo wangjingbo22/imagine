@@ -16,6 +16,7 @@ const API_BASE_URL = resolveApiBaseUrl(import.meta.env?.VITE_API_BASE_URL)
 
 export class ApiError extends Error {
   readonly code: number | string
+  readonly status?: number
   readonly issues: ValidationIssue[]
   readonly details: Array<Record<string, unknown>>
 
@@ -24,10 +25,12 @@ export class ApiError extends Error {
     message: string,
     issues: ValidationIssue[] = [],
     details: Array<Record<string, unknown>> = [],
+    status?: number,
   ) {
     super(message)
     this.name = 'ApiError'
     this.code = code
+    this.status = status
     this.issues = issues
     this.details = details
   }
@@ -68,9 +71,12 @@ async function readResponseBody(response: Response): Promise<unknown> {
       throw new ApiError(
         response.status,
         `服务端请求失败（HTTP ${response.status}）`,
+        [],
+        [],
+        response.status,
       )
     }
-    throw new ApiError('API_RESPONSE_INVALID', '服务端返回了无法识别的数据')
+    throw new ApiError('API_RESPONSE_INVALID', '服务端返回了无法识别的数据', [], [], response.status)
   }
 }
 
@@ -93,6 +99,7 @@ export async function requestBare<T>(
       body.errors.map((issue) => `${issue.path}: ${issue.message}`).join('; '),
       body.errors,
       body.errors as unknown as Array<Record<string, unknown>>,
+      response.status,
     )
   }
   if (!response.ok) {
@@ -102,6 +109,7 @@ export async function requestBare<T>(
       error.message || `HTTP ${response.status}`,
       [],
       Array.isArray(error.errors) ? error.errors : [],
+      response.status,
     )
   }
   return { data: body as T, headers: response.headers }
@@ -127,20 +135,27 @@ export async function request<T>(
       body.errors.map((issue) => `${issue.path}: ${issue.message}`).join('; '),
       body.errors,
       body.errors as unknown as Array<Record<string, unknown>>,
+      response.status,
     )
   }
 
   if (!isObject(body)) {
     if (!response.ok) {
-      throw new ApiError(response.status, `服务端请求失败（HTTP ${response.status}）`)
+      throw new ApiError(response.status, `服务端请求失败（HTTP ${response.status}）`, [], [], response.status)
     }
-    throw new ApiError('API_RESPONSE_INVALID', '服务端返回了无法识别的数据')
+    throw new ApiError('API_RESPONSE_INVALID', '服务端返回了无法识别的数据', [], [], response.status)
   }
 
   const error = body as ErrorBody
   if (!response.ok || error.code !== 200) {
     const details = Array.isArray(error.errors) ? error.errors : []
-    throw new ApiError(error.code ?? response.status, error.message || `HTTP ${response.status}`, [], details)
+    throw new ApiError(
+      error.code ?? response.status,
+      error.message || `HTTP ${response.status}`,
+      [],
+      details,
+      response.status,
+    )
   }
 
   return body as unknown as ApiResponse<T>

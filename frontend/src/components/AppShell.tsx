@@ -1,8 +1,7 @@
 import { ArrowLeft, CircleHelp, SlidersHorizontal, UserRound } from 'lucide-react'
-import { useEffect, useState, type PropsWithChildren } from 'react'
+import type { PropsWithChildren } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { getCurrentUser } from '../api/accountApi'
-import type { CurrentUser } from '../domain/account'
+import { useAccountSession } from '../session/useAccountSession'
 import { BrandMark } from './BrandMark'
 
 interface AppShellProps extends PropsWithChildren {
@@ -18,13 +17,7 @@ export function AppShell({
   const location = useLocation()
   const navigate = useNavigate()
   const isHome = location.pathname === '/'
-  const [user, setUser] = useState<CurrentUser | null>(null)
-
-  useEffect(() => {
-    let active = true
-    void getCurrentUser().then(({ data }) => { if (active) setUser(data) }).catch(() => { if (active) setUser(null) })
-    return () => { active = false }
-  }, [location.pathname])
+  const { user, isInitializing, sessionError } = useAccountSession()
   const modelSettingsPath = user ? '/model-settings' : '/account?returnTo=%2Fmodel-settings'
   const currentPath = `${location.pathname}${location.search}`
   const accountPath = location.pathname.startsWith('/recommendation/')
@@ -64,10 +57,12 @@ export function AppShell({
             </button>
           )}
           <nav className="topbar__nav" aria-label="主导航">
-            <span className="topbar__status">
-              <span className="status-dot" />
-              {user ? `你好，${user.displayName}` : '请登录'}
-            </span>
+            {!sessionError && (
+              <span className="topbar__status">
+                <span className="status-dot" />
+                {isInitializing ? '正在读取账户' : user ? `你好，${user.displayName}` : '请登录'}
+              </span>
+            )}
             <button className="icon-button" type="button" aria-label="帮助">
               <CircleHelp size={19} />
             </button>
@@ -78,6 +73,11 @@ export function AppShell({
           </nav>
         </div>
       </header>
+      {sessionError && (
+        <div className="app-shell__session-error" role="alert">
+          <div>{sessionError}</div>
+        </div>
+      )}
       {children}
     </div>
   )

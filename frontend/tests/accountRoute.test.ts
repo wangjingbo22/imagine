@@ -25,16 +25,73 @@ test('account API uses the session cookie and the account contract paths', async
   assert.match(client, /credentials:\s*["']include["']/)
 })
 
-test('account page provides authentication and profile actions without local storage sessions', async () => {
+test('account page provides authentication and profile actions through the shared session', async () => {
   const page = await readFile(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8')
 
   assert.match(page, /registerAccount/)
   assert.match(page, /loginAccount/)
-  assert.match(page, /getCurrentUser/)
   assert.match(page, /updateAccountProfile/)
-  assert.match(page, /logoutAccount/)
+  assert.match(page, /useAccountSession/)
   assert.match(page, /interests/)
   assert.doesNotMatch(page, /localStorage/)
+})
+
+test('account session is globally owned and synchronizes account mutations with every shell', async () => {
+  const [main, page, shell, provider, context] = await Promise.all([
+    readFile(new URL('../src/main.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/AppShell.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/session/AccountSessionProvider.tsx', import.meta.url), 'utf8').catch(() => ''),
+    readFile(new URL('../src/session/AccountSessionContext.ts', import.meta.url), 'utf8').catch(() => ''),
+  ])
+
+  assert.match(main, /<AccountSessionProvider>/)
+  assert.match(context, /createContext/)
+  assert.match(provider, /getCurrentUser/)
+  assert.match(provider, /ACCOUNT_SESSION_REQUIRED/)
+  assert.match(provider, /error\.status === 401/)
+  assert.match(provider, /sessionVersionRef/)
+  assert.match(provider, /if \(isSessionRequired\(caught\)\) \{\s*clearCurrentUser\(\)/)
+  assert.match(page, /useAccountSession/)
+  assert.equal(page.match(/setCurrentUser\(response\.data\)/g)?.length, 2)
+  assert.match(shell, /useAccountSession\(\)/)
+  assert.doesNotMatch(page, /getCurrentUser/)
+  assert.doesNotMatch(shell, /getCurrentUser/)
+  assert.doesNotMatch(page, /useState<CurrentUser/)
+  assert.doesNotMatch(shell, /useState<CurrentUser/)
+})
+
+test('account logout clears only shared account session artifacts after server logout succeeds', async () => {
+  const [page, provider, parentTripCollaboration] = await Promise.all([
+    readFile(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/session/AccountSessionProvider.tsx', import.meta.url), 'utf8').catch(() => ''),
+    readFile(new URL('../src/services/parentTripCollaboration.ts', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(page, /await logout\(\)/)
+  assert.match(provider, /logoutAccount/)
+  assert.match(provider, /await logoutAccount\(\)\s*\n\s*clearCurrentUser\(\)/)
+  assert.match(provider, /clearUserLlmSettings/)
+  assert.match(provider, /clearAccountBoundParentTripMemberSessions/)
+  assert.match(parentTripCollaboration, /clearAccountBoundParentTripMemberSessions/)
+  assert.match(parentTripCollaboration, /parent-trip-member-session:/)
+  assert.match(provider, /setUser\(null\)/)
+  assert.doesNotMatch(provider, /localStorage\.clear\(\)/)
+  assert.doesNotMatch(provider, /sessionStorage\.clear\(\)/)
+})
+
+test('session read errors remain visible once outside the mobile-hidden account status', async () => {
+  const [page, shell, styles] = await Promise.all([
+    readFile(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/AppShell.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/index.css', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(shell, /app-shell__session-error/)
+  assert.match(shell, /app-shell__session-error" role="alert"/)
+  assert.doesNotMatch(shell, /<span role="alert">/)
+  assert.doesNotMatch(page, /sessionError/)
+  assert.match(styles, /\.app-shell__session-error\s*\{[^}]*display:\s*block/)
 })
 
 test('account content mounted after the initial session check is visible', async () => {
@@ -46,10 +103,23 @@ test('account content mounted after the initial session check is visible', async
 })
 
 test('account page only treats an invalid session as signed out', async () => {
-  const page = await readFile(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8')
+  const provider = await readFile(
+    new URL('../src/session/AccountSessionProvider.tsx', import.meta.url),
+    'utf8',
+  ).catch(() => '')
 
-  assert.match(page, /ACCOUNT_SESSION_REQUIRED/)
-  assert.match(page, /账户状态读取失败，请刷新重试/)
+  assert.match(provider, /ACCOUNT_SESSION_REQUIRED/)
+  assert.match(provider, /账户状态读取失败，请刷新重试/)
+})
+
+test('an HTTP 200 body code 401 is not treated as an invalid account session', async () => {
+  const provider = await readFile(
+    new URL('../src/session/AccountSessionProvider.tsx', import.meta.url),
+    'utf8',
+  ).catch(() => '')
+
+  assert.match(provider, /error\.code === 'ACCOUNT_SESSION_REQUIRED' \|\| error\.status === 401/)
+  assert.doesNotMatch(provider, /error\.code === 401/)
 })
 
 test('account return path is allowlisted before resuming an invitation', async () => {
