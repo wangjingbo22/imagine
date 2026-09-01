@@ -48,14 +48,15 @@ test('trip API posts the exact event-replan payload without legacy candidate fie
   assert.doesNotMatch(method, /feedback|candidates|lockedTaskIds|taskFacts/)
 })
 
-test('Workspace uses server event replanning and disables free-text S1 feedback', async () => {
+test('Workspace uses server event replanning and deterministic adjustment controls', async () => {
   const source = await readFile(
     new URL('../src/pages/WorkspacePage.tsx', import.meta.url),
     'utf8',
   )
 
   assert.match(source, /tripApi\.replanFromEvents\(tripId\)/)
-  assert.match(source, /实际消费变化在完成当前任务时记录/)
+  assert.match(source, /confirmExecutionAdjustment/)
+  assert.doesNotMatch(source, /tripApi\.parseExecutionAdjustment/)
   assert.doesNotMatch(source, /buildAmapReplanCandidate/)
   assert.doesNotMatch(source, /tripApi\.selectReplan/)
   assert.doesNotMatch(source, /USER_FEEDBACK/)

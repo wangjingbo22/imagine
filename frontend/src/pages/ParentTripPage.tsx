@@ -35,7 +35,7 @@ import {
   validateFutureDate,
 } from '../services/tripTimeConstraints'
 
-const cities = ['北京', '上海', '成都', '西安', '杭州']
+const citySuggestions = ['北京', '上海', '成都', '西安', '杭州']
 const MIN_DAY_COUNT = 2
 const MAX_DAY_COUNT = 30
 const MAX_PARTICIPANT_COUNT = 20
@@ -263,9 +263,10 @@ export function ParentTripPage() {
   return <AppShell><main className="parent-trip-page">
     {!trip ? <section className="parent-trip-card"><p className="eyebrow">多日同行</p><h1>创建多天同城行程</h1><p className="parent-trip-card__lead">一次创建 2–30 天的行程框架，再逐日完成具体规划。</p>
       <label>行程名称<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
-      <div className="parent-trip-grid"><label>城市<select value={form.cityName} onChange={(event) => setForm({ ...form, cityName: event.target.value })}>{cities.map((city) => <option key={city}>{city}</option>)}</select></label>
+      <div className="parent-trip-grid"><label>城市<input list="parent-trip-city-suggestions" value={form.cityName} onChange={(event) => setForm({ ...form, cityName: event.target.value })} placeholder="输入目的城市" required /></label>
       <label>开始日期<input aria-invalid={Boolean(startDateError)} min={localDateValue(temporalNow)} type="date" value={form.startDate} onFocus={() => setTemporalNow(new Date())} onChange={(event) => { setError(''); setForm({ ...form, startDate: event.target.value }) }} /></label>
       <label>天数<input type="number" min={MIN_DAY_COUNT} max={MAX_DAY_COUNT} step="1" inputMode="numeric" value={form.dayCount} onChange={(event) => setForm({ ...form, dayCount: Number(event.target.value) })} aria-describedby="parent-trip-day-hint" /><small id="parent-trip-day-hint">自定义填写，支持 2–30 天</small></label></div>
+      <datalist id="parent-trip-city-suggestions">{citySuggestions.map((city) => <option key={city} value={city} />)}</datalist>
       {startDateError && <p className="form-error" role="alert">{startDateError}</p>}
       <div className="parent-trip-budget-inputs"><label>多日行程总预算（元）<input type="number" min="0" inputMode="decimal" value={form.totalBudget} onChange={(event) => setForm({ ...form, totalBudget: event.target.value })} /><small>创建后会自动平均分配到每天；进入单日规划时无需再次填写。</small></label></div>
       <button className="button button--primary" disabled={busy || Boolean(startDateError)} onClick={() => void create()}>创建父行程 <ChevronRight size={18} /></button>

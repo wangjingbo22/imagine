@@ -25,6 +25,19 @@ async function installSession(page: Page) {
   await page.addInitScript((tripId) => {
     window.sessionStorage.setItem(`organizer-token:${tripId}`, 't024-browser-only-token')
   }, T024_TRIP_ID)
+  await page.route('**/api/v1/account/me', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: api({
+        userId: '90000000-0000-4000-8000-000000000024',
+        email: 'acceptance@example.com',
+        displayName: '验收用户',
+        homeCity: '北京',
+        interests: ['历史文化'],
+      }),
+    })
+  })
 }
 
 async function assertResponsiveContract(page: Page) {
@@ -491,6 +504,11 @@ for (const fixture of [
     await page.goto(`/workspace?tripId=${T024_TRIP_ID}`, { waitUntil: 'domcontentloaded' })
     await expect(page.getByText(fixture.expected, { exact: false }).first()).toBeVisible()
     if (fixture.kind === 'execute') {
+      await expect(page.getByText('调整后续行程', { exact: true })).toBeVisible()
+      await page.getByRole('button', { name: '迟到', exact: true }).click()
+      await page.getByLabel('自定义迟到分钟数').fill('45')
+      await expect(page.getByRole('button', { name: '确认并生成 Plan V2 预览' })).toBeEnabled()
+      await assertResponsiveContract(page)
       await page.getByRole('button', { name: '计划工作台' }).click()
       const timeSortLabel = page.getByText('按时间', { exact: true })
       await expect(timeSortLabel).toBeVisible()

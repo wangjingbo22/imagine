@@ -48,10 +48,10 @@ body,
 .topbar__status { color: #315479; border-color: #d4e4f8; border-radius: 7px; background: #f7fbff; }
 .icon-button { color: #315479; border-radius: 7px; }
 .icon-button:hover { color: var(--future-blue); background: #edf5ff; }
-.topbar__model-link { min-width: 54px; min-height: 46px; display: grid; place-items: center; gap: 1px; color: #315479; border-radius: 7px; font-size: 10px; font-weight: 700; line-height: 1.1; }
+.topbar__model-link { min-width: 64px; min-height: 54px; display: grid; place-items: center; gap: 2px; color: #315479; border-radius: 8px; font-size: 10px; font-weight: 700; line-height: 1.1; }
 .topbar__model-link:hover { color: var(--future-blue); background: #edf5ff; }
-.topbar__model-link svg { width: 17px; height: 17px; }
-.avatar { border-radius: 9px; background: #0b3b83; }
+.topbar__model-link svg { width: 21px; height: 21px; }
+.avatar { width: 52px; height: 52px; border-radius: 10px; background: #0b3b83; }
 
 .button {
   min-height: 46px;
@@ -342,6 +342,22 @@ body,
   width: min(1240px, calc(100% - 56px));
   margin: 44px auto 96px;
 }
+.parent-trip-card {
+  max-width: 920px;
+  margin: 32px auto;
+  padding: 44px;
+  gap: 24px;
+  border-top: 4px solid #1769e0;
+}
+.parent-trip-card h1 { margin: 2px 0 0; color: #0b2d5b; font-size: clamp(32px, 4vw, 48px); line-height: 1.08; letter-spacing: 0; }
+.parent-trip-card__lead { max-width: 580px; margin: -12px 0 4px; color: #5d7592; font-size: 15px; }
+.parent-trip-card > label { padding: 18px; border: 1px solid #d9e7f6; border-radius: 8px; background: #f9fcff; }
+.parent-trip-card > label input { margin-top: 2px; }
+.parent-trip-grid { gap: 16px; }
+.parent-trip-grid > label,
+.parent-trip-budget-inputs > label { padding: 17px; border: 1px solid #d9e7f6; border-radius: 8px; background: #ffffff; }
+.parent-trip-card input { color: #123b70; border-color: #cbdff5; background: #fbfdff; }
+.parent-trip-card > .button { width: 100%; min-height: 56px; margin-top: 2px; }
 .parent-trip-hero {
   position: relative;
   min-height: 184px;
@@ -423,7 +439,8 @@ body,
 @media (max-width: 760px) {
   .topbar__inner { width: min(100% - 28px, 1320px); }
   .topbar__status { display: none; }
-  .topbar__model-link { min-width: 46px; font-size: 9px; }
+  .topbar__model-link { min-width: 54px; min-height: 50px; font-size: 9px; }
+  .avatar { width: 48px; height: 48px; }
   .planner-sidebar { border-bottom: 1px solid var(--future-line); background: #ffffff; }
   .planner-sidebar h1,
   .planner-sidebar strong,
@@ -439,6 +456,8 @@ body,
   .account-layout { width: min(100% - 28px, 1080px); padding: 38px 0 72px; }
   .hero-section { min-height: auto; background-size: 34px 34px; }
   .parent-trip-page { width: min(100% - 28px, 1240px); margin: 24px auto 64px; }
+  .parent-trip-card { margin: 22px auto; padding: 26px 22px; gap: 18px; }
+  .parent-trip-grid { grid-template-columns: 1fr; }
   .parent-trip-hero { min-height: 0; padding: 28px 24px; align-items: flex-start; flex-direction: column; }
   .parent-trip-hero::before { inset: 22px auto 22px 0; }
   .parent-trip-hero h1 { font-size: 36px; }

@@ -3629,26 +3629,6 @@ select:focus-visible {
   padding: 17px;
 }
 
-.execution-feedback-card textarea {
-  width: 100%;
-  min-height: 76px;
-  margin: 12px 0 9px;
-  padding: 10px;
-  resize: vertical;
-  color: var(--web-ink);
-  font-size: 9px;
-  line-height: 1.6;
-  border: 1px solid var(--web-line);
-  border-radius: 8px;
-  outline: 0;
-  background: #f8fafc;
-}
-
-.execution-feedback-card textarea:focus {
-  border-color: #92b2f0;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.07);
-}
-
 .execution-feedback-card .button {
   width: 100%;
 }
@@ -3663,20 +3643,108 @@ select:focus-visible {
   line-height: 1.5;
 }
 
-.adjustment-quick-actions {
+.adjustment-direct-form {
+  display: grid;
+  gap: 14px;
   margin-top: 12px;
-  padding: 10px;
-  border: 1px solid #dbe6f8;
-  border-radius: 9px;
-  background: #f7faff;
 }
 
-.adjustment-confirmation {
-  margin-top: 14px;
-  padding: 12px;
+.adjustment-field {
+  display: grid;
+  gap: 8px;
+}
+
+.adjustment-field__label {
+  color: var(--web-ink);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.adjustment-segmented,
+.adjustment-choice-grid {
+  display: grid;
+  gap: 7px;
+}
+
+.adjustment-segmented {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.adjustment-choice-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.adjustment-segmented button,
+.adjustment-choice-grid button {
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px;
+  color: var(--web-blue);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  border: 1px solid #c9d9f6;
+  border-radius: 7px;
+  background: white;
+  cursor: pointer;
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+
+.adjustment-segmented button:hover:not(:disabled),
+.adjustment-choice-grid button:hover:not(:disabled) {
+  border-color: #7ca5ef;
+  background: #f3f7ff;
+}
+
+.adjustment-segmented button.is-selected,
+.adjustment-choice-grid button.is-selected {
+  color: #174ca8;
+  border-color: #6f9cf0;
+  background: #eaf2ff;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.12);
+}
+
+.adjustment-segmented button:focus-visible,
+.adjustment-choice-grid button:focus-visible,
+.adjustment-number-entry input:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.18);
+  outline-offset: 2px;
+}
+
+.adjustment-segmented button:disabled,
+.adjustment-choice-grid button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.adjustment-number-entry {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  color: var(--web-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.adjustment-number-entry input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 10px;
+  color: var(--web-ink);
+  font: inherit;
   border: 1px solid var(--web-line);
-  border-radius: 10px;
-  background: #f7faff;
+  border-radius: 7px;
+  outline: 0;
+  background: white;
+}
+
+.adjustment-number-entry b {
+  color: var(--web-ink);
+  font-size: 10px;
 }
 
 .plan-diff-change-count, .plan-diff-retained {
@@ -3690,58 +3758,6 @@ select:focus-visible {
 
 .plan-diff-retained summary { cursor: pointer; }
 .plan-diff-retained p { overflow-wrap: anywhere; }
-
-.adjustment-confirmation p {
-  margin: 0;
-  color: var(--web-muted);
-  font-size: 10px;
-  line-height: 1.6;
-}
-
-.adjustment-confirmation label {
-  display: grid;
-  gap: 6px;
-  color: var(--web-ink);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.adjustment-confirmation input,
-.adjustment-confirmation select {
-  width: 100%;
-  min-height: 44px;
-  padding: 8px 10px;
-  color: var(--web-ink);
-  font: inherit;
-  border: 1px solid var(--web-line);
-  border-radius: 8px;
-  background: white;
-}
-
-.adjustment-quick-actions > span {
-  display: block;
-  margin-bottom: 7px;
-  color: var(--web-muted);
-  font-size: 8px;
-  font-weight: 700;
-}
-
-.adjustment-quick-actions > div {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.adjustment-quick-actions button {
-  min-height: 44px;
-  padding: 0 7px;
-  color: var(--web-blue);
-  font-size: 8px;
-  font-weight: 700;
-  border: 1px solid #c9d9f6;
-  border-radius: 7px;
-  background: white;
-}
 
 .execution-feedback-card .adjustment-unavailable {
   margin: 12px 0 0;

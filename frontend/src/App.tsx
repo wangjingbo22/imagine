@@ -90,9 +90,9 @@ function App() {
         <Route path="/generating" element={<RequireAccount><AgentProcessPage /></RequireAccount>} />
         <Route path="/workspace" element={<RequireAccount><WorkspacePage /></RequireAccount>} />
         <Route path="/parent-trips/new" element={<RequireAccount><ParentTripPage /></RequireAccount>} />
-        <Route path="/parent-join" element={<RequireAccount><ParentTripMemberPage /></RequireAccount>} />
-        <Route path="/parent-join/:token" element={<RequireAccount><ParentTripMemberPage /></RequireAccount>} />
-        <Route path="/parent-trips/:parentTripId/member" element={<RequireAccount><ParentTripMemberPage /></RequireAccount>} />
+        <Route path="/parent-join" element={<ParentTripMemberPage />} />
+        <Route path="/parent-join/:token" element={<ParentTripMemberPage />} />
+        <Route path="/parent-trips/:parentTripId/member" element={<ParentTripMemberPage />} />
         <Route path="/parent-trips/:parentTripId" element={<RequireAccount><ParentTripPage /></RequireAccount>} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="/model-settings" element={<RequireAccount><ModelSettingsPage /></RequireAccount>} />

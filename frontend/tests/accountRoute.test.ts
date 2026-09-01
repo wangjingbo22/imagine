@@ -12,10 +12,32 @@ test('account page is reachable from the application router and shell', async ()
   assert.match(app, /function RequireAccount/)
   assert.match(app, /<RequireAccount><HomePage \/><\/RequireAccount>/)
   assert.match(app, /<RequireAccount><ConversationPlannerPage \/><\/RequireAccount>/)
+  assert.match(app, /<Route path="\/parent-join" element=\{<ParentTripMemberPage \/>\} \/>/)
+  assert.doesNotMatch(app, /<RequireAccount><ParentTripMemberPage/)
   assert.match(shell, /const accountPath =/)
   assert.match(shell, /to=\{accountPath\}/)
   assert.match(shell, /className="topbar__model-link"/)
   assert.match(shell, /绑定模型/)
+})
+
+test('multi-day trip creation accepts a typed city with optional suggestions', async () => {
+  const page = await readFile(new URL('../src/pages/ParentTripPage.tsx', import.meta.url), 'utf8')
+
+  assert.match(page, /list="parent-trip-city-suggestions"/)
+  assert.match(page, /<datalist id="parent-trip-city-suggestions">/)
+  assert.doesNotMatch(page, /<label>城市<select/)
+})
+
+test('top navigation keeps only enlarged model binding and account actions', async () => {
+  const [shell, styles] = await Promise.all([
+    readFile(new URL('../src/components/AppShell.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/styles/future-system.css', import.meta.url), 'utf8'),
+  ])
+
+  assert.doesNotMatch(shell, /CircleHelp|aria-label="帮助"/)
+  assert.match(shell, /SlidersHorizontal size=\{21\}/)
+  assert.match(shell, /UserRound size=\{21\}/)
+  assert.match(styles, /\.avatar \{ width: 52px; height: 52px/)
 })
 
 test('account API uses the session cookie and the account contract paths', async () => {
@@ -61,14 +83,15 @@ test('application shell has no pointer-tracking grid effect', async () => {
   assert.doesNotMatch(styles, /grid-focus|Pointer-aware grid/)
 })
 
-test('account page provides authentication and profile actions through the shared session', async () => {
+test('account page sends signed-in users to model binding without collecting a profile', async () => {
   const page = await readFile(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8')
 
   assert.match(page, /registerAccount/)
   assert.match(page, /loginAccount/)
-  assert.match(page, /updateAccountProfile/)
   assert.match(page, /useAccountSession/)
-  assert.match(page, /interests/)
+  assert.match(page, /navigate\('\/model-settings', \{ replace: true \}\)/)
+  assert.match(page, /绑定模型/)
+  assert.doesNotMatch(page, /updateAccountProfile|常用城市|保存画像|ProfileDraft/)
   assert.doesNotMatch(page, /localStorage/)
 })
 
@@ -89,7 +112,7 @@ test('account session is globally owned and synchronizes account mutations with 
   assert.match(provider, /sessionVersionRef/)
   assert.match(provider, /if \(isSessionRequired\(caught\)\) \{\s*clearCurrentUser\(\)/)
   assert.match(page, /useAccountSession/)
-  assert.equal(page.match(/setCurrentUser\(response\.data\)/g)?.length, 2)
+  assert.equal(page.match(/setCurrentUser\(response\.data\)/g)?.length, 1)
   assert.match(shell, /useAccountSession\(\)/)
   assert.doesNotMatch(page, /getCurrentUser/)
   assert.doesNotMatch(shell, /getCurrentUser/)
@@ -158,11 +181,11 @@ test('an HTTP 200 body code 401 is not treated as an invalid account session', a
   assert.doesNotMatch(provider, /error\.code === 401/)
 })
 
-test('account flow requires profile confirmation before model binding', async () => {
+test('account flow enters model binding directly after login', async () => {
   const page = await readFile(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8')
 
-  assert.match(page, /完成画像后继续绑定模型/)
   assert.match(page, /navigate\('\/model-settings', \{ replace: true \}\)/)
+  assert.doesNotMatch(page, /用户画像|常用城市|保存画像/)
   assert.doesNotMatch(page, /navigate\(returnTo/)
   assert.doesNotMatch(page, /window\.location\s*=/)
 })
