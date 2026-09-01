@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from uuid import UUID
 
@@ -34,11 +35,13 @@ class ParentTripService:
         revisions: SqliteTripDraftRevisionRepository,
         collaboration: CollaborationService,
         plans: PlanVersionService,
+        today: Callable[[], date] | None = None,
     ) -> None:
         self.repository = repository
         self.revisions = revisions
         self.collaboration = collaboration
         self.plans = plans
+        self._today = today or date.today
 
     @staticmethod
     def _error(error: Exception) -> AppError:
@@ -77,6 +80,13 @@ class ParentTripService:
         return AppError(code, messages.get(code, "父行程操作无法完成。"), status, False)
 
     def create(self, request: ParentTripCreateRequest, token: str) -> ParentTrip:
+        if request.start_date < self._today():
+            raise AppError(
+                "PARENT_TRIP_DATE_IN_PAST",
+                "父行程开始日期不能早于今天。",
+                422,
+                False,
+            )
         try:
             self.repository.create(request, token)
             return self.get(request.parent_trip_id, token)

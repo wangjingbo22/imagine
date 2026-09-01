@@ -121,6 +121,12 @@ class TripDraftRevisionService(TripDraftRevisionPort):
                 True,
             ),
             "DRAFT_PARSE_IN_PROGRESS": ("草稿解析正在进行", 409, True),
+            "TRIP_DATE_IN_PAST": ("出行日期不能早于今天，请重新选择", 422, False),
+            "TRIP_START_TIME_IN_PAST": (
+                "今天的开始时间必须晚于当前时间，请重新选择",
+                422,
+                False,
+            ),
             "TRIP_UNDERSTANDING_INVALID": ("行程理解结果无效", 502, False),
             "TRIP_UNDERSTANDING_UNAVAILABLE": ("行程理解服务不可用", 503, True),
         }
@@ -149,6 +155,25 @@ class TripDraftRevisionService(TripDraftRevisionPort):
         if isinstance(error, (ValidationError, TripSchemaError)):
             return cls._app_error("TRIP_UNDERSTANDING_INVALID")
         return cls._app_error("TRIP_UNDERSTANDING_UNAVAILABLE")
+
+    @classmethod
+    def _validate_trip_schedule(
+        cls,
+        payload: OrganizerConversationRequest,
+        proposal: TripUnderstandingProposal,
+    ) -> None:
+        travel_date = proposal.trip.travel_date
+        if travel_date is None:
+            return
+        if travel_date < payload.reference_date:
+            raise cls._app_error("TRIP_DATE_IN_PAST")
+        if (
+            travel_date == payload.reference_date
+            and payload.reference_time is not None
+            and proposal.trip.start_time is not None
+            and proposal.trip.start_time <= payload.reference_time
+        ):
+            raise cls._app_error("TRIP_START_TIME_IN_PAST")
 
     def _release_unfinished_claim(self, claim: ClaimedCommand) -> None:
         try:
@@ -412,6 +437,7 @@ class TripDraftRevisionService(TripDraftRevisionPort):
                         request,
                         reviewed_fallback_proposal(payload),
                     )
+                    self._validate_trip_schedule(payload, proposal)
                     deterministic_extraction = TripUnderstandingExtraction(
                         proposal=proposal,
                         recognitionSource="REVIEWED_FIXED_QUESTIONS",
@@ -451,6 +477,7 @@ class TripDraftRevisionService(TripDraftRevisionPort):
                 if payload.explicit_participant_count is not None
                 else extraction.proposal
             )
+            self._validate_trip_schedule(payload, proposal)
             proposal = validate_trip_understanding(request, proposal)
             persisted_extraction = TripUnderstandingExtraction(
                 proposal=proposal,

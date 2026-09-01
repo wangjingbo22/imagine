@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { futureDateValue } from '../src/services/tripTimeConstraints'
 
 
 const PASSWORD = 't013-account-password'
@@ -96,7 +97,7 @@ for (const dayCount of [2, 3] as const) {
       email: `t013-member-${suffix}@example.com`,
     }
     const memberNickname = `T013 成员 ${dayCount}日`
-    const startDate = dayCount === 2 ? '2026-09-12' : '2026-09-19'
+    const startDate = futureDateValue(new Date(), dayCount === 2 ? 11 : 18)
     const budgets = ['500', '600', '700']
     const memberContext = await browser.newContext({
       locale: 'zh-CN',

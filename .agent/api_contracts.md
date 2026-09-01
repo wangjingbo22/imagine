@@ -312,6 +312,7 @@ Schema 校验失败沿用人工确认结构：
 - `GET /api/v2/trips/{tripId}/collaboration` 必须携带 `X-Organizer-Token`，返回当前 `collaborationVersion/currentRevision/status/canPlan/progress/confirmationItems`。
 - 每个 `confirmationItems[]` 必须包含 `participantId`、`relatedParticipantIds[]`、`ruleId`、`reason` 与 `allowedRelaxations[]`；旧字段名 `relaxations` 仅保留输入兼容，不作为公开响应字段。
 - `POST /api/v2/trips/{tripId}/confirmation-items/{itemId}/resolve` 必须携带 `X-Organizer-Token` 与 `Idempotency-Key`，请求固定为 `schemaVersion/baseRevision/expectedVersion/relaxationId`。
+- `POST /api/v2/trips/conversations` 的组织者请求必须携带 `referenceDate`（`YYYY-MM-DD`），并可携带提交瞬间的 `referenceTime`（`HH:mm`）。过去日期返回 HTTP 422 `TRIP_DATE_IN_PAST`，当天已过去的开始时间返回 HTTP 422 `TRIP_START_TIME_IN_PAST`；两类失败均不得写入 revision。
 - 组织者只能执行 `actorScope=ORGANIZER` 的放宽项。成员字段的 `PARTICIPANT` 放宽项必须由对应成员会话执行；组织者页面应显示责任成员，但不得代填或越权修改。
 - 任何未解决确认项都令 `status=CONFLICT_REVIEW`、`canPlan=false`、`readinessDigest=null`，Provider、推荐和规划边界必须在调用下游前拒绝。
 - 放宽会创建新的 T002 revision。旧确认随即变为 `NEEDS_RECONFIRMATION`，状态进入 `COLLECTING_MEMBERS`；只有所有成员在新 revision 重新确认且硬冲突为零，才可进入 `READY_TO_PLAN`。
@@ -331,6 +332,7 @@ Schema 校验失败沿用人工确认结构：
 
 ### 16.1 身份与接口
 
+- `POST /api/v3/parent-trips`：创建 2–3 天父行程；`startDate` 早于当天时返回 HTTP 422 `PARENT_TRIP_DATE_IN_PAST`，且不得创建记录。
 - `POST /api/v3/parent-trips/{parentTripId}/invitations`：携带 `X-Parent-Trip-Token` 和 `Idempotency-Key`，请求为 `schemaVersion/expectedSyncVersion/expiresInHours`；父行程最多包含组织者和两名成员。
 - `POST /api/v1/account/parent-trip-invitations/redeem`：同时携带有效 HttpOnly `account_session` Cookie、`Idempotency-Key` 和请求 `schemaVersion/token`；邀请只允许一个账号兑换，同账号同键重试恢复同一成员会话。
 - `GET /api/v3/parent-trips/{parentTripId}/sync`：必须且只能携带 `X-Parent-Trip-Token` 或 `X-Parent-Member-Session` 之一。

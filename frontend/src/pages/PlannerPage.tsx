@@ -25,6 +25,13 @@ import {
   splitPlaceInput,
   toRecognizedFormPatch,
 } from '../services/tripDraftRecognition'
+import {
+  futureDateValue,
+  localDateValue,
+  localTimeValue,
+  minimumStartTime,
+  validateTripSchedule,
+} from '../services/tripTimeConstraints'
 import type {
   AssistanceMode,
   ConstraintProfileStatus,
@@ -63,7 +70,7 @@ export function PlannerPage() {
   const [submitError, setSubmitError] = useState('')
   const [confirmationItems, setConfirmationItems] = useState<TripDraftConfirmationItem[]>([])
   const [cityName, setCityName] = useState('北京')
-  const [travelDate, setTravelDate] = useState('2026-08-26')
+  const [travelDate, setTravelDate] = useState(() => futureDateValue())
   const [startTime, setStartTime] = useState('09:00')
   const [endTime, setEndTime] = useState('20:00')
   const [startLocationText, setStartLocationText] = useState('北京市中心')
@@ -80,6 +87,13 @@ export function PlannerPage() {
   const [request, setRequest] = useState(
     '我一个人在北京玩一天，喜欢历史和特色餐饮，希望少走路，晚上 8 点前结束。',
   )
+  const [temporalNow, setTemporalNow] = useState(() => new Date())
+  const scheduleError = validateTripSchedule({
+    date: travelDate,
+    startTime,
+    endTime,
+  }, temporalNow)
+  const startTimeMin = minimumStartTime(travelDate, temporalNow)
 
   const selectedMode = useMemo(
     () => assistanceOptions.find((item) => item.value === assistanceMode),
@@ -138,6 +152,11 @@ export function PlannerPage() {
       setSubmitError(error instanceof Error ? error.message : '关怀约束回退 DRAFT 失败')
     })
   }, [assistanceProfile, tripId])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setTemporalNow(new Date()), 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const canParse = request.trim().length > 0
 
@@ -215,9 +234,15 @@ export function PlannerPage() {
     try {
       const response = await tripApi.createDraft(naturalLanguageParseInput())
       applyRecognizedFields(response.data.parsed)
+      const recognizedScheduleError = validateTripSchedule({
+        date: response.data.parsed.travelDate ?? '',
+        startTime: response.data.parsed.startTime ?? '',
+        endTime: response.data.parsed.endTime ?? '',
+      }, new Date())
       setConfirmationItems(response.data.confirmationItems)
       setLastAnalyzedRequest(request.trim())
       setAnalysisMessage(recognitionResultMessage(response.data))
+      if (recognizedScheduleError) setSubmitError(recognizedScheduleError)
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : '自然语言识别失败，请稍后重试。')
     } finally {
@@ -235,6 +260,17 @@ export function PlannerPage() {
       setSubmitError('请先确认关怀约束，DRAFT 状态不能进入规划。')
       return
     }
+    if (lastAnalyzedRequest === request.trim()) {
+      const submittedScheduleError = validateTripSchedule({
+        date: travelDate,
+        startTime,
+        endTime,
+      }, new Date())
+      if (submittedScheduleError) {
+        setSubmitError(submittedScheduleError)
+        return
+      }
+    }
     setSubmitError('')
     setIsSubmitting(true)
     try {
@@ -242,6 +278,8 @@ export function PlannerPage() {
       let parseInput: TripDraftParseInput = {
         schemaVersion: '1.0',
         tripId,
+        referenceDate: localDateValue(),
+        referenceTime: localTimeValue(),
         cityName: cityName.trim() || null,
         travelDate: travelDate || null,
         startTime: startTime || null,
@@ -283,6 +321,12 @@ export function PlannerPage() {
         return
       }
       const parsed = response.data.parsed
+      const parsedScheduleError = validateTripSchedule({
+        date: parsed.travelDate ?? '',
+        startTime: parsed.startTime ?? '',
+        endTime: parsed.endTime ?? '',
+      }, new Date())
+      if (parsedScheduleError) throw new Error(parsedScheduleError)
       if (
         !parsed.cityName || !parsed.travelDate || !parsed.startTime ||
         !parsed.endTime || !parsed.startLocationText ||
@@ -444,17 +488,18 @@ export function PlannerPage() {
             </div>
             <label className="input-card">
               <span><CalendarDays size={18} /> 出行日期</span>
-              <input type="date" value={travelDate} onChange={(event) => setTravelDate(event.target.value)} />
+              <input aria-invalid={Boolean(scheduleError)} min={localDateValue(temporalNow)} type="date" value={travelDate} onFocus={() => setTemporalNow(new Date())} onChange={(event) => setTravelDate(event.target.value)} />
               <small>当前版本规划单日行程</small>
             </label>
             <div className="input-card">
               <span><Clock3 size={18} /> 可用时间</span>
               <div className="time-input-row">
-                <input aria-label="开始时间" type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} />
+                <input aria-invalid={Boolean(scheduleError)} aria-label="开始时间" min={startTimeMin} type="time" value={startTime} onFocus={() => setTemporalNow(new Date())} onChange={(event) => setStartTime(event.target.value)} />
                 <span>至</span>
-                <input aria-label="结束时间" type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} />
+                <input aria-invalid={Boolean(scheduleError)} aria-label="结束时间" min={startTime || startTimeMin} type="time" value={endTime} onFocus={() => setTemporalNow(new Date())} onChange={(event) => setEndTime(event.target.value)} />
               </div>
               <small>Agent 将校验任务是否位于时间窗内</small>
+              {scheduleError && <small className="form-error" role="alert">{scheduleError}</small>}
             </div>
             <label className="input-card">
               <span><Wallet size={18} /> 总预算</span>

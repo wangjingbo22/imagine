@@ -118,3 +118,38 @@ async def test_llm_failure_is_visible_when_rules_take_over() -> None:
     assert result.recognition_source == "DEGRADED_RULES"
     assert result.recognition_model is None
     assert result.degraded_reason == "BAILIAN_TIMEOUT"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("travel_date", "start_time", "expected_path"),
+    [
+        ("2026-09-02", "11:00", "travelDate"),
+        ("2026-09-03", "09:00", "startTime"),
+    ],
+)
+async def test_parser_rejects_past_dates_and_elapsed_same_day_times(
+    travel_date: str,
+    start_time: str,
+    expected_path: str,
+) -> None:
+    service = TripDraftParserService(FixtureCityResolver())
+
+    result = await service.parse(
+        TripDraftParseRequest(
+            natural_language_request="武汉一日行程，喜欢建筑",
+            city_name="武汉",
+            travel_date=travel_date,
+            start_time=start_time,
+            end_time="19:00",
+            start_location_text="武汉站",
+            end_location_text="汉口站",
+            budget_cents=50_000,
+            interests=["建筑"],
+            reference_date="2026-09-03",
+            reference_time="10:00",
+        )
+    )
+
+    assert result.can_plan is False
+    assert any(item.path == expected_path and item.code == "invalid" for item in result.confirmation_items)

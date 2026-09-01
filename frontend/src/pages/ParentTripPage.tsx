@@ -27,6 +27,11 @@ import {
   parentTripOrganizerTokenKey,
   PARENT_TRIP_POLL_INTERVAL_MS,
 } from '../services/parentTripCollaboration'
+import {
+  futureDateValue,
+  localDateValue,
+  validateFutureDate,
+} from '../services/tripTimeConstraints'
 
 const cities = ['北京', '上海', '成都', '西安', '杭州']
 const yuan = (cents: number | null) => cents === null ? '尚未生成' : `¥${(cents / 100).toFixed(0)}`
@@ -44,10 +49,17 @@ export function ParentTripPage() {
   const [invitation, setInvitation] = useState<ParentTripInvitationCreated | null>(null)
   const [invitationUrl, setInvitationUrl] = useState('')
   const [copyDone, setCopyDone] = useState(false)
-  const [form, setForm] = useState({ title: '周末同城之旅', cityName: '北京', startDate: '2026-09-06', dayCount: 2, budgets: ['500', '500', '500'] })
+  const [form, setForm] = useState(() => ({ title: '周末同城之旅', cityName: '北京', startDate: futureDateValue(), dayCount: 2, budgets: ['500', '500', '500'] }))
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [inviteBusy, setInviteBusy] = useState(false)
+  const [temporalNow, setTemporalNow] = useState(() => new Date())
+  const startDateError = validateFutureDate(form.startDate, temporalNow)
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setTemporalNow(new Date()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const load = useCallback(async (id: string) => {
     const token = window.sessionStorage.getItem(parentTripOrganizerTokenKey(id))
@@ -98,6 +110,13 @@ export function ParentTripPage() {
   }, [load, parentTripId])
 
   async function create() {
+    const submittedAt = new Date()
+    const submittedDateError = validateFutureDate(form.startDate, submittedAt)
+    if (submittedDateError) {
+      setTemporalNow(submittedAt)
+      setError(submittedDateError)
+      return
+    }
     setBusy(true)
     setError('')
     try {
@@ -183,10 +202,11 @@ export function ParentTripPage() {
     {!trip ? <section className="parent-trip-card"><p className="eyebrow">多日同行</p><h1>创建 2–3 天同城父行程</h1>
       <label>行程名称<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
       <div className="parent-trip-grid"><label>城市<select value={form.cityName} onChange={(event) => setForm({ ...form, cityName: event.target.value })}>{cities.map((city) => <option key={city}>{city}</option>)}</select></label>
-      <label>开始日期<input type="date" value={form.startDate} onChange={(event) => setForm({ ...form, startDate: event.target.value })} /></label>
+      <label>开始日期<input aria-invalid={Boolean(startDateError)} min={localDateValue(temporalNow)} type="date" value={form.startDate} onFocus={() => setTemporalNow(new Date())} onChange={(event) => { setError(''); setForm({ ...form, startDate: event.target.value }) }} /></label>
       <label>天数<select value={form.dayCount} onChange={(event) => setForm({ ...form, dayCount: Number(event.target.value) })}><option value={2}>2 天</option><option value={3}>3 天</option></select></label></div>
+      {startDateError && <p className="form-error" role="alert">{startDateError}</p>}
       <div className="parent-trip-budget-inputs">{form.budgets.slice(0, form.dayCount).map((value, index) => <label key={index}>第 {index + 1} 天预算（元）<input type="number" min="0" value={value} onChange={(event) => setForm({ ...form, budgets: form.budgets.map((current, currentIndex) => currentIndex === index ? event.target.value : current) })} /></label>)}</div>
-      <button className="button button--primary" disabled={busy} onClick={() => void create()}>创建父行程 <ChevronRight size={18} /></button>
+      <button className="button button--primary" disabled={busy || Boolean(startDateError)} onClick={() => void create()}>创建父行程 <ChevronRight size={18} /></button>
     </section> : <><section className="parent-trip-hero"><div><p className="eyebrow">同城 {trip.days.length} 天父行程</p><h1>{trip.title}</h1><p>{trip.cityName} · {trip.startDate} 至 {trip.endDate}</p></div>
       <div className="parent-trip-sync-state"><span>{syncView ? `${syncView.visibleProfiles.length}/3 人` : '同步中'}</span><button className="icon-button" type="button" title="立即刷新" aria-label="立即刷新" onClick={() => void load(trip.parentTripId).catch((caught: Error) => setError(caught.message))}><RefreshCw size={18} /></button></div></section>
       <section className="parent-budget-summary"><div><WalletCards/><span>分配总预算</span><strong>{yuan(trip.totalBudgetCents)}</strong></div><div><span>已生成计划合计</span><strong>{yuan(trip.plannedCostCents)}</strong></div><div><span>已记录支出合计</span><strong>{yuan(trip.actualSpentCents)}</strong></div></section>

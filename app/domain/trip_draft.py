@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import date, datetime, time
 import re
 from typing import Annotated, Literal
 from unicodedata import normalize
@@ -45,6 +45,7 @@ class TripDraftParseRequest(DraftContractModel):
     trip_id: UUID | None = None
     natural_language_request: str = Field(min_length=1, max_length=1000)
     reference_date: date | None = None
+    reference_time: time | None = None
     city_name: str | None = None
     travel_date: str | None = None
     start_time: str | None = None

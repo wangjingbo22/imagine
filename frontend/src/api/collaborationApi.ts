@@ -36,6 +36,7 @@ export async function createOrganizerConversation(
     naturalLanguageRequest: string
     answers: ConversationAnswer[]
     referenceDate: string
+    referenceTime?: string
     reviewedFallback?: boolean
   },
   idempotencyKey: string,

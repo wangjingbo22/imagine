@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { futureDateValue } from '../src/services/tripTimeConstraints'
 import {
   T024_TRIP_ID,
   T024_V2_ID,
@@ -306,7 +307,7 @@ test('mocked single-person UI integration confirms the recommendation and enters
   await page.getByRole('button', { name: /单人创建/ }).click()
   await page.getByLabel('这趟旅行，你最希望得到什么？').fill('想轻松游览北京的历史文化景点。')
   await page.getByLabel('目的城市').fill('北京')
-  await page.getByLabel('出行日期').fill('2026-09-05')
+  await page.getByLabel('出行日期').fill(futureDateValue())
   await page.getByLabel('开始').fill('09:00')
   await page.getByLabel('结束').fill('20:00')
   await page.getByRole('button', { name: /下一个问题/ }).click()

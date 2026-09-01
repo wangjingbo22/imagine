@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import date, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -64,7 +65,7 @@ async def create_parent(
             "parentTripId": parent_id,
             "title": "杭州周末同行",
             "cityName": "杭州",
-            "startDate": "2026-09-12",
+            "startDate": (date.today() + timedelta(days=11)).isoformat(),
             "dayBudgetCents": [40_000, 60_000],
         },
     )

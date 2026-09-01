@@ -3,6 +3,7 @@ import type {
   TripDraftParseInput,
   TripDraftParseResult,
 } from '../domain/trip'
+import { localDateValue, localTimeValue } from './tripTimeConstraints'
 
 interface RecognitionInputOptions {
   tripId: string
@@ -27,10 +28,13 @@ export interface RecognizedFormPatch {
 
 export function buildNaturalLanguageParseInput(
   options: RecognitionInputOptions,
+  now = new Date(),
 ): TripDraftParseInput {
   return {
     schemaVersion: '1.0',
     tripId: options.tripId,
+    referenceDate: localDateValue(now),
+    referenceTime: localTimeValue(now),
     naturalLanguageRequest: options.naturalLanguageRequest.trim(),
     cityName: null,
     travelDate: null,

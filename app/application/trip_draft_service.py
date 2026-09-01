@@ -124,6 +124,23 @@ class TripDraftParserService:
             items.append(
                 _invalid("time-window", "endTime", "结束时间必须晚于开始时间")
             )
+        if travel_date is not None and travel_date < reference:
+            items.append(
+                _invalid("date-past", "travelDate", "出行日期不能早于今天")
+            )
+        if (
+            travel_date == reference
+            and request.reference_time is not None
+            and start_time is not None
+            and time.fromisoformat(start_time) <= request.reference_time
+        ):
+            items.append(
+                _invalid(
+                    "start-time-past",
+                    "startTime",
+                    "今天的开始时间必须晚于当前时间",
+                )
+            )
 
         budget_cents = request.budget_cents
         if budget_cents is None:

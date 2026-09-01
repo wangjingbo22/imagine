@@ -77,6 +77,8 @@ export interface TripDraftParseInput extends Omit<
   'startLocationText' | 'endLocationText' | 'budgetCents'
 > {
   tripId: string
+  referenceDate?: string
+  referenceTime?: string
   cityName: string | null
   travelDate: string | null
   startTime: string | null

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -42,7 +42,7 @@ def request(days=3):
 def service(tmp_path: Path):
     revisions, collaboration = Revisions(), Collaboration()
     return ParentTripService(SqliteParentTripRepository(tmp_path / "t.sqlite3"), revisions,
-        collaboration, Plans()), revisions, collaboration
+        collaboration, Plans(), today=lambda: date(2026, 9, 1)), revisions, collaboration
 
 
 def test_two_and_three_day_parent_are_consecutive_and_budgeted(tmp_path: Path):
@@ -55,6 +55,17 @@ def test_two_and_three_day_parent_are_consecutive_and_budgeted(tmp_path: Path):
         assert value.total_budget_cents == 50_000 * count
         assert value.planned_cost_cents is None
         assert all(day.cost_status == "NOT_AVAILABLE" for day in value.days)
+
+
+def test_parent_trip_rejects_a_start_date_before_today(tmp_path: Path):
+    current, _, _ = service(tmp_path)
+    payload = request(2).model_copy(update={"start_date": date(2026, 8, 31)})
+
+    with pytest.raises(AppError) as caught:
+        current.create(payload, "past-date-token" * 4)
+
+    assert caught.value.code == "PARENT_TRIP_DATE_IN_PAST"
+    assert caught.value.http_status == 422
 
 
 def test_child_must_match_city_date_and_budget_and_cannot_be_overwritten(tmp_path: Path):
@@ -136,7 +147,7 @@ async def test_parent_trip_http_contract_round_trips_without_revealing_token(tmp
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         created = await client.post("/api/v3/parent-trips", headers={"X-Parent-Trip-Token": token}, json={
             "schemaVersion": "1.0", "parentTripId": str(parent_id), "title": "成都两日",
-            "cityName": "成都", "startDate": "2026-09-10", "dayBudgetCents": [30_000, 40_000],
+            "cityName": "成都", "startDate": (date.today() + timedelta(days=9)).isoformat(), "dayBudgetCents": [30_000, 40_000],
         })
         assert created.status_code == 200, created.text
         body = created.json()["data"]

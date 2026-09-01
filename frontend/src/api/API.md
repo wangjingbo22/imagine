@@ -254,7 +254,10 @@ src/api/tripContract.ts
 - `tripApi.createDraft()` → `POST /api/v1/trips/drafts/parse`
 - `tripApi.confirmDraft()` → `POST /api/v1/trips/drafts/confirm`
 
-请求携带稳定 `tripId`，解析、约束确认和后续 PlanVersion 使用同一 Trip。
+解析请求携带稳定 `tripId`，以及提交瞬间的本地 `referenceDate`（`YYYY-MM-DD`）和
+`referenceTime`（`HH:mm`）；解析、约束确认和后续 PlanVersion 使用同一 Trip。
+过去日期通过字段级 `travelDate/invalid` 返回，当天已过去的开始时间通过
+`startTime/invalid` 返回。
 确认清单未清空时 `canPlan=false`，页面不得进入规划。
 
 ## 8. 城市 Provider 与 Plan V1 正式接口
@@ -324,6 +327,7 @@ src/api/tripContract.ts
 - 页面只有在 `status=READY_TO_PLAN && canPlan=true && readinessDigest!=null` 时显示唯一推荐入口。冲突解决后若成员状态为 `NEEDS_RECONFIRMATION`，应继续显示等待重新确认，不得直接进入规划。
 - 组织者创建入口已接入 T002 `TripDraftRevision` 生产实现；任何 revision、权限或 readiness 校验失败仍必须 fail-closed，前端不得伪造成功状态。
 - `POST /api/v2/trips/conversations` 的成功创建响应在 `data.recognition` 返回 `source`（`MODEL_PROPOSAL` 或 `REVIEWED_FIXED_QUESTIONS`）、`model`、`degradedReason` 和 `callCount`。模型成功时 `degradedReason` 必须为 `null`；六项复核降级时必须保留真实百炼失败码，页面不得显示百炼成功，但仍可继续既有组织者确认流程。未完成复核的失败响应仍使用 `FIXED_QUESTIONS` fallback 形状。
+- 组织者创建请求携带提交瞬间的 `referenceDate` 与可选 `referenceTime`；过去日期返回 HTTP 422 `TRIP_DATE_IN_PAST`，当天已过去的开始时间返回 HTTP 422 `TRIP_START_TIME_IN_PAST`，且不得写入 revision。
 
 ## 14. S2-T012 任务照片生命周期接口
 
@@ -351,6 +355,7 @@ src/api/tripContract.ts
 
 ## 16. 父行程邀请、成员资料与短轮询
 
+- `createParentTrip()` → `POST /api/v3/parent-trips`；`startDate` 早于当天时返回 HTTP 422 `PARENT_TRIP_DATE_IN_PAST`，且不得创建父行程。
 - `createParentTripInvitation()` → `POST /api/v3/parent-trips/{parentTripId}/invitations`；组织者携带父行程 capability、当前 `expectedSyncVersion` 和稳定幂等键创建一个成员席位。
 - `redeemParentTripInvitation()` → `POST /api/v1/account/parent-trip-invitations/redeem`；请求必须同时带有效账号 Cookie 和邀请 token，成员邀请只兑换一次，同账号同一幂等键可恢复同一会话。
 - `getParentTripSync()` → `GET /api/v3/parent-trips/{parentTripId}/sync`；组织者使用 `X-Parent-Trip-Token`，成员使用 `X-Parent-Member-Session`，两者不能同时发送。

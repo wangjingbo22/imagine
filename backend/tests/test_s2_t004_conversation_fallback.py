@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -163,6 +164,38 @@ def _revision_count(repository: SqliteTripDraftRevisionRepository) -> int:
         return connection.execute(
             "SELECT COUNT(*) FROM trip_draft_revisions"
         ).fetchone()[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reference_date", "reference_time", "expected_code"),
+    [
+        (date(2026, 9, 7), "08:00", "TRIP_DATE_IN_PAST"),
+        (date(2026, 9, 6), "09:00", "TRIP_START_TIME_IN_PAST"),
+    ],
+)
+async def test_reviewed_fallback_rejects_past_trip_time_before_persisting_revision(
+    tmp_path: Path,
+    reference_date: date,
+    reference_time: str,
+    expected_code: str,
+) -> None:
+    gateway = CountingGateway(_result(failure_code="LLM_NOT_CONFIGURED", call_count=0))
+    service, repository = _service(tmp_path, gateway)
+    request = _reviewed_request().model_copy(update={
+        "reference_date": reference_date,
+        "reference_time": reference_time,
+    })
+
+    with pytest.raises(AppError) as caught:
+        await service.create_initial(
+            request,
+            idempotency_key=f"past-time-{expected_code.lower()}",
+        )
+
+    assert caught.value.code == expected_code
+    assert caught.value.http_status == 422
+    assert _revision_count(repository) == 0
 
 
 @pytest.mark.asyncio

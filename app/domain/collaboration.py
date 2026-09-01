@@ -153,6 +153,10 @@ class ConversationSubmission(CollaborationModel):
 class OrganizerConversationRequest(ConversationSubmission):
     schema_version: Literal["1.0"]
     reference_date: date
+    reference_time: str | None = Field(
+        default=None,
+        pattern=r"^([01]\d|2[0-3]):[0-5]\d$",
+    )
 
 
 class FixedQuestionReviewItem(CollaborationModel):
