@@ -1,4 +1,4 @@
-import { ArrowLeft, CircleHelp, SlidersHorizontal, UserRound } from 'lucide-react'
+import { ArrowLeft, SlidersHorizontal, UserRound } from 'lucide-react'
 import type { PropsWithChildren } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAccountSession } from '../session/useAccountSession'
@@ -63,12 +63,9 @@ export function AppShell({
                 {isInitializing ? '正在读取账户' : user ? `你好，${user.displayName}` : '请登录'}
               </span>
             )}
-            <button className="icon-button" type="button" aria-label="帮助">
-              <CircleHelp size={19} />
-            </button>
-            <Link className="topbar__model-link" to={modelSettingsPath} aria-label="绑定模型" title="绑定模型"><SlidersHorizontal size={18} /><span>绑定模型</span></Link>
+            <Link className="topbar__model-link" to={modelSettingsPath} aria-label="绑定模型" title="绑定模型"><SlidersHorizontal size={21} /><span>绑定模型</span></Link>
             <Link className="avatar" to={accountPath} aria-label={user ? `${user.displayName}的账户` : '账户'} title={user?.displayName ?? '账户'}>
-              {user ? user.displayName.slice(0, 1).toUpperCase() : <UserRound size={16} />}
+              {user ? user.displayName.slice(0, 1).toUpperCase() : <UserRound size={21} />}
             </Link>
           </nav>
         </div>

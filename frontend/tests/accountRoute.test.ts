@@ -18,6 +18,26 @@ test('account page is reachable from the application router and shell', async ()
   assert.match(shell, /绑定模型/)
 })
 
+test('multi-day trip creation accepts a typed city with optional suggestions', async () => {
+  const page = await readFile(new URL('../src/pages/ParentTripPage.tsx', import.meta.url), 'utf8')
+
+  assert.match(page, /list="parent-trip-city-suggestions"/)
+  assert.match(page, /<datalist id="parent-trip-city-suggestions">/)
+  assert.doesNotMatch(page, /<label>城市<select/)
+})
+
+test('top navigation keeps only enlarged model binding and account actions', async () => {
+  const [shell, styles] = await Promise.all([
+    readFile(new URL('../src/components/AppShell.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/styles/future-system.css', import.meta.url), 'utf8'),
+  ])
+
+  assert.doesNotMatch(shell, /CircleHelp|aria-label="帮助"/)
+  assert.match(shell, /SlidersHorizontal size=\{21\}/)
+  assert.match(shell, /UserRound size=\{21\}/)
+  assert.match(styles, /\.avatar \{ width: 52px; height: 52px/)
+})
+
 test('account API uses the session cookie and the account contract paths', async () => {
   const api = await readFile(new URL('../src/api/accountApi.ts', import.meta.url), 'utf8').catch(() => '')
   const client = await readFile(new URL('../src/api/client.ts', import.meta.url), 'utf8')
