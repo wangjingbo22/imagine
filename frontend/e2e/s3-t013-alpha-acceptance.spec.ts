@@ -194,6 +194,8 @@ for (const dayCount of [2, 3] as const) {
         expect(target.searchParams.get('city')).toBe('北京')
         expect(target.searchParams.get('budget')).toBe(String(Number(budgets[index]) * 100))
         await organizer.getByRole('button', { name: /单人创建/ }).click()
+        await organizer.getByLabel('这趟旅行，你最希望得到什么？').fill('希望当天行程轻松、顺路，并符合多日总计划。')
+        await organizer.getByRole('button', { name: /开始回答 5 个问题/ }).click()
         await expect(organizer.getByLabel('目的城市')).toHaveValue('北京')
         await expect(organizer.getByLabel('出行日期')).toHaveValue(addDays(startDate, index))
         if (index === dayCount - 1) {

@@ -10,6 +10,12 @@ test('single-day planner blocks past dates and invalid time windows', async ({ p
   const today = localDateValue()
   await page.goto('/plan')
   await page.getByRole('button', { name: /单人创建/ }).click()
+  const startQuestions = page.getByRole('button', { name: /开始回答 5 个问题/ })
+  await expect(startQuestions).toBeDisabled()
+  await expect(page.getByLabel('目的城市')).toHaveCount(0)
+  await page.getByLabel('这趟旅行，你最希望得到什么？').fill('想轻松游览北京的历史文化景点。')
+  await expect(startQuestions).toBeEnabled()
+  await startQuestions.click()
   await page.getByLabel('目的城市').fill('北京')
 
   const dateInput = page.getByLabel('出行日期')
@@ -53,6 +59,9 @@ test('group planner keeps party question and total trip budget', async ({ page }
   const today = localDateValue()
   await page.goto('/plan?mode=group')
 
+  await expect(page.getByText('问题 1 / 6', { exact: true })).toHaveCount(0)
+  await page.getByLabel('这趟旅行，你最希望得到什么？').fill('和朋友轻松游览北京。')
+  await page.getByRole('button', { name: /开始回答 6 个问题/ }).click()
   await expect(page.getByLabel('出行日期')).toHaveValue(today)
   await expect(page.getByText('问题 1 / 6', { exact: true })).toBeVisible()
   await expect(page.getByText('出行时间', { exact: true })).toBeVisible()

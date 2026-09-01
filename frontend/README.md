@@ -2,7 +2,7 @@
 
 行知旅伴前端是基于 React 19、TypeScript 6 和 Vite 8 的响应式 Web 工作台，覆盖单人单日旅行，以及多人协作确认、GROUP Plan V1、执行记录、Plan V2 决策、真实地图与旅行回忆。
 
-> 当前阶段：Sprint 2 Beta。核心业务默认连接本地 FastAPI；Mock 开关仅用于前端独立开发和响应式合同测试，不代表线上能力。
+> 当前阶段：Sprint 3 Alpha。核心业务默认连接本地 FastAPI；Mock 开关仅用于前端独立开发和响应式合同测试，不代表线上能力。
 
 ## 技术栈
 
@@ -21,6 +21,10 @@
 | `/plan` | 行程输入 | 编辑城市、日期、预算、兴趣、起终点和关怀设置 |
 | `/generating` | Agent 过程 | 展示地点、路线、预算与约束校验过程 |
 | `/workspace` | 行程工作台 | 计划确认、真实地图、执行事件、Plan V2 与总结 |
+| `/account` | 账户 | 注册、登录、资料与会话状态 |
+| `/model-settings` | 模型设置 | 当前账户的模型、Base URL 和 API Key 绑定 |
+| `/parent-trips/:parentTripId` | 父行程 | 2 日/3 日父行程、成员协作与逐日入口 |
+| `/budget-ledger` | 预算账本 | 父行程预算、费用来源与手动修正 |
 
 未知路由会跳转到首页。
 

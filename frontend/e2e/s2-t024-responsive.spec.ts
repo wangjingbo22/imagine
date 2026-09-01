@@ -306,6 +306,7 @@ test('mocked single-person UI integration confirms the recommendation and enters
   await page.goto('/plan', { waitUntil: 'domcontentloaded' })
   await page.getByRole('button', { name: /单人创建/ }).click()
   await page.getByLabel('这趟旅行，你最希望得到什么？').fill('想轻松游览北京的历史文化景点。')
+  await page.getByRole('button', { name: /开始回答 5 个问题/ }).click()
   await page.getByLabel('目的城市').fill('北京')
   await page.getByLabel('出行日期').fill(futureDateValue())
   await page.getByLabel('开始').fill('09:00')
@@ -322,13 +323,17 @@ test('mocked single-person UI integration confirms the recommendation and enters
   await page.getByRole('button', { name: /完成问答并智能整理/ }).click()
   await expect(page.getByText('Agent 解析确认卡')).toBeVisible()
   await page.getByRole('button', { name: /确认组织者资料/ }).click()
-  const recommendation = page.getByRole('button', { name: /查看唯一推荐/ })
+  const recommendation = page.getByRole('button', { name: /查看推荐方案/ })
   await expect(recommendation).toBeVisible()
   await expect.poll(() => page.evaluate((tripId) => Boolean(window.sessionStorage.getItem(`s2-plan-context:${tripId}`)), T024_TRIP_ID)).toBe(true)
   await recommendation.click()
   await expect(page).toHaveURL(new RegExp(`/recommendation/${T024_TRIP_ID}$`))
-  await expect(page.getByRole('heading', { name: '唯一推荐方案' })).toBeVisible()
-  await page.getByRole('button', { name: /确认唯一方案/ }).click()
+  await expect(page.getByRole('heading', { name: '推荐方案' })).toBeVisible()
+  await page.getByRole('combobox', { name: '第 1 个地点', exact: true }).selectOption('place-fact-4')
+  await page.getByRole('button', { name: '将第 2 个地点上移' }).click()
+  await expect(page.getByRole('combobox', { name: '第 1 个地点', exact: true })).toHaveValue('place-fact-1')
+  await expect(page.getByRole('combobox', { name: '第 2 个地点', exact: true })).toHaveValue('place-fact-4')
+  await page.getByRole('button', { name: /确认此方案/ }).click()
   const buildRoute = page.getByRole('button', { name: /生成完整路线/ })
   await expect(buildRoute).toBeVisible()
   await buildRoute.click()
@@ -339,10 +344,11 @@ test('mocked single-person UI integration confirms the recommendation and enters
   await expect(page.getByRole('heading', { name: /北京.*一日计划/ })).toBeVisible()
   await expect(page.getByRole('navigation', { name: '行程视图' })).toBeVisible()
   await expect(page.getByRole('button', { name: '执行旅程' })).toBeVisible()
+  await expect(page.getByText('关怀校验', { exact: true })).toHaveCount(0)
   expect(routeAudit.placeSearchCalls()).toBe(0)
   expect(
     routeAudit.generatedCandidate()?.taskFacts?.map((item) => item.place?.placeId),
-  ).toEqual(['place-3', 'place-1', 'place-2', expect.stringMatching(/^return-/)])
+  ).toEqual(['place-1', 'place-4', 'place-2', expect.stringMatching(/^return-/)])
   const trace = await page.evaluate(
     (tripId) => JSON.parse(window.sessionStorage.getItem(`s2-recommendation-trace:${tripId}`) || 'null'),
     T024_TRIP_ID,
@@ -350,22 +356,63 @@ test('mocked single-person UI integration confirms the recommendation and enters
   expect(trace).toMatchObject({
     factSetId: recommendationBundle.factSetId,
     providerFactDigest: recommendationBundle.providerFactDigest,
-    selectedPlaces: recommendationBundle.trustedPlan.tasks.map((item) => ({
-      factRefId: item.factRefId,
-      placeId: item.placeId,
-    })),
+    selectedPlaces: [
+      { factRefId: 'place-fact-1', placeId: 'place-1' },
+      { factRefId: 'place-fact-4', placeId: 'place-4' },
+      { factRefId: 'place-fact-2', placeId: 'place-2' },
+    ],
   })
   await assertResponsiveContract(page)
 })
 
-test('unique recommendation remains readable at the acceptance viewport', async ({ page }) => {
+test('editable recommendation remains readable and survives account navigation', async ({ page }) => {
   await installSession(page)
+  let recommendationCalls = 0
+  await page.route('**/api/v1/account/me', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: api({
+        userId: '90000000-0000-4000-8000-000000000024',
+        email: 'acceptance@example.com',
+        displayName: '验收用户',
+        homeCity: '北京',
+        interests: ['历史文化'],
+      }),
+    })
+  })
   await page.route(`**/api/v2/trips/${T024_TRIP_ID}/recommendations`, async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: api(recommendationBundle) })
+    recommendationCalls += 1
+    const response = recommendationCalls === 1
+      ? recommendationBundle
+      : {
+          ...recommendationBundle,
+          factSetId: 'fact-set-that-must-not-replace-the-edited-session',
+          providerFactDigest: 'd'.repeat(64),
+          trustedPlan: {
+            ...recommendationBundle.trustedPlan,
+            tasks: recommendationBundle.candidates.slice(1, 4),
+          },
+        }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: api(response) })
   })
   await page.goto(`/recommendation/${T024_TRIP_ID}`, { waitUntil: 'domcontentloaded' })
-  await expect(page.getByRole('heading', { name: '唯一推荐方案' })).toBeVisible()
-  await expect(page.getByText('最低成员分 92/100')).toBeVisible()
+  await expect(page.getByRole('heading', { name: '推荐方案' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '行程地点' })).toBeVisible()
+  await expect(page.locator('.recommendation-location option').first()).not.toContainText('（历史文化）')
+  await expect(page.getByRole('button', { name: '返回上一个页面' })).toHaveCount(0)
+  await expect(page.getByText(/FactRef|最低成员分|扣分规则|未知事实/)).toHaveCount(0)
+  await page.getByRole('combobox', { name: '第 1 个地点', exact: true }).selectOption('place-fact-5')
+
+  const account = page.getByRole('link', { name: '验收用户的账户' })
+  await expect(account).toHaveAttribute(
+    'href',
+    `/account?returnTo=${encodeURIComponent(`/recommendation/${T024_TRIP_ID}`)}`,
+  )
+  await account.click()
+  await expect(page).toHaveURL(new RegExp(`/recommendation/${T024_TRIP_ID}$`))
+  await expect(page.getByRole('combobox', { name: '第 1 个地点', exact: true })).toHaveValue('place-fact-5')
+  expect(recommendationCalls).toBe(1)
   await assertResponsiveContract(page)
 })
 

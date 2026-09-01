@@ -2,13 +2,13 @@
 
 # 行知旅伴
 
-<p>面向国内城市、支持预算与关怀约束的单日旅行规划 Agent 原型。</p>
+<p>面向国内城市、支持预算与关怀约束的单日旅行规划，并扩展到父行程协作的旅行 Agent 原型。</p>
 
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.116%2B-009688?logo=fastapi&logoColor=white)
 ![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=20232a)
 ![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
-![Sprint 2 Beta](https://img.shields.io/badge/Stage-Sprint%202%20Beta-6f42c1)
+![Sprint 3 Alpha](https://img.shields.io/badge/Stage-Sprint%203%20Alpha-6f42c1)
 
 [🌐 公网演示](https://imagine-1-31o2.onrender.com/) · [API 健康检查](https://imagine-mp7v.onrender.com/api/v1/health)
 
@@ -20,19 +20,21 @@
   <img src="docs/assets/readme/hero-home.png" alt="行知旅伴项目首页，展示预算约束、关怀出行与高德事实核验流程" width="1100">
 </p>
 
-> 当前阶段：**Sprint 2 Beta** —— 单人单日闭环保持稳定；S2-T032 已完成多人六问、成员确认、冲突处理、GROUP Trip、共享 Plan V1、执行/到达、照片、迟到/疲劳、Plan V2 与 MemoryTimeline 的本地自动化链路。
+> 当前阶段：**Sprint 3 Alpha** —— 单日核心闭环和 S2-T032 多人闭环保持稳定；Sprint 3 已加入账户会话、账户级 AI 设置、父行程多人协作、两日/三日入口、预算账本以及后端质量门禁。
 
-> 当前基线：`main@8d82c4f`。T032 当前结论为 `LOCAL_AUTOMATION_PASS / PUBLIC_UAT_NOT_RUN`；生产级 `RouteCandidateBuilderPort`、真实高德/百炼、公网三会话连续验收以及真实 GPS/相机权限验收仍未完成。
+> 当前基线：`main@a5d77b0`。S3 本地功能和质量门禁已有专项验收记录；S2-T032 仍为 `LOCAL_AUTOMATION_PASS / PUBLIC_UAT_NOT_RUN`，S3-T004 真实 Render/设备验收尚未完成。
 
 > 公网说明：Web 与 API 已通过 HTTPS 提供。公网环境是独立部署的演示快照，功能与健康检查返回的 `buildSha` 可能暂时落后于当前 `main`，不能替代本地提交和验收记录。
 
 ## 项目简介
 
-行知旅伴面向国内城市的单日旅行规划场景。用户可以用自然语言输入城市、日期、预算、兴趣、地点和关怀需求，系统结合高德地点与路线事实，由服务端进行确定性约束校验，形成可执行的单日计划。
+行知旅伴面向国内城市的单日旅行规划场景，并提供父行程的多人协作与逐日入口。用户可以用自然语言输入城市、日期、预算、兴趣、地点和关怀需求，系统结合高德地点与路线事实，由服务端进行确定性约束校验，形成可执行的单日计划。
 
 在执行过程中，系统记录任务状态和实际消费；实际消费变化可发起服务端重规划评估。服务端读取 CURRENT V1、可信规划事实与执行事件，并在未完成后缀仍可行时生成单个确定性候选 Plan V2，由用户决定接受或拒绝；无可行方案时继续保留 CURRENT V1。
 
 Sprint 2 在此基础上增加 2—3 人草稿修订、邀请与成员确认、硬冲突复核、候选层公平评分，以及一次定位证据、任务照片、旅行回忆和迟到/疲劳调整等能力。这里的边界很明确：**百炼大模型只提供候选字段或只读解释，高德提供地点/路线事实，最终结果由行知旅伴服务端确定性校验**。未配置 `BAILIAN_API_KEY` 或百炼暂时不可用时，系统会进入固定问题、本地规则或不可用说明，不让模型输出直接绕过确认、白名单和约束。
+
+Sprint 3 在此基础上加入账户注册、登录与资料、账户级模型和 API Key 设置、父行程多人协作、2 日/3 日父行程入口、预算来源账本，以及后端全量质量门禁。多日扩展目前主要提供父行程聚合和逐日进入单日 Trip 的入口；两日 `Trip` 草稿 Schema 已独立持久化，但多日计划生成、确认和执行尚未扩展为统一主链。
 
 ## 功能特性
 
@@ -51,6 +53,10 @@ Sprint 2 在此基础上增加 2—3 人草稿修订、邀请与成员确认、�
 - 迟到/疲劳事件驱动的冻结前缀、后缀重规划、四域 HARD 重验与零写入无解结果（S2-T021）
 - 服务端候选 Plan V2、结构化 Diff、百炼只读解释降级与原子接受/拒绝（S2-T022）
 - 计划费用、实际费用、任务状态与版本历史基础总结
+- 账户注册、登录、资料管理与账户级 AI 模型设置
+- 父行程组织者/成员协作、邀请兑换、资料隔离与逐日单日行程入口
+- 2 日/3 日父行程预算汇总、费用来源状态与手动修正展示
+- S3-T003 后端全量测试、核心域覆盖率、固定硬约束和 P0/P1 质量门禁
 
 ## 使用流程
 
@@ -248,11 +254,16 @@ T032 专项范围和验收边界见 [多人本地/公网验收说明](docs/testi
 
 ### Sprint 3：质量与交付
 
-- [ ] 故障降级与三城完整链、两城烟测
-- [ ] 多日 Schema
-- [x] 后端测试、前端 lint/build 基础 CI 配置
 - [x] S3-T003 后端全量测试、五域覆盖率、零硬冲突与 P0/P1 自动化门禁
-- [ ] 部署版本同步与答辩证据补齐
+- [x] S3-T005/T006 三城完整本地链路与西安/杭州高德在线烟测
+- [x] S3-T007 两日 DRAFT Schema 与隔离 SQLite 快照持久化
+- [x] S3-T009 账户注册/登录/资料与会话安全的本地验证
+- [x] S3-T010/T012/T013 父行程多人协作、2 日/3 日逐日入口与 Alpha 本地验收
+- [x] S3-T011/T014 预算账本与账户级 AI 设置本地功能验证
+- [x] 后端测试、前端 lint/build 基础 CI 配置
+- [ ] 多日计划生成、确认与执行主链
+- [ ] S3-T004 Render 公网发布、真实设备验收与三次连续演示
+- [ ] 账户持久化重启、账户级模型公网调用和答辩证据补齐
 
 ## 团队成员与迭代协作
 
@@ -284,6 +295,11 @@ T032 专项范围和验收边界见 [多人本地/公网验收说明](docs/testi
 - [S2-T032 验收证据目录](docs/testing/evidence/s2_t032/README.md)
 - [迟到/疲劳重规划规则](docs/rules/s2_t021_t022_execution_replanning.md)
 - [S3-T003 质量门禁与 T002 接入说明](docs/quality/README.md)
+- [S3-T005/T006 城市与高德验证](docs/testing/2026-08-31-s3-t005-t006-local-verification.md)
+- [S3-T007 两日 Trip 验收](docs/testing/2026-09-01-s3-t007-independent-acceptance.md)
+- [S3-T009 账户验收](docs/testing/2026-09-01-s3-t009-independent-acceptance.md)
+- [S3-T013 Alpha 本地验收](docs/testing/2026-09-01-s3-t013-alpha-acceptance.md)
+- [Sprint 3 追溯目录](docs/traceability/sprint3/)
 - [AI 使用说明](doc/ai_usage.md)
 
 ## 已知限制、安全说明与明确不做事项
@@ -298,6 +314,9 @@ T032 专项范围和验收边界见 [多人本地/公网验收说明](docs/testi
 - 2—3 人的 GROUP Trip、共享 V1、执行、调整、V2 和 MemoryTimeline 已完成本地集成；正式推荐编排仍受 `RouteCandidateBuilderPort` 装配状态限制，公网三会话链仍未验收。
 - 一次定位的证据、到达判断和完成事件服务端链已经存在，但浏览器真实定位交互与移动设备公网验收仍待完成；系统明确不做持续 GPS。
 - 任务照片与回忆属于课程原型能力，媒体保存在 SQLite；公网 Render 使用临时文件系统时，未挂载 Persistent Disk 的数据会在重新部署或实例替换后丢失。
+- 两日 `Trip` 目前是独立的 DRAFT Schema 和快照持久化合同，不进入现有单日确认、规划和执行主链；父行程的 2 日/3 日能力通过逐日单日入口提供。
+- 账户支持资料和账户级模型设置，但邮箱验证、找回密码、OAuth、RBAC、防暴力破解和公网重启留存仍未完成或不在本轮范围内；用户绑定 Key 依赖稳定的 `ACCOUNT_API_KEY_ENCRYPTION_KEY` 和 `/app/data` 持久盘。
+- 预算账本展示来源、未知费用和手动修正，不提供支付能力；账户级模型调用仍需真实部署环境和平台额度验证。
 - 公网 HTTPS Web 与 API 当前可访问，但它们是独立部署快照；应通过健康检查的 `buildSha` 判断版本，不把公网可访问性等同于最新 `main` 已部署，也不展示没有可核验运行页的 build 徽章。
 
 明确不做：持续 GPS、视频剪辑、全国无障碍保证、优惠券/跑腿，以及第三方批量抓取。

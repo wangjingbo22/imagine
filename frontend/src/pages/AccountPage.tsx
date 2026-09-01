@@ -11,13 +11,9 @@ import {
 import { ApiError } from '../api/client'
 import { AppShell } from '../components/AppShell'
 import type { CurrentUser } from '../domain/account'
+import { safeReturnPath } from '../services/accountReturnPath'
 
 type AccountMode = 'login' | 'register'
-
-function safeReturnPath(search: string): string | null {
-  const returnTo = new URLSearchParams(search).get('returnTo')
-  return returnTo === '/parent-join' || returnTo === '/model-settings' ? returnTo : null
-}
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError || error instanceof Error ? error.message : fallback

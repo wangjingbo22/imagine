@@ -37,7 +37,7 @@ from app.schemas.plan import (
     PlanVersionStatus,
     ProposedPlanVersion,
 )
-from app.schemas.trip import PlanReviewTripSnapshot, TripStatus
+from app.schemas.trip import AssistanceType, PlanReviewTripSnapshot, TripStatus
 from app.services.assistance_constraints import (
     DeterministicAssistanceConstraintCompiler,
     FIELD_NAP_WINDOW,
@@ -142,7 +142,17 @@ class DeterministicCandidatePlanner:
             budget_summary,
             warnings,
             facility_results,
-        ) = self._recompute_tasks(valid.task_facts)
+        ) = self._recompute_tasks(
+            valid.task_facts,
+            require_facility_confirmation=any(
+                participant.assistance_profile is not None
+                and (
+                    participant.assistance_profile.type is AssistanceType.PARENT_CHILD
+                    or participant.assistance_profile.avoid_stairs
+                )
+                for participant in valid.trip.participants
+            ),
+        )
         if valid.start_location.provenance.sourceStatus is SourceStatus.UNKNOWN:
             warnings = (
                 CandidatePlanWarning(
@@ -454,6 +464,8 @@ class DeterministicCandidatePlanner:
     @staticmethod
     def _recompute_tasks(
         task_facts: Sequence[CandidateTaskFact],
+        *,
+        require_facility_confirmation: bool,
     ) -> tuple[
         tuple[CandidateTask, ...],
         BudgetSummary,
@@ -515,7 +527,7 @@ class DeterministicCandidatePlanner:
                     if evidence.facilityType is facility_type
                 ]
                 for facility_type in FacilityType
-            }
+            } if require_facility_confirmation else {}
             for facility_type, matching_evidence in evidence_by_type.items():
                 facility_reference = (
                     f"{item.task_id}.routeFacility.{facility_type.value}"

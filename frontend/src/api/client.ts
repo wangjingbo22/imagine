@@ -9,10 +9,12 @@ export function resolveApiBaseUrl(configuredValue?: string): string {
   return normalized || ''
 }
 
-// Local development is same-origin by default: Vite proxies /api and /health
-// to the backend. Deployments with a separate API origin can still provide an
-// explicit HTTPS VITE_API_BASE_URL.
-const API_BASE_URL = resolveApiBaseUrl(import.meta.env?.VITE_API_BASE_URL)
+// Production requests must use the web service's same-origin proxy so the
+// account session cookie is sent consistently. Development may opt into a
+// separate API target when Vite is not proxying it.
+const API_BASE_URL = import.meta.env?.PROD
+  ? ''
+  : resolveApiBaseUrl(import.meta.env?.VITE_API_BASE_URL)
 
 export class ApiError extends Error {
   readonly code: number | string
