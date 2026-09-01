@@ -61,6 +61,9 @@ test('model settings show the server error instead of masking failed API Key sto
   assert.match(page, /error instanceof ApiError\) return error\.message/)
   assert.match(page, /保存失败：\$\{saveErrorMessage\(error\)\}/)
   assert.match(page, /await saveModelSettings[\s\S]*navigate\('\/', \{ replace: true \}\)/)
+  assert.match(page, /<form className="model-settings__panel" onSubmit=/)
+  assert.match(page, /disabled=\{saving\}/)
+  assert.match(page, /第三方服务后，该服务会收到 API Key/)
 })
 
 test('recommendation loading presents staged analysis instead of an empty status area', async () => {
