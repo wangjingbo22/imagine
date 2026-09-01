@@ -23,6 +23,8 @@ test('account API uses the session cookie and the account contract paths', async
   assert.match(api, /\/api\/v1\/account\/me/)
   assert.match(api, /\/api\/v1\/account\/me\/profile/)
   assert.match(client, /credentials:\s*["']include["']/)
+  assert.match(client, /import\.meta\.env\?\.PROD/)
+  assert.match(client, /\? ''\s*:\s*resolveApiBaseUrl/)
 })
 
 test('account page provides authentication and profile actions through the shared session', async () => {

@@ -6,6 +6,7 @@ import type {
   InvitationCreated,
   InvitationRedeemed,
   MemberSessionView,
+  SharedTripProposalField,
   OrganizerConversationCreated,
 } from '../domain/collaboration'
 
@@ -180,6 +181,33 @@ export async function confirmMemberSession(input: {
   return response.data
 }
 
+/**
+ * 把成员异议保存为“待审批建议”。这个接口不会直接修改共享行程，
+ * 所以即使成员误操作，组织者原计划也不会被覆盖。
+ */
+export async function createMemberChangeProposal(input: {
+  participantSessionToken: string
+  baseRevision: number
+  expectedVersion: number
+  fieldPath: SharedTripProposalField
+  proposedValue: string | number
+  reason: string
+}): Promise<MemberSessionView> {
+  const response = await request<MemberSessionView>('/api/v2/member-session/change-proposals', {
+    method: 'POST',
+    headers: { 'X-Participant-Session': input.participantSessionToken },
+    body: JSON.stringify({
+      schemaVersion: '1.0',
+      baseRevision: input.baseRevision,
+      expectedVersion: input.expectedVersion,
+      fieldPath: input.fieldPath,
+      proposedValue: input.proposedValue,
+      reason: input.reason,
+    }),
+  })
+  return response.data
+}
+
 export async function getOrganizerCollaboration(
   tripId: string,
   organizerToken: string,
@@ -210,6 +238,34 @@ export async function resolveOrganizerConfirmationItem({
         baseRevision: state.currentRevision,
         expectedVersion: state.collaborationVersion,
         relaxationId,
+      }),
+    },
+  )
+  return response.data
+}
+
+/** 组织者的审批动作：批准会生成新修订，拒绝只记录结论并保留原计划。 */
+export async function reviewMemberChangeProposal(input: {
+  state: CollaborationAggregate
+  proposalId: string
+  decision: 'APPROVE' | 'REJECT'
+  organizerToken: string
+  organizerNote?: string
+}): Promise<CollaborationAggregate> {
+  const response = await request<CollaborationAggregate>(
+    `/api/v2/trips/${encodeURIComponent(input.state.tripId)}/change-proposals/${encodeURIComponent(input.proposalId)}/review`,
+    {
+      method: 'POST',
+      headers: {
+        'X-Organizer-Token': input.organizerToken,
+        'Idempotency-Key': newIdempotencyKey('member-proposal-review'),
+      },
+      body: JSON.stringify({
+        schemaVersion: '1.0',
+        baseRevision: input.state.currentRevision,
+        expectedVersion: input.state.collaborationVersion,
+        decision: input.decision,
+        organizerNote: input.organizerNote?.trim() || null,
       }),
     },
   )

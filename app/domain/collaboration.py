@@ -101,6 +101,14 @@ class RelaxationAction(StrEnum):
     CHANGE_NAP_WINDOW = "CHANGE_NAP_WINDOW"
 
 
+class MemberChangeProposalStatus(StrEnum):
+    """成员对共享行程提出的修改建议所处的审批状态。"""
+
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
 class ConversationAnswer(CollaborationModel):
     question_id: str = Field(min_length=1, max_length=40)
     answer: str = Field(min_length=1, max_length=1000)
@@ -257,6 +265,7 @@ class CollaborationAggregate(CollaborationModel):
     progress: CollaborationProgress
     participants: list[ParticipantProgress]
     confirmation_items: list[CollaborationIssue]
+    change_proposals: list["MemberChangeProposal"] = Field(default_factory=list)
 
 
 class InvitationCreateRequest(CollaborationModel):
@@ -330,6 +339,50 @@ class ParticipantConversationRequest(ParticipantMutationRequest):
         )
 
 
+class MemberChangeProposalCreateRequest(ParticipantMutationRequest):
+    """成员提交共享行程修改建议时使用的严格请求契约。
+
+    这里只开放适合协商的共同字段，成员无法借此修改其他成员的私有偏好。
+    proposed_value 保持 JSON 标量类型，以便预算使用整数、其余字段使用字符串。
+    """
+
+    field_path: Literal[
+        "trip.cityName",
+        "trip.travelDate",
+        "trip.startTime",
+        "trip.endTime",
+        "trip.startLocationText",
+        "trip.endLocationText",
+        "trip.budgetCents",
+    ]
+    proposed_value: str | int
+    # 中文原因可能只需要一个字（例如“无”“晚”）；允许单字符，但仍禁止空白。
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class MemberChangeProposalReviewRequest(ParticipantMutationRequest):
+    """组织者审批成员建议的请求；拒绝时原修订保持不变。"""
+
+    decision: Literal["APPROVE", "REJECT"]
+    organizer_note: str | None = Field(default=None, max_length=500)
+
+
+class MemberChangeProposal(CollaborationModel):
+    """在成员与组织者页面之间共享的修改建议视图。"""
+
+    proposal_id: UUID
+    trip_id: UUID
+    participant_id: UUID
+    base_revision: int = Field(ge=1)
+    field_path: str
+    proposed_value: JsonValue
+    reason: str
+    status: MemberChangeProposalStatus
+    organizer_note: str | None = None
+    created_at: datetime
+    reviewed_at: datetime | None = None
+
+
 class ResolveConfirmationItemRequest(ParticipantMutationRequest):
     relaxation_id: str = Field(pattern=r"^rx_[a-f0-9]{16}$")
 
@@ -345,6 +398,7 @@ class MemberSessionView(CollaborationModel):
     access_status: ParticipantAccessStatus
     confirmation_status: ParticipantConfirmationStatus
     confirmation_items: list[CollaborationIssue]
+    change_proposals: list[MemberChangeProposal] = Field(default_factory=list)
 
 
 COLLABORATION_SCHEMA_MODELS = (
@@ -360,6 +414,9 @@ COLLABORATION_SCHEMA_MODELS = (
     ParticipantMutationRequest,
     ParticipantConversationRequest,
     ResolveConfirmationItemRequest,
+    MemberChangeProposalCreateRequest,
+    MemberChangeProposalReviewRequest,
+    MemberChangeProposal,
     MemberSessionView,
 )
 
@@ -397,6 +454,10 @@ __all__ = [
     "InvitationRedeemed",
     "IssueCode",
     "JsonValue",
+    "MemberChangeProposal",
+    "MemberChangeProposalCreateRequest",
+    "MemberChangeProposalReviewRequest",
+    "MemberChangeProposalStatus",
     "MemberSessionView",
     "OrganizerBootstrapResult",
     "OrganizerConversationCreated",

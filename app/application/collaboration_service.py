@@ -24,6 +24,9 @@ from app.domain.collaboration import (
     InvitationCreated,
     InvitationRedeemed,
     IssueCode,
+    MemberChangeProposalCreateRequest,
+    MemberChangeProposalReviewRequest,
+    MemberChangeProposalStatus,
     MemberSessionView,
     OrganizerBootstrapResult,
     ParticipantAccessStatus,
@@ -31,6 +34,7 @@ from app.domain.collaboration import (
     ParticipantConversationRequest,
     ParticipantMutationRequest,
     ParticipantProgress,
+    RelaxationAction,
     ResolveConfirmationItemRequest,
 )
 from app.domain.collaboration_digest import (
@@ -86,7 +90,12 @@ class CollaborationService:
             status = 410
         elif code in {"PARTICIPANT_CONFIRMATION_REQUIRED", "PARTICIPANT_DRAFT_MISSING"}:
             status = 422
-        elif code in {"COLLABORATION_NOT_FOUND", "PARTICIPANT_NOT_BOUND", "CONFLICT_NOT_FOUND"}:
+        elif code in {
+            "COLLABORATION_NOT_FOUND",
+            "PARTICIPANT_NOT_BOUND",
+            "CONFLICT_NOT_FOUND",
+            "CHANGE_PROPOSAL_NOT_FOUND",
+        }:
             status = 404
         else:
             status = 409
@@ -104,6 +113,8 @@ class CollaborationService:
             "COLLABORATION_NOT_FOUND": "未找到当前行程的协作会话，请重新创建行程。",
             "PARTICIPANT_NOT_BOUND": "该成员不属于当前行程，请刷新协作页面。",
             "CONFLICT_NOT_FOUND": "该冲突项已变化或不存在，请刷新后重新处理。",
+            "CHANGE_PROPOSAL_NOT_FOUND": "该成员建议不存在，请刷新后重试。",
+            "CHANGE_PROPOSAL_NOT_PENDING": "该成员建议已经处理，请刷新查看最新结果。",
             "COLLABORATION_VERSION_STALE": "协作状态已被其他页面更新，请刷新后重试。",
             "DRAFT_REVISION_STALE": "行程资料已更新，请刷新后基于最新内容继续。",
             "COLLABORATION_OPERATION_IN_PROGRESS": "该行程正在执行另一个规划请求，请稍候再试。",
@@ -213,11 +224,12 @@ class CollaborationService:
         *,
         progress: list[ParticipantProgress],
         issues: tuple[CollaborationIssue, ...],
+        has_pending_proposals: bool,
         can_plan: bool,
     ) -> CollaborationStatus:
         if can_plan:
             return CollaborationStatus.READY_TO_PLAN
-        if issues:
+        if issues or has_pending_proposals:
             return CollaborationStatus.CONFLICT_REVIEW
         if any(
             item.confirmation_status in {
@@ -362,9 +374,16 @@ class CollaborationService:
             item.confirmation_status is ParticipantConfirmationStatus.CONFIRMED
             for item in progress
         )
+        # 待审批建议表示成员尚未同意共同安排。规划入口必须等待组织者明确
+        # 批准或拒绝，避免系统在异议尚未处理时静默执行原计划。
+        pending_proposals = tuple(
+            item for item in stored.change_proposals
+            if item.status is MemberChangeProposalStatus.PENDING
+        )
         can_plan = (
             all_confirmed
             and not issues
+            and not pending_proposals
             and stored.current_revision == revision.revision
             and self._source_digest_is_ready(revision, stored)
         )
@@ -381,7 +400,12 @@ class CollaborationService:
             draftId=revision.draft_id,
             currentRevision=revision.revision,
             organizerParticipantId=stored.organizer_participant_id,
-            status=self._status(progress=progress, issues=issues, can_plan=can_plan),
+            status=self._status(
+                progress=progress,
+                issues=issues,
+                has_pending_proposals=bool(pending_proposals),
+                can_plan=can_plan,
+            ),
             collaborationVersion=stored.version,
             readinessDigest=digest,
             canPlan=can_plan,
@@ -391,10 +415,11 @@ class CollaborationService:
                     item.confirmation_status is ParticipantConfirmationStatus.CONFIRMED
                     for item in progress
                 ),
-                openIssueCount=len(issues),
+                openIssueCount=len(issues) + len(pending_proposals),
             ),
             participants=progress,
             confirmationItems=list(issues),
+            changeProposals=list(stored.change_proposals),
         )
 
     def organizer_state(
@@ -439,7 +464,117 @@ class CollaborationService:
             accessStatus=progress.access_status,
             confirmationStatus=progress.confirmation_status,
             confirmationItems=visible,
+            changeProposals=[
+                item for item in stored.change_proposals
+                if item.participant_id == actor.participant_id
+            ],
         )
+
+    def create_member_change_proposal(
+        self,
+        *,
+        session_token: str | None,
+        request: MemberChangeProposalCreateRequest,
+    ) -> MemberSessionView:
+        """接收成员异议，但不允许成员直接改变共享行程。
+
+        提议值先经过轻量规范化，最终在组织者批准时还会交给 T002 的严格
+        TripUnderstandingProposal 校验，因此无效日期、时间或预算无法落入新修订。
+        """
+        try:
+            actor = self.repository.authenticate_participant(session_token)
+            stored = self.repository.get_stored(actor.trip_id)
+            if actor.participant_id == stored.organizer_participant_id:
+                raise AppError("MEMBER_PROPOSAL_REQUIRED", "组织者请直接修改自己的行程资料", 403, False)
+            value = request.proposed_value
+            if request.field_path == "trip.budgetCents":
+                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                    raise AppError("CHANGE_PROPOSAL_VALUE_INVALID", "预算必须是非负整数分", 422, False)
+            elif not isinstance(value, str) or not value.strip():
+                raise AppError("CHANGE_PROPOSAL_VALUE_INVALID", "建议内容不能为空", 422, False)
+            else:
+                value = value.strip()
+            self.repository.create_change_proposal(
+                trip_id=actor.trip_id,
+                participant_id=actor.participant_id,
+                base_revision=request.base_revision,
+                expected_version=request.expected_version,
+                field_path=request.field_path,
+                proposed_value=value,
+                reason=request.reason.strip(),
+            )
+            return self._member_view_for_actor(actor)
+        except AppError:
+            raise
+        except CollaborationStoreError as error:
+            raise self._store_error(error) from error
+
+    def review_member_change_proposal(
+        self,
+        *,
+        trip_id: UUID,
+        proposal_id: UUID,
+        organizer_token: str | None,
+        request: MemberChangeProposalReviewRequest,
+        idempotency_key: str,
+    ) -> CollaborationAggregate:
+        """由组织者批准或拒绝建议；只有批准才创建新的共享行程修订。"""
+        try:
+            actor = self.repository.authenticate_organizer(organizer_token)
+            if actor.trip_id != trip_id:
+                raise CollaborationStoreError("ORGANIZER_PERMISSION_REQUIRED")
+            stored = self.repository.get_stored(trip_id)
+            if stored.version != request.expected_version:
+                raise CollaborationStoreError("COLLABORATION_VERSION_STALE")
+            proposal = next((item for item in stored.change_proposals if item.proposal_id == proposal_id), None)
+            if proposal is None:
+                raise CollaborationStoreError("CHANGE_PROPOSAL_NOT_FOUND")
+            if proposal.status is not MemberChangeProposalStatus.PENDING:
+                raise CollaborationStoreError("CHANGE_PROPOSAL_NOT_PENDING")
+            # 提议保留“成员提交时的修订”用于审计，但组织者可能先处理了另一条
+            # 建议。此时仍允许基于当前修订批准或拒绝，避免旧提议永久卡住规划。
+            if stored.current_revision != request.base_revision:
+                raise CollaborationStoreError("DRAFT_REVISION_STALE")
+
+            review_version = request.expected_version
+            decision = MemberChangeProposalStatus.REJECTED
+            if request.decision == "APPROVE":
+                revised = self.revisions.apply_relaxation(
+                    trip_id=trip_id,
+                    base_revision=request.base_revision,
+                    patch=CanonicalRevisionPatch(
+                        action=RelaxationAction.SET_SHARED_FIELD,
+                        participant_id=None,
+                        field_path=proposal.field_path,
+                        value=proposal.proposed_value,
+                    ),
+                    idempotency_key=f"{idempotency_key}-revision",
+                )
+                self.repository.advance_revision(
+                    trip_id=trip_id,
+                    before_revision=request.base_revision,
+                    after_revision=revised.revision,
+                    expected_version=request.expected_version,
+                    actor_scope="ORGANIZER",
+                    actor_id=str(actor.participant_id),
+                    idempotency_key=f"{idempotency_key}-advance",
+                )
+                review_version += 1
+                decision = MemberChangeProposalStatus.APPROVED
+            self.repository.review_change_proposal(
+                trip_id=trip_id,
+                proposal_id=proposal_id,
+                expected_version=review_version,
+                status=decision,
+                organizer_note=request.organizer_note,
+            )
+            return self.organizer_state(trip_id, organizer_token)
+        except TripDraftRevisionUnavailable as error:
+            raise self._revision_error(error) from error
+        except AppError:
+            raise
+        except CollaborationStoreError as error:
+            raise self._store_error(error) from error
 
     def member_view(self, session_token: str | None) -> MemberSessionView:
         try:

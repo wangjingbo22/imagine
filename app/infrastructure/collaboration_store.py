@@ -16,6 +16,8 @@ from app.application.collaboration_ports import TripDraftRevisionView
 from app.domain.collaboration import (
     InvitationCreated,
     InvitationRedeemed,
+    MemberChangeProposal,
+    MemberChangeProposalStatus,
     OrganizerBootstrapResult,
     ParticipantAccessStatus,
     TripFlowKind,
@@ -59,6 +61,7 @@ class StoredCollaboration:
     version: int
     policy_version: str
     confirmations: Mapping[UUID, ConfirmationRecord]
+    change_proposals: tuple[MemberChangeProposal, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,6 +238,25 @@ class SqliteCollaborationRepository:
                 resolved_at TEXT NOT NULL,
                 PRIMARY KEY (trip_id, conflict_id)
             )""")
+            # 修改建议必须独立于成员画像保存：这样成员不能直接覆盖共享事实，
+            # 组织者也能看到完整的审批记录与原始提议值。
+            connection.execute("""CREATE TABLE IF NOT EXISTS collaboration_change_proposals (
+                proposal_id TEXT PRIMARY KEY,
+                trip_id TEXT NOT NULL,
+                participant_id TEXT NOT NULL,
+                base_revision INTEGER NOT NULL,
+                field_path TEXT NOT NULL,
+                proposed_value_json TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                status TEXT NOT NULL,
+                organizer_note TEXT,
+                created_at TEXT NOT NULL,
+                reviewed_at TEXT
+            )""")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_collaboration_change_proposals_trip "
+                "ON collaboration_change_proposals(trip_id, created_at)"
+            )
             mark_legacy_collaboration_rows(connection)
             backfill_confirmed_single_flows(connection)
 
@@ -967,6 +989,10 @@ class SqliteCollaborationRepository:
                 "confirmed_member_digest FROM collaboration_participants WHERE trip_id=?",
                 (str(trip_id),),
             ).fetchall()
+            proposal_rows = connection.execute(
+                "SELECT * FROM collaboration_change_proposals WHERE trip_id=? ORDER BY created_at",
+                (str(trip_id),),
+            ).fetchall()
         return StoredCollaboration(
             trip_id=trip_id,
             organizer_participant_id=UUID(session["organizer_participant_id"]),
@@ -983,7 +1009,122 @@ class SqliteCollaborationRepository:
                 )
                 for row in rows
             },
+            change_proposals=tuple(
+                MemberChangeProposal(
+                    proposalId=UUID(row["proposal_id"]),
+                    tripId=trip_id,
+                    participantId=UUID(row["participant_id"]),
+                    baseRevision=int(row["base_revision"]),
+                    fieldPath=row["field_path"],
+                    proposedValue=json.loads(row["proposed_value_json"]),
+                    reason=row["reason"],
+                    status=MemberChangeProposalStatus(row["status"]),
+                    organizerNote=row["organizer_note"],
+                    createdAt=datetime.fromisoformat(row["created_at"]),
+                    reviewedAt=(datetime.fromisoformat(row["reviewed_at"]) if row["reviewed_at"] else None),
+                )
+                for row in proposal_rows
+            ),
         )
+
+    def create_change_proposal(
+        self,
+        *,
+        trip_id: UUID,
+        participant_id: UUID,
+        base_revision: int,
+        expected_version: int,
+        field_path: str,
+        proposed_value: object,
+        reason: str,
+    ) -> MemberChangeProposal:
+        """原子写入一条待审批建议并推进协作版本。
+
+        版本校验与写入在同一事务中完成，避免组织者更新计划后，成员仍把
+        针对旧页面填写的建议混入新修订。
+        """
+        proposal = MemberChangeProposal(
+            proposalId=uuid4(), tripId=trip_id, participantId=participant_id,
+            baseRevision=base_revision, fieldPath=field_path,
+            proposedValue=proposed_value, reason=reason,
+            status=MemberChangeProposalStatus.PENDING, createdAt=self._clock(),
+        )
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._assert_mutation_allowed_connection(connection, trip_id, self._clock())
+                row = connection.execute(
+                    "SELECT current_revision, version FROM collaboration_sessions WHERE trip_id=?",
+                    (str(trip_id),),
+                ).fetchone()
+                if row is None:
+                    raise CollaborationStoreError("COLLABORATION_NOT_FOUND")
+                if int(row["current_revision"]) != base_revision:
+                    raise CollaborationStoreError("DRAFT_REVISION_STALE")
+                if int(row["version"]) != expected_version:
+                    raise CollaborationStoreError("COLLABORATION_VERSION_STALE")
+                connection.execute(
+                    """INSERT INTO collaboration_change_proposals
+                    (proposal_id, trip_id, participant_id, base_revision, field_path,
+                     proposed_value_json, reason, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)""",
+                    (str(proposal.proposal_id), str(trip_id), str(participant_id), base_revision,
+                     field_path, json.dumps(proposed_value, ensure_ascii=False), reason,
+                     proposal.created_at.isoformat()),
+                )
+                connection.execute(
+                    "UPDATE collaboration_sessions SET version=?, updated_at=? WHERE trip_id=?",
+                    (expected_version + 1, self._clock().isoformat(), str(trip_id)),
+                )
+                connection.execute("COMMIT")
+                return proposal
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+
+    def review_change_proposal(
+        self,
+        *,
+        trip_id: UUID,
+        proposal_id: UUID,
+        expected_version: int,
+        status: MemberChangeProposalStatus,
+        organizer_note: str | None,
+    ) -> int:
+        """审批建议并推进协作版本；此方法本身绝不直接修改行程草稿。"""
+        if status is MemberChangeProposalStatus.PENDING:
+            raise CollaborationStoreError("CHANGE_PROPOSAL_DECISION_INVALID")
+        now = self._clock()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                session = connection.execute(
+                    "SELECT version FROM collaboration_sessions WHERE trip_id=?", (str(trip_id),)
+                ).fetchone()
+                if session is None:
+                    raise CollaborationStoreError("COLLABORATION_NOT_FOUND")
+                if int(session["version"]) != expected_version:
+                    raise CollaborationStoreError("COLLABORATION_VERSION_STALE")
+                updated = connection.execute(
+                    """UPDATE collaboration_change_proposals
+                    SET status=?, organizer_note=?, reviewed_at=?
+                    WHERE proposal_id=? AND trip_id=? AND status='PENDING'""",
+                    (status.value, organizer_note, now.isoformat(), str(proposal_id), str(trip_id)),
+                ).rowcount
+                if updated != 1:
+                    raise CollaborationStoreError("CHANGE_PROPOSAL_NOT_PENDING")
+                next_version = expected_version + 1
+                connection.execute(
+                    "UPDATE collaboration_sessions SET version=?, updated_at=? WHERE trip_id=?",
+                    (next_version, now.isoformat(), str(trip_id)),
+                )
+                connection.execute("COMMIT")
+                return next_version
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
 
     def begin_idempotent_operation(
         self,
