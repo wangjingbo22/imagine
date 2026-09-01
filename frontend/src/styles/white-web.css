@@ -2003,7 +2003,7 @@ body,
 
 .segment-route-mode-picker__choices button,
 .segment-route-mode-picker__retry {
-  min-height: 32px;
+  min-height: 44px;
   padding: 6px 9px;
   color: var(--web-blue);
   border: 1px solid #a9c5fb;
@@ -2056,7 +2056,7 @@ body,
 
   .segment-route-mode-picker__choices button,
   .segment-route-mode-picker__retry {
-    min-height: 36px;
+    min-height: 44px;
   }
 }
 

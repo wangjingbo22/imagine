@@ -10,6 +10,7 @@
     "test": "node scripts/run-tests.mjs",
     "test:e2e": "playwright test",
     "test:t024": "playwright test s2-t024-responsive.spec.ts",
+    "test:segment-route-preferences": "playwright test segment-route-preferences.spec.ts",
     "preview": "vite preview"
   },
   "dependencies": {
