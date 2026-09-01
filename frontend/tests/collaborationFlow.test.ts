@@ -242,6 +242,19 @@ test('fixed-question fallback requires an explicit six-answer review and a fresh
   assert.match(page, /再次尝试智能整理/)
 })
 
+test('reviewed fallback revision renders authoritative degradation without model success copy', async () => {
+  const [domain, page] = await Promise.all([
+    readFile(new URL('../src/domain/collaboration.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8'),
+  ])
+  assert.match(domain, /source: 'MODEL_PROPOSAL' \| 'REVIEWED_FIXED_QUESTIONS'/)
+  assert.match(domain, /degradedReason: string \| null/)
+  assert.match(page, /result\.recognition\.source === 'REVIEWED_FIXED_QUESTIONS'/)
+  assert.match(page, /本次百炼未成功，草稿来自已核对的六项回答/)
+  assert.match(page, /result\.recognition\.degradedReason/)
+  assert.doesNotMatch(page, /百炼成功/)
+})
+
 test('recommendation route consumes the guarded server Trip without legacy reconfirmation', async () => {
   const [page, api] = await Promise.all([
     readFile(new URL('../src/pages/RecommendationPage.tsx', import.meta.url), 'utf8'),

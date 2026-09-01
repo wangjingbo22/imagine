@@ -19,6 +19,7 @@ from typing_extensions import TypeAliasType
 from app.domain.trip_draft import (
     CanonicalFieldPath,
     ParticipantUnderstanding,
+    TripDraftRevisionRecognition,
     TripUnderstandingTrip,
     TripDraftRevision,
 )
@@ -280,6 +281,7 @@ class OrganizerBootstrapResult(CollaborationModel):
 
 class OrganizerConversationCreated(CollaborationModel):
     revision: TripDraftRevision
+    recognition: TripDraftRevisionRecognition
     organizer_access: OrganizerBootstrapResult
 
 

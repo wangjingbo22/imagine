@@ -127,8 +127,16 @@ export type FixedQuestionFallbackResponse = {
   canPlan: false
 }
 
+export type TripDraftRevisionRecognition = {
+  source: 'MODEL_PROPOSAL' | 'REVIEWED_FIXED_QUESTIONS'
+  model: string | null
+  degradedReason: string | null
+  callCount: number
+}
+
 export type OrganizerConversationCreated = {
   revision: TripDraftRevision
+  recognition: TripDraftRevisionRecognition
   organizerAccess: {
     tripId: string
     organizerParticipantId: string

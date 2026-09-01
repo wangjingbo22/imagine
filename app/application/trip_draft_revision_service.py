@@ -38,6 +38,7 @@ from app.domain.collaboration import (
 from app.domain.collaboration_digest import canonical_sha256
 from app.domain.trip_draft import (
     TripDraftRevision,
+    TripDraftRevisionRecognition,
     TripUnderstandingExplicitFields,
     TripUnderstandingExtraction,
     TripUnderstandingFailureCode,
@@ -487,6 +488,18 @@ class TripDraftRevisionService(TripDraftRevisionPort):
     def get_current(self, trip_id: UUID) -> TripDraftRevisionView:
         try:
             return self.repository.get_current(trip_id)
+        except TripDraftRevisionStoreError as error:
+            raise TripDraftRevisionUnavailable(error.code) from error
+
+    def get_recognition(
+        self,
+        revision: TripDraftRevisionView,
+    ) -> TripDraftRevisionRecognition:
+        try:
+            return self.repository.get_recognition(
+                draft_id=revision.draft_id,
+                revision=revision.revision,
+            )
         except TripDraftRevisionStoreError as error:
             raise TripDraftRevisionUnavailable(error.code) from error
 

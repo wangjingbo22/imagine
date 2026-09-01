@@ -11,7 +11,11 @@ from typing import Callable
 from uuid import UUID, uuid4
 
 from app.application.collaboration_ports import UnresolvedAnswerAttempt
-from app.domain.trip_draft import TripDraftRevision, TripUnderstandingExtraction
+from app.domain.trip_draft import (
+    TripDraftRevision,
+    TripDraftRevisionRecognition,
+    TripUnderstandingExtraction,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -481,6 +485,13 @@ class SqliteTripDraftRevisionRepository:
         degraded_reason = getattr(extraction, "failure_code", None)
         if degraded_reason is None:
             degraded_reason = getattr(extraction, "degraded_reason", None)
+        if recognition_source == "MODEL_PROPOSAL" and degraded_reason is not None:
+            raise TripDraftRevisionStoreError("TRIP_UNDERSTANDING_INVALID")
+        if (
+            recognition_source == "REVIEWED_FIXED_QUESTIONS"
+            and degraded_reason is None
+        ):
+            raise TripDraftRevisionStoreError("TRIP_UNDERSTANDING_INVALID")
         with self._immediate_transaction() as connection:
             prior = self._find_command(connection, claim.command)
             if prior is None or prior["request_digest"] != claim.command.request_digest:
@@ -554,6 +565,37 @@ class SqliteTripDraftRevisionRepository:
             ).rowcount
             if updated != 1:
                 raise TripDraftRevisionStoreError("TRIP_DRAFT_REVISION_UNAVAILABLE")
+
+    def get_recognition(
+        self,
+        *,
+        draft_id: UUID,
+        revision: int,
+    ) -> TripDraftRevisionRecognition:
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT recognition_source, recognition_model, degraded_reason,
+                          llm_call_count
+                   FROM trip_draft_revisions
+                   WHERE draft_id=? AND revision=?""",
+                (str(draft_id), revision),
+            ).fetchone()
+        if row is None:
+            raise TripDraftRevisionStoreError("TRIP_DRAFT_REVISION_UNAVAILABLE")
+        try:
+            return TripDraftRevisionRecognition.model_validate(
+                {
+                    "source": row["recognition_source"],
+                    "model": row["recognition_model"],
+                    "degradedReason": row["degraded_reason"],
+                    "callCount": row["llm_call_count"],
+                },
+                strict=True,
+            )
+        except Exception as error:
+            raise TripDraftRevisionStoreError(
+                "TRIP_DRAFT_REVISION_UNAVAILABLE"
+            ) from error
 
     def fail(
         self,
