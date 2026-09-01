@@ -4,6 +4,10 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
+    disk:
+      name: xingzhi-travel-api-data
+      mountPath: /app/data
+      sizeGB: 1
     envVars:
       - key: AMAP_WEB_SERVICE_KEY
         sync: false
@@ -21,6 +25,12 @@ services:
         value: 10
       - key: CORS_ALLOWED_ORIGINS
         value: https://imagine-1-31o2.onrender.com
+      - key: APP_ENVIRONMENT
+        value: production
+      - key: AUTH_COOKIE_SECURE
+        value: "true"
+      - key: ACCOUNT_SESSION_DB_PATH
+        value: /app/data/account.sqlite3
       - key: PLAN_VERSION_DB_PATH
         value: /app/data/plan_versions.sqlite3
       - key: AMAP_CACHE_DB_PATH
