@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+from cryptography.fernet import Fernet, InvalidToken
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
@@ -12,6 +13,8 @@ from app.domain.account import (
     CurrentUser,
     LoginRequest,
     ProfileUpdateRequest,
+    ModelSettingsUpdateRequest,
+    ModelSettingsView,
     RegisterRequest,
     normalized_email,
 )
@@ -31,11 +34,13 @@ class AccountService:
         session_ttl_days: int = 14,
         clock: Callable[[], datetime] | None = None,
         password_hash: PasswordHash | None = None,
+        api_key_encryption_key: str | None = None,
     ) -> None:
         self.repository = repository
         self.session_ttl = timedelta(days=min(session_ttl_days, MAX_SESSION_TTL_DAYS))
         self._clock = clock or (lambda: datetime.now(UTC))
         self._password_hash = password_hash or PasswordHash.recommended()
+        self._cipher = Fernet(api_key_encryption_key.encode()) if api_key_encryption_key else None
 
     @staticmethod
     def _credentials_error() -> AppError:
@@ -120,3 +125,29 @@ class AccountService:
     def logout(self, token: str | None) -> None:
         if token:
             self.repository.revoke_session(token)
+
+    def model_settings(self, token: str | None) -> ModelSettingsView:
+        user = self.current_user(token)
+        stored = self.repository.get_model_settings(user.user_id)
+        return ModelSettingsView(configured=stored is not None, model=stored[0] if stored else None, key_hint=("••••" + self._decrypt(stored[1])[-4:]) if stored else None)
+
+    def update_model_settings(self, token: str | None, payload: ModelSettingsUpdateRequest) -> ModelSettingsView:
+        user = self.current_user(token)
+        if self._cipher is None:
+            raise AppError("ACCOUNT_KEY_STORAGE_UNAVAILABLE", "服务端未配置 API Key 加密密钥", 503, False)
+        self.repository.save_model_settings(user.user_id, model=payload.model, encrypted_api_key=self._cipher.encrypt(payload.api_key.encode()).decode())
+        return ModelSettingsView(configured=True, model=payload.model, key_hint="••••" + payload.api_key[-4:])
+
+    def delete_model_settings(self, token: str | None) -> None:
+        self.repository.delete_model_settings(self.current_user(token).user_id)
+
+    def user_model_credentials(self, token: str | None) -> tuple[str, str] | None:
+        user = self.current_user(token)
+        stored = self.repository.get_model_settings(user.user_id)
+        return (stored[0], self._decrypt(stored[1])) if stored else None
+
+    def _decrypt(self, value: str) -> str:
+        if self._cipher is None:
+            raise AppError("ACCOUNT_KEY_STORAGE_UNAVAILABLE", "服务端未配置 API Key 加密密钥", 503, False)
+        try: return self._cipher.decrypt(value.encode()).decode()
+        except (InvalidToken, UnicodeDecodeError) as error: raise AppError("ACCOUNT_KEY_STORAGE_UNAVAILABLE", "已保存的 API Key 无法读取", 503, False) from error

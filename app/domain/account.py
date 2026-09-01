@@ -54,5 +54,16 @@ class LogoutResult(AccountModel):
     logged_out: bool = True
 
 
+class ModelSettingsUpdateRequest(AccountModel):
+    model: Annotated[str, Field(pattern=r"^qwen-(turbo|plus|max)$")]
+    api_key: Annotated[str, Field(min_length=16, max_length=512)]
+
+
+class ModelSettingsView(AccountModel):
+    configured: bool
+    model: str | None = None
+    key_hint: str | None = None
+
+
 def normalized_email(email: str | EmailStr) -> str:
     return str(email).strip().casefold()

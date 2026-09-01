@@ -11,13 +11,14 @@ from app.domain.account import (
     LogoutResult,
     ProfileUpdateRequest,
     RegisterRequest,
+    ModelSettingsUpdateRequest, ModelSettingsView,
 )
 from app.domain.models import ApiResponse
 from app.domain.parent_trip import ParentTripInvitationRedeemRequest
 
 
 ACCOUNT_COOKIE_NAME = "account_session"
-ACCOUNT_COOKIE_PATH = "/api/v1/account"
+ACCOUNT_COOKIE_PATH = "/api"
 
 router = APIRouter(prefix="/api/v1/account", tags=["账户"])
 
@@ -127,6 +128,18 @@ async def update_profile(
 ) -> ApiResponse[CurrentUser]:
     _no_store(response)
     return ApiResponse(data=service.update_profile(_token(request), payload))
+
+@router.get("/me/model-settings")
+async def model_settings(request: Request, response: Response, service: AccountService = Depends(get_account_service)) -> ApiResponse[ModelSettingsView]:
+    _no_store(response); return ApiResponse(data=service.model_settings(_token(request)))
+
+@router.put("/me/model-settings")
+async def update_model_settings(payload: ModelSettingsUpdateRequest, request: Request, response: Response, service: AccountService = Depends(get_account_service)) -> ApiResponse[ModelSettingsView]:
+    _no_store(response); return ApiResponse(data=service.update_model_settings(_token(request), payload))
+
+@router.delete("/me/model-settings")
+async def delete_model_settings(request: Request, response: Response, service: AccountService = Depends(get_account_service)) -> ApiResponse[ModelSettingsView]:
+    service.delete_model_settings(_token(request)); _no_store(response); return ApiResponse(data=ModelSettingsView(configured=False))
 
 
 @router.post("/parent-trip-invitations/redeem")

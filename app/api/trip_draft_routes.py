@@ -4,6 +4,7 @@ from app.application.trip_draft_service import TripDraftParserService
 from app.application.workflow_service import WorkflowService
 from app.domain.models import ApiResponse
 from app.domain.trip_draft import TripDraftParseRequest
+from app.infrastructure.bailian import BailianTripDraftExtractor
 
 
 router = APIRouter(prefix="/api/v1", tags=["自然语言行程解析与歧义确认"])
@@ -24,9 +25,10 @@ def get_workflow_service(request: Request) -> WorkflowService:
 )
 async def parse_trip_draft(
     payload: TripDraftParseRequest,
+    request: Request,
     service: TripDraftParserService = Depends(get_trip_draft_service),
 ) -> ApiResponse:
-    return ApiResponse(data=await service.parse(payload))
+    return ApiResponse(data=await _parse_with_user_model(request, service, payload))
 
 
 @router.post(
@@ -36,9 +38,40 @@ async def parse_trip_draft(
 )
 async def confirm_trip_draft(
     payload: TripDraftParseRequest,
+    request: Request,
     service: TripDraftParserService = Depends(get_trip_draft_service),
     workflow: WorkflowService = Depends(get_workflow_service),
 ) -> ApiResponse:
-    parsed = await service.parse(payload)
+    parsed = await _parse_with_user_model(request, service, payload)
     confirmed = service.require_planning_ready(parsed)
     return ApiResponse(data=workflow.confirm_trip(confirmed))
+
+
+async def _parse_with_user_model(
+    request: Request,
+    service: TripDraftParserService,
+    payload: TripDraftParseRequest,
+):
+    """Use an optional browser-session key for this request only; never persist it."""
+    token = request.cookies.get("account_session")
+    if not token:
+        return await service.parse(payload)
+    credentials = request.app.state.account_service.user_model_credentials(token)
+    if credentials is None:
+        return await service.parse(payload)
+    model, api_key = credentials
+    settings = request.app.state.settings
+    extractor = BailianTripDraftExtractor(
+        api_key=api_key,
+        base_url=settings.bailian_base_url,
+        model=model,
+        timeout_seconds=settings.bailian_request_timeout_seconds,
+    )
+    ephemeral_service = TripDraftParserService(
+        city_resolver=service._city_resolver,
+        llm_extractor=extractor,
+    )
+    try:
+        return await ephemeral_service.parse(payload)
+    finally:
+        await extractor.close()

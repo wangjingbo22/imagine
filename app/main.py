@@ -216,6 +216,7 @@ def create_app(
     resolved_account_service = account_service or AccountService(
         SqliteAccountRepository(resolved_settings.account_session_db_path),
         session_ttl_days=resolved_settings.account_session_ttl_days,
+        api_key_encryption_key=(resolved_settings.account_api_key_encryption_key.get_secret_value() if resolved_settings.account_api_key_encryption_key else None),
     )
     managed_client: AmapClient | None = None
     managed_bailian_extractor: BailianTripDraftExtractor | None = None

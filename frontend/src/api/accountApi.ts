@@ -6,6 +6,7 @@ import type {
   RegisterInput,
 } from '../domain/account'
 import { request } from './client'
+import type { ModelSettingsView } from '../domain/account'
 
 export function registerAccount(input: RegisterInput) {
   return request<CurrentUser>('/api/v1/account/register', {
@@ -37,3 +38,7 @@ export function updateAccountProfile(input: ProfileUpdateInput) {
     body: JSON.stringify(input),
   })
 }
+
+export function getModelSettings() { return request<ModelSettingsView>('/api/v1/account/me/model-settings') }
+export function saveModelSettings(input: { model: string; apiKey: string }) { return request<ModelSettingsView>('/api/v1/account/me/model-settings', { method: 'PUT', body: JSON.stringify(input) }) }
+export function deleteModelSettings() { return request<ModelSettingsView>('/api/v1/account/me/model-settings', { method: 'DELETE' }) }

@@ -83,6 +83,11 @@ class SqliteAccountRepository:
                 """
             )
             connection.execute(
+                """CREATE TABLE IF NOT EXISTS account_model_settings (
+                user_id TEXT PRIMARY KEY, model TEXT NOT NULL, encrypted_api_key TEXT NOT NULL,
+                updated_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users (user_id))"""
+            )
+            connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS account_sessions (
                     token_hash TEXT PRIMARY KEY,
@@ -252,3 +257,17 @@ class SqliteAccountRepository:
                 """,
                 (now, hash_session_token(token)),
             )
+
+    def save_model_settings(self, user_id: UUID, *, model: str, encrypted_api_key: str) -> None:
+        with closing(self._connect()) as connection:
+            connection.execute("""INSERT INTO account_model_settings(user_id,model,encrypted_api_key,updated_at)
+            VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET model=excluded.model, encrypted_api_key=excluded.encrypted_api_key, updated_at=excluded.updated_at""", (str(user_id), model, encrypted_api_key, self._utc(self._clock()).isoformat()))
+
+    def get_model_settings(self, user_id: UUID) -> tuple[str, str] | None:
+        with closing(self._connect()) as connection:
+            row = connection.execute("SELECT model, encrypted_api_key FROM account_model_settings WHERE user_id = ?", (str(user_id),)).fetchone()
+        return (row["model"], row["encrypted_api_key"]) if row else None
+
+    def delete_model_settings(self, user_id: UUID) -> None:
+        with closing(self._connect()) as connection:
+            connection.execute("DELETE FROM account_model_settings WHERE user_id = ?", (str(user_id),))

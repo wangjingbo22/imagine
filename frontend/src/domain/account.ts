@@ -6,6 +6,8 @@ export interface CurrentUser {
   interests: string[]
 }
 
+export interface ModelSettingsView { configured: boolean; model: string | null; keyHint: string | null }
+
 export interface RegisterInput {
   email: string
   password: string

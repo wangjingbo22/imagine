@@ -42,6 +42,7 @@ import type {
 } from '../domain/executionAdjustment'
 import { ApiError, request, requestBare } from './client'
 import { createExpenseChangeReplanRequest } from '../services/executionReplan'
+import { userLlmHeaders } from '../services/userLlmSettings'
 import type { ProviderFactPlaceSet } from '../services/recommendationSelection'
 
 export const USE_PLAN_VERSION_API =
@@ -140,6 +141,7 @@ export const tripApi = {
   createDraft(input: TripDraftParseInput) {
     return request<TripDraftParseResult>('/api/v1/trips/drafts/parse', {
       method: 'POST',
+      headers: userLlmHeaders(),
       body: JSON.stringify(input),
     })
   },
@@ -147,6 +149,7 @@ export const tripApi = {
   confirmDraft(input: TripDraftParseInput) {
     return request<CreateSingleDayTrip>('/api/v1/trips/drafts/confirm', {
       method: 'POST',
+      headers: userLlmHeaders(),
       body: JSON.stringify(input),
     })
   },
