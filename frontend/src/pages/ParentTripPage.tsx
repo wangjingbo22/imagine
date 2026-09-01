@@ -9,7 +9,7 @@ import {
   WalletCards,
 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   createParentTrip,
   createParentTripInvitation,
@@ -210,6 +210,7 @@ export function ParentTripPage() {
     </section> : <><section className="parent-trip-hero"><div><p className="eyebrow">同城 {trip.days.length} 天父行程</p><h1>{trip.title}</h1><p>{trip.cityName} · {trip.startDate} 至 {trip.endDate}</p></div>
       <div className="parent-trip-sync-state"><span>{syncView ? `${syncView.visibleProfiles.length}/3 人` : '同步中'}</span><button className="icon-button" type="button" title="立即刷新" aria-label="立即刷新" onClick={() => void load(trip.parentTripId).catch((caught: Error) => setError(caught.message))}><RefreshCw size={18} /></button></div></section>
       <section className="parent-budget-summary"><div><WalletCards/><span>分配总预算</span><strong>{yuan(trip.totalBudgetCents)}</strong></div><div><span>已生成计划合计</span><strong>{yuan(trip.plannedCostCents)}</strong></div><div><span>已记录支出合计</span><strong>{yuan(trip.actualSpentCents)}</strong></div></section>
+      <Link className="button button--soft" to={`/budget-ledger?parentTripId=${trip.parentTripId}`}>查看预算账本</Link>
 
       <section className="parent-collaboration" aria-label="同行成员">
         <header><div><Users size={22} /><h2>同行成员</h2></div><button className="button button--soft" type="button" disabled={!syncView || memberLimitReached || inviteBusy} onClick={() => void createInvitation()}><UserPlus size={17} />{inviteBusy ? '生成中' : '生成成员邀请'}</button></header>
