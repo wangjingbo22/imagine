@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Annotated, Literal
 
-from pydantic import Field, JsonValue, model_validator
+from pydantic import Field, JsonValue, model_serializer, model_validator
 
 from app.domain.models import Place, Provenance, Route
 from app.schemas.constraint import Constraint
@@ -16,6 +16,19 @@ from app.schemas.trip import (
     TripStatus,
 )
 from app.services.route_risk import ValidationStatus
+
+class PlannedRest(ContractModel):
+    """An explicit rest at the previous stop, before the next trusted route."""
+
+    start_at: SecondPrecisionTime
+    end_at: SecondPrecisionTime
+
+    @model_validator(mode="after")
+    def ordered(self) -> "PlannedRest":
+        if self.end_at <= self.start_at:
+            raise ValueError("rest endAt must be later than startAt")
+        return self
+
 
 class CandidateTaskFact(ContractModel):
     """One selected same-city activity and its normalized T006 facts."""
@@ -32,6 +45,18 @@ class CandidateTaskFact(ContractModel):
     route: Route
     elapsed_since_rest_minutes: Annotated[int, Field(ge=0)]
     note: Annotated[str, Field(max_length=500)] = ""
+    rest_before: PlannedRest | None = None
+    rest_on_arrival: PlannedRest | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_optional_rest(self, handler, info):
+        # Keep existing V1 request digests stable when no rest was scheduled.
+        result = handler(self)
+        if self.rest_before is None:
+            result.pop("restBefore" if info.by_alias else "rest_before", None)
+        if self.rest_on_arrival is None:
+            result.pop("restOnArrival" if info.by_alias else "rest_on_arrival", None)
+        return result
 
     @model_validator(mode="after")
     def validate_time_range(self) -> "CandidateTaskFact":
@@ -101,6 +126,20 @@ class CandidatePlanRequest(ContractModel):
                 raise ValueError("taskFacts must stay inside the trip day time window")
             if item.start_at < previous_end:
                 raise ValueError("taskFacts must be ordered and must not overlap")
+            seconds = lambda value: value.hour * 3600 + value.minute * 60 + value.second
+            route_end = item.start_at
+            if item.rest_on_arrival is not None:
+                if item.rest_on_arrival.end_at != item.start_at:
+                    raise ValueError("arrival rest must end at the activity start")
+                route_end = item.rest_on_arrival.start_at
+                if seconds(route_end) - item.route.durationSeconds < seconds(previous_end):
+                    raise ValueError("arrival rest must leave enough time for the trusted route")
+            if item.rest_before is not None:
+                if (
+                    item.rest_before.start_at < previous_end
+                    or seconds(item.rest_before.end_at) > seconds(route_end) - item.route.durationSeconds
+                ):
+                    raise ValueError("planned rest must fit after the previous task and before travel")
             previous_end = item.end_at
         return self
 

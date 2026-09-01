@@ -211,6 +211,47 @@ def test_missing_trusted_facts_fail_before_t018_can_select(
     assert exc_info.value.code == "T011_CANDIDATE_FACTS_NOT_FOUND"
 
 
+@pytest.mark.parametrize("facility_status", ["PASS", "FAIL"])
+def test_optional_facilities_do_not_hide_missing_hard_route_coverage(
+    facility_status: str,
+) -> None:
+    payload = _fixture_payload()
+    payload["request"]["confirmedConstraints"] = []
+    payload["request"]["trip"]["participants"][0]["assistanceProfile"] = None
+    for fact in payload["request"]["taskFacts"]:
+        for evidence in fact["route"]["facilityEvidence"]:
+            evidence["status"] = facility_status
+    request = _request(payload)
+    initial = generate_proposed_plan_version(request)
+    current = PlanVersion(
+        **initial.model_dump(),
+        status=PlanVersionStatus.CURRENT,
+        created_at=datetime(2026, 9, 5, tzinfo=UTC),
+    )
+    proposed = _v2_plan(request, current)
+    validator = T011ReplanCandidateValidator(
+        InMemoryTrustedFacts({proposed.plan_id: request})
+    )
+    outcome = MinimumDisruptionSelector(validator).select(
+        current_plan=current,
+        candidates=(ReplanCandidate(plan=proposed, satisfaction_loss=0),),
+        locked_task_ids=(current.days[0].tasks[0].task_id,),
+    )
+    assert isinstance(outcome, SelectedReplan)
+    checks = outcome.validation_report.checks
+    assert {item.domain for item in checks if item.hardness == "HARD"} == set(ReplanRuleDomain)
+    assert any(
+        item.rule_id == "T011.ROUTE.NO_APPLICABLE_RULE"
+        and item.hardness == "HARD"
+        and item.status.value == "PASS"
+        for item in checks
+    )
+    assert all(
+        item.hardness == "SOFT" and item.status.value == facility_status
+        for item in checks if item.rule_id.startswith("T010.FACILITY.")
+    )
+
+
 def test_fact_snapshot_tampering_fails_closed_even_when_all_snapshot_checks_pass(
     tmp_path: Path,
 ) -> None:

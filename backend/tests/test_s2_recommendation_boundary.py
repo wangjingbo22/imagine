@@ -127,3 +127,47 @@ def test_fairness_key_prefers_higher_lowest_member_score() -> None:
     balanced = [MemberScore(participantId=str(index), score=80) for index in range(3)]
     unequal = [MemberScore(participantId=str(index), score=score) for index, score in enumerate((95, 95, 50))]
     assert TrustedRecommendationService._fairness_sort_key(tasks, balanced, facts) < TrustedRecommendationService._fairness_sort_key(tasks, unequal, facts)
+
+
+def test_member_score_uses_traceable_interest_deductions_instead_of_fixed_70() -> None:
+    tasks = [
+        CandidatePlace(
+            factRefId="AMAP:museum",
+            placeId="museum",
+            name="城市历史博物馆",
+            category="科教文化服务;博物馆",
+        )
+    ]
+
+    scores = TrustedRecommendationService._score_members(
+        tasks,
+        [
+            MemberPreference(
+                participant_id="history-member",
+                interests=("历史文化",),
+                must_visit=(),
+            ),
+            MemberPreference(
+                participant_id="food-member",
+                interests=("美食",),
+                must_visit=(),
+            ),
+        ],
+    )
+
+    assert [item.score for item in scores] == [100, 80]
+    assert scores[0].reasons == ["兴趣覆盖 1/1"]
+    assert scores[1].penalty_rule_ids == ["FAIR.INTEREST.UNMET"]
+    assert "扣 20 分" in scores[1].reasons[1]
+
+
+def test_member_score_without_soft_preferences_is_explicitly_not_penalized() -> None:
+    tasks = [CandidatePlace(factRefId="AMAP:a", placeId="a", name="公园")]
+
+    score = TrustedRecommendationService._score_members(
+        tasks,
+        [MemberPreference(participant_id="member", interests=(), must_visit=())],
+    )[0]
+
+    assert score.score == 100
+    assert score.reasons == ["未设置软兴趣，当前不扣兴趣分"]

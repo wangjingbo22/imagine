@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import { ApiError } from '../src/api/client.ts'
@@ -227,4 +228,39 @@ test('event persistence exposes the backend idempotency conflict code', async (t
       return true
     },
   )
+})
+
+test('Workspace offers deterministic Plan V2 presets and blocks an empty suffix', async () => {
+  const source = await readFile(
+    new URL('../src/pages/WorkspacePage.tsx', import.meta.url),
+    'utf8',
+  )
+
+  assert.match(source, /prepareQuickAdjustment\('LATE', 15\)/)
+  assert.match(source, /prepareQuickAdjustment\('FATIGUE', 'SEVERE'\)/)
+  assert.match(source, /hasAdjustableSuffix/)
+  assert.match(source, /当前已经是最后一个任务，没有后续安排可生成 Plan V2/)
+  assert.match(source, /describePlanV2Error\(error\)/)
+})
+
+test('facility evidence is grouped but remains individually correctable', async () => {
+  const source = await readFile(
+    new URL('../src/pages/WorkspacePage.tsx', import.meta.url),
+    'utf8',
+  )
+
+  assert.match(source, /facilityReviewGroups/)
+  assert.match(source, /查看并逐段修正/)
+  assert.match(source, /setReviewItems\(\[item\], 'PASS'\)/)
+  assert.match(source, /completedReviewCount !== reviewItems\.length/)
+})
+
+test('V2 review separates actual changes from retained fields and blocks empty acceptance', async () => {
+  const source = await readFile(new URL('../src/pages/WorkspacePage.tsx', import.meta.url), 'utf8')
+  assert.match(source, /changedExecutionTasks/)
+  assert.match(source, /休息与关怀安排/)
+  assert.match(source, /item\.changeType !== 'RETAINED'/)
+  assert.match(source, /<details className="plan-diff-retained">/)
+  assert.match(source, /disabled=\{isDecidingV2 \|\| changedExecutionTasks\.length === 0\}/)
+  assert.match(source, /REPLAN_ADJUSTMENT_NO_CHANGE/)
 })

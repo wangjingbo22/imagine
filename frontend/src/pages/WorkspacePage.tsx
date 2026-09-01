@@ -34,6 +34,7 @@ import { TaskPhotoCard } from '../components/TaskPhotoCard'
 import type {
   CandidatePlanRequest,
   CandidatePlanReview,
+  CandidateReviewItem,
   CandidateReviewConfirmationInput,
   CreateSingleDayTrip,
   ExecutionEvent,
@@ -81,10 +82,11 @@ import { restoreDraftFromPlanningFacts } from '../services/planningFacts'
 import { getStoredOrganizerToken } from '../services/organizerStorage'
 import {
   canRequestS1PlanV2,
+  executionAdjustmentBlockReason,
   S1_REPLAN_LIMIT_MESSAGE,
 } from '../services/replanPolicy'
 
-const S1_EVENT_REPLAN_ONLY_MESSAGE = 'Sprint1仅支持实际消费变化触发V2'
+const EXECUTION_REPLAN_HELP = '实际消费变化在完成当前任务时记录'
 
 type WorkspaceView = 'plan' | 'execute' | 'diff' | 'summary'
 
@@ -96,11 +98,11 @@ const views: Array<{ value: WorkspaceView; label: string }> = [
 ]
 
 const diffCategoryLabels = {
-  PLACE: '地点',
   TIME: '时间',
+  CARE: '休息与关怀安排',
   ROUTE: '路线',
   COST: '费用',
-  CARE: '关怀指标',
+  PLACE: '地点',
 } as const
 
 const diffChangeLabels = {
@@ -132,6 +134,50 @@ const recommendationFeedbackOptions = [
   '增加文化景点',
   '调整用餐安排',
 ]
+
+const facilityTypeLabels: Record<string, string> = {
+  ELEVATOR: '电梯',
+  RAMP: '坡道',
+  NURSING_ROOM: '母婴室',
+  ACCESSIBLE_ENTRANCE: '无障碍入口',
+}
+
+function describePlanV2Error(error: unknown) {
+  if (!(error instanceof ApiError)) {
+    return error instanceof Error ? error.message : '确认事件并生成 V2 失败'
+  }
+  const messages: Record<string, string> = {
+    REPLAN_ADJUSTMENT_NO_CHANGE: '当前安排已满足本次限制，没有实际任务变化，已保留原计划，不生成空白 V2。',
+    REPLAN_FATIGUE_ROUTE_TOO_LONG: '现有交通路段加必要停留时间超过疲劳休息间隔，需要核实更省力的路线；原计划未被替换。',
+    REPLAN_FATIGUE_TIME_INSUFFICIENT: '加入真实休息后时间不足，请调整出行安排；原计划未被替换。',
+    REPLAN_S1_VERSION_LIMIT: '当前已不再执行 Plan V1。本版本仅支持一次 V1 → V2 调整，请继续执行当前计划。',
+    REPLAN_NO_FEASIBLE_CANDIDATE: '当前调整未通过服务端校验，原 Plan V1 保持不变。',
+    S2_T021_EVENT_TASK_NOT_STARTED: '当前任务尚未正式开始。请刷新页面或先开始当前任务，再生成 V2。',
+    S2_T021_SUFFIX_EMPTY: '当前已经是最后一个任务，没有后续安排可生成 Plan V2。',
+    REPLAN_CANDIDATE_PENDING: '已有一个待决策的 Plan V2，请先在“V1/V2 变更对比”中接受或拒绝。',
+    REPLAN_CURRENT_PLAN_REQUIRED: '没有可执行的当前 Plan V1，请先确认并开始 Plan V1。',
+    REPLAN_EXECUTION_REQUIRED: '行程尚未进入执行状态，请先确认 Plan V1 并开始行程。',
+    S2_T021_NO_FEASIBLE_CANDIDATE: '当前迟到或疲劳约束下没有安全可行的后续方案，原 Plan V1 保持不变。',
+    T018_NO_FEASIBLE_CANDIDATE: '当前迟到或疲劳约束下没有安全可行的后续方案，原 Plan V1 保持不变。',
+  }
+  if (error.code === 'REPLAN_NO_FEASIBLE_CANDIDATE') {
+    const ruleIds = error.details.flatMap((item) =>
+      Array.isArray(item.affectedRuleIds) ? item.affectedRuleIds.filter((rule): rule is string => typeof rule === 'string') : [],
+    )
+    const explanations = [...new Set(ruleIds.map((rule) => {
+      if (rule.startsWith('REPLAN.VALIDATION.COVERAGE.')) return '服务端校验报告不完整，请更新服务后重试'
+      if (rule === 'REPLAN.PREFIX.IMMUTABLE') return '候选改变了已开始或已锁定的任务，不能替换当前计划'
+      if (rule.includes('timeBudgetMinutes')) return '剩余时间不足，当前可信路线无法在截止时间前完成'
+      if (rule.includes('walkBudgetMeters') || rule.includes('maxSegmentWalkMeters')) return '现有路线的步行量超过调整后的体力限制'
+      if (rule.includes('restIntervalMinutes')) return '现有后续安排无法满足所需休息频率'
+      if (rule.includes('BUDGET')) return '已消费金额加剩余费用超过预算，或仍有费用未确认'
+      if (rule.includes('CARE')) return '关怀限制或设施事实尚未满足，请核对相关要求'
+      return `未通过规则：${rule}`
+    }))]
+    return [messages.REPLAN_NO_FEASIBLE_CANDIDATE, ...explanations].join(' ')
+  }
+  return messages[String(error.code)] ?? `${error.message}（${String(error.code)}）`
+}
 
 function formatMoney(cents: number) {
   return `¥${Math.round(cents / 100)}`
@@ -261,6 +307,7 @@ export function WorkspacePage() {
   const confirmedTrip = navigationState?.trip
   const tripId =
     new URLSearchParams(location.search).get('tripId') ?? navigationState?.tripId ?? null
+  const parentTripId = new URLSearchParams(location.search).get('parentTripId')
   const organizerToken = tripId
     ? getStoredOrganizerToken(tripId)
     : null
@@ -621,10 +668,64 @@ export function WorkspacePage() {
     facilityEvidence.length === 0 ||
     facilityEvidence.some(facilityEvidenceNeedsConfirmation)
   )
+  const reviewItems = candidateReview?.items ?? []
+  const priceReviewItems = reviewItems.filter((item) => item.valueType === 'PRICE_CENTS')
+  const sourceReviewItems = reviewItems.filter((item) => item.valueType === 'SOURCE_CONFIRMATION')
+  const facilityReviewGroups = [...reviewItems
+    .filter((item) => item.valueType === 'FACILITY_STATUS')
+    .reduce((groups, item) => {
+      const key = item.facilityType ?? item.field
+      const current = groups.get(key) ?? []
+      current.push(item)
+      groups.set(key, current)
+      return groups
+    }, new Map<string, CandidateReviewItem[]>())
+    .entries()]
+    .map(([key, items]) => ({
+      key,
+      label: facilityTypeLabels[key] ?? items[0]?.label ?? '路线设施',
+      items,
+    }))
+  const completedReviewCount = reviewItems.filter(
+    (item) => Boolean(reviewValues[item.itemId]?.trim()),
+  ).length
+  const reviewProgress = reviewItems.length > 0
+    ? Math.round(completedReviewCount / reviewItems.length * 100)
+    : 0
   const canCreatePlanV2 = canRequestS1PlanV2(
     storedCurrentPlan?.version ?? null,
     executionAdjustmentCount,
   )
+  const hasAdjustableSuffix = currentTaskIndex < activePlan.tasks.length - 1
+  const adjustmentBlockReason = executionAdjustmentBlockReason({
+    currentVersion: storedCurrentPlan?.version ?? null,
+    completedV2Decisions: executionAdjustmentCount,
+    hasPendingCandidate: candidatePlanV2 !== null,
+    hasCurrentTask: Boolean(currentTask),
+    hasAdjustableSuffix,
+    hasOrganizerToken: Boolean(organizerToken),
+  })
+  const adjustmentDetailsComplete = adjustmentEventType === 'LATE'
+    ? Number.isInteger(Number(adjustmentLateMinutes)) && Number(adjustmentLateMinutes) >= 1 && Number(adjustmentLateMinutes) <= 240
+    : adjustmentEventType === 'FATIGUE' && Boolean(adjustmentFatigueLevel)
+  const changedExecutionTasks = candidatePlanV2?.days[0].tasks.filter((task) => {
+    const previous = storedCurrentPlan?.days[0].tasks.find((item) => item.taskId === task.taskId)
+    return !previous || previous.timeRange !== task.timeRange || previous.note !== task.note ||
+      previous.title !== task.title || previous.transport !== task.transport ||
+      previous.durationMinutes !== task.durationMinutes || previous.costCents !== task.costCents ||
+      previous.walkMeters !== task.walkMeters
+  }) ?? []
+
+  function setReviewItems(
+    items: CandidateReviewItem[],
+    value: string,
+  ) {
+    setReviewValues((current) => ({
+      ...current,
+      ...Object.fromEntries(items.map((item) => [item.itemId, value])),
+    }))
+    setPlanLifecycleError('')
+  }
   function toggleRecommendationFeedback(option: string) {
     setSelectedFeedbackOptions((current) =>
       current.includes(option)
@@ -889,13 +990,67 @@ export function WorkspacePage() {
     setView('diff')
   }
 
+  function prepareQuickAdjustment(
+    eventType: ExecutionAdjustmentType,
+    value: number | FatigueLevel,
+  ) {
+    if (adjustmentBlockReason || isParsingAdjustment || isConfirmingAdjustment) {
+      if (adjustmentBlockReason) setPlanLifecycleError(adjustmentBlockReason)
+      return
+    }
+    if (!currentTask) {
+      setPlanLifecycleError('当前页面缺少正在执行的任务。')
+      return
+    }
+    if (!hasAdjustableSuffix) {
+      setPlanLifecycleError('当前已经是最后一个任务，没有后续安排可生成 Plan V2。')
+      return
+    }
+    const lateMinutes = eventType === 'LATE' ? Number(value) : null
+    const fatigueLevel = eventType === 'FATIGUE' ? value as FatigueLevel : null
+    const draft: ExecutionEventParseOutcome['draft'] = {
+      schemaVersion: '1.0',
+      eventType,
+      taskId: currentTask.id,
+      lateMinutes,
+      fatigueLevel,
+      clarificationQuestions: [],
+    }
+    setAdjustmentParse({
+      draft,
+      recognition: {
+        source: 'DETERMINISTIC_FORM',
+        model: null,
+        degradedReason: null,
+      },
+    })
+    setAdjustmentEventType(eventType)
+    setAdjustmentLateMinutes(lateMinutes === null ? '' : String(lateMinutes))
+    setAdjustmentFatigueLevel(fatigueLevel ?? '')
+    setAdjustmentText(
+      eventType === 'LATE'
+        ? `迟到了 ${lateMinutes} 分钟`
+        : `当前为${fatigueLevel === 'MILD' ? '轻度' : fatigueLevel === 'MODERATE' ? '中度' : '重度'}疲劳`,
+    )
+    setPendingAdjustmentEvent(null)
+    setPlanLifecycleError('')
+  }
+
   async function parseExecutionAdjustment() {
+    if (adjustmentBlockReason || isParsingAdjustment || isConfirmingAdjustment) {
+      if (adjustmentBlockReason) setPlanLifecycleError(adjustmentBlockReason)
+      return
+    }
     if (!tripId || !currentTask) {
       setPlanLifecycleError('当前页面缺少正在执行的任务，无法解析调整。')
       return
     }
     if (!organizerToken) {
       setPlanLifecycleError('当前浏览器没有组织者凭证，不能提交迟到或疲劳调整。')
+      return
+    }
+    if (!hasAdjustableSuffix) {
+      setPlanLifecycleError('当前已经是最后一个任务，没有后续安排可生成 Plan V2。')
       return
     }
     const rawText = adjustmentText.trim()
@@ -930,12 +1085,22 @@ export function WorkspacePage() {
   }
 
   async function confirmExecutionAdjustment() {
+    if (adjustmentBlockReason || isParsingAdjustment || isConfirmingAdjustment) {
+      if (adjustmentBlockReason) setPlanLifecycleError(adjustmentBlockReason)
+      return
+    }
     if (!tripId || !storedCurrentPlan || !adjustmentParse) {
       setPlanLifecycleError('请先解析并确认当前任务的迟到或疲劳情况。')
       return
     }
     if (!organizerToken) {
       setPlanLifecycleError('当前浏览器没有组织者凭证，只有组织者可以发起重规划。')
+      return
+    }
+    if (adjustmentParse.draft.taskId !== currentTask?.id) {
+      setAdjustmentParse(null)
+      setPendingAdjustmentEvent(null)
+      setPlanLifecycleError('当前任务已变化，请重新选择迟到或疲劳情况。')
       return
     }
     setIsConfirmingAdjustment(true)
@@ -1004,7 +1169,7 @@ export function WorkspacePage() {
       )
       setView('diff')
     } catch (error) {
-      setPlanLifecycleError(error instanceof Error ? error.message : '确认事件并生成 V2 失败')
+      setPlanLifecycleError(describePlanV2Error(error))
     } finally {
       setIsConfirmingAdjustment(false)
     }
@@ -1044,6 +1209,9 @@ export function WorkspacePage() {
       setPendingAdjustmentEvent(null)
       setAdjustmentParse(null)
       setAdjustmentText('')
+      setAdjustmentEventType('')
+      setAdjustmentLateMinutes('')
+      setAdjustmentFatigueLevel('')
       setExecutionNotice(
         decision === 'accept'
           ? '已接受 Plan V2；Plan V1 已转为历史版本。'
@@ -1169,6 +1337,7 @@ export function WorkspacePage() {
 
   return (
     <AppShell compact>
+      {parentTripId && <button className="parent-trip-return" type="button" onClick={() => { window.location.href = `/parent-trips/${parentTripId}` }}>← 返回多日父行程</button>}
       <main className="workspace">
         <header className="workspace-header" data-reveal="fade">
           <div>
@@ -1310,44 +1479,27 @@ export function WorkspacePage() {
               {candidateReview && (
                 <section className="evidence-review-card" aria-live="polite">
                   <div className="source-card__head">
-                    <span><ShieldCheck size={18} /> 补齐可信事实</span>
-                    <strong>{candidateReview.items.length} 项待确认</strong>
+                    <span><ShieldCheck size={18} /> 行前事实核对</span>
+                    <strong>{completedReviewCount}/{reviewItems.length} 已完成</strong>
                   </div>
-                  <p>高德没有返回这些事实。请按实际情况填写；提交后由服务端重新计算，页面不能自行改成 PASS。</p>
-                  {candidateReview.items.some((item) => item.valueType === 'FACILITY_STATUS') && (
-                    <div className="evidence-review-bulk">
-                      <span>设施批量确认：</span>
-                      <button
-                        onClick={() => setReviewValues((current) => ({
-                          ...current,
-                          ...Object.fromEntries(candidateReview.items
-                            .filter((item) => item.valueType === 'FACILITY_STATUS')
-                            .map((item) => [item.itemId, 'PASS'])),
-                        }))}
-                        type="button"
-                      >全部现场确认存在</button>
-                      <button
-                        onClick={() => setReviewValues((current) => ({
-                          ...current,
-                          ...Object.fromEntries(candidateReview.items
-                            .filter((item) => item.valueType === 'FACILITY_STATUS')
-                            .map((item) => [item.itemId, 'FAIL'])),
-                        }))}
-                        type="button"
-                      >全部现场确认未发现</button>
-                    </div>
-                  )}
-                  <div className="evidence-review-list">
-                    {candidateReview.items.map((item) => (
-                      <div className="evidence-review-row" key={item.itemId}>
-                        <label htmlFor={`review-${item.itemId}`}>{item.label}</label>
-                        {item.valueType === 'PRICE_CENTS' ? (
+                  <div className="evidence-review-progress" aria-label={`事实核对进度 ${reviewProgress}%`}>
+                    <i style={{ width: `${reviewProgress}%` }} />
+                  </div>
+                  <p>只确认你实际知道的情况。相同设施已按类型合并，不再要求逐路线重复填写；“按未发现处理”表示规划时不依赖该设施。</p>
+
+                  {priceReviewItems.length > 0 && (
+                    <section className="evidence-review-group">
+                      <header><span>费用</span><small>{priceReviewItems.length} 项</small></header>
+                      <p>填写现场价或可靠估价；只有明确免费时才选“免费”。</p>
+                      {priceReviewItems.map((item) => (
+                        <div className="evidence-review-row" key={item.itemId}>
+                          <label htmlFor={`review-${item.itemId}`}>{item.label}</label>
                           <div className="evidence-price-input">
                             <span>¥</span>
                             <input
                               id={`review-${item.itemId}`}
                               min="0"
-                              placeholder="填写实际或估算金额"
+                              placeholder="实际或可靠估价"
                               step="0.01"
                               type="number"
                               value={reviewValues[item.itemId] ?? ''}
@@ -1356,54 +1508,96 @@ export function WorkspacePage() {
                                 [item.itemId]: event.target.value,
                               }))}
                             />
-                            <button
-                              onClick={() => setReviewValues((current) => ({
-                                ...current,
-                                [item.itemId]: '0',
-                              }))}
-                              type="button"
-                            >
-                              确认为免费
+                            <button onClick={() => setReviewItems([item], '0')} type="button">
+                              明确免费
                             </button>
                           </div>
-                        ) : item.valueType === 'FACILITY_STATUS' ? (
-                          <select
-                            id={`review-${item.itemId}`}
-                            value={reviewValues[item.itemId] ?? ''}
-                            onChange={(event) => setReviewValues((current) => ({
-                              ...current,
-                              [item.itemId]: event.target.value,
-                            }))}
-                          >
-                            <option value="">请选择</option>
-                            <option value="PASS">现场确认存在</option>
-                            <option value="FAIL">现场确认不存在</option>
-                          </select>
-                        ) : (
-                          <button
-                            className={reviewValues[item.itemId] === 'CONFIRMED' ? 'is-confirmed' : ''}
-                            id={`review-${item.itemId}`}
-                            onClick={() => setReviewValues((current) => ({
-                              ...current,
-                              [item.itemId]: 'CONFIRMED',
-                            }))}
-                            type="button"
-                          >
-                            {reviewValues[item.itemId] === 'CONFIRMED' ? '已确认来源' : '确认该来源'}
-                          </button>
-                        )}
+                        </div>
+                      ))}
+                    </section>
+                  )}
+
+                  {facilityReviewGroups.length > 0 && (
+                    <section className="evidence-review-group">
+                      <header><span>路线设施</span><small>{facilityReviewGroups.length} 类</small></header>
+                      <p>按设施类型一次选择，自动应用到涉及的全部路线段。</p>
+                      <div className="facility-review-grid">
+                        {facilityReviewGroups.map((group) => {
+                          const values = group.items.map((item) => reviewValues[item.itemId])
+                          const selected = values.every((value) => value === 'PASS')
+                            ? 'PASS'
+                            : values.every((value) => value === 'FAIL') ? 'FAIL' : ''
+                          return (
+                            <article className="facility-review-item" key={group.key}>
+                              <div>
+                                <strong>{group.label}</strong>
+                                <small>影响 {group.items.length} 段路线</small>
+                              </div>
+                              <div className="facility-review-actions">
+                                <button
+                                  className={selected === 'PASS' ? 'is-selected is-pass' : ''}
+                                  onClick={() => setReviewItems(group.items, 'PASS')}
+                                  type="button"
+                                >已核实存在</button>
+                                <button
+                                  className={selected === 'FAIL' ? 'is-selected is-fail' : ''}
+                                  onClick={() => setReviewItems(group.items, 'FAIL')}
+                                  type="button"
+                                >按未发现处理</button>
+                              </div>
+                              <details>
+                                <summary>查看并逐段修正</summary>
+                                <ul>{group.items.map((item) => (
+                                  <li key={item.itemId}>
+                                    <span>{item.label}</span>
+                                    <div>
+                                      <button
+                                        className={reviewValues[item.itemId] === 'PASS' ? 'is-selected is-pass' : ''}
+                                        onClick={() => setReviewItems([item], 'PASS')}
+                                        type="button"
+                                      >有</button>
+                                      <button
+                                        className={reviewValues[item.itemId] === 'FAIL' ? 'is-selected is-fail' : ''}
+                                        onClick={() => setReviewItems([item], 'FAIL')}
+                                        type="button"
+                                      >未发现</button>
+                                    </div>
+                                  </li>
+                                ))}</ul>
+                              </details>
+                            </article>
+                          )
+                        })}
                       </div>
-                    ))}
-                  </div>
+                    </section>
+                  )}
+
+                  {sourceReviewItems.length > 0 && (
+                    <section className="evidence-review-group evidence-review-group--source">
+                      <header><span>数据来源</span><small>{sourceReviewItems.length} 项</small></header>
+                      <p>确认这些信息来自你本人、现场标识或可靠商家信息。</p>
+                      <button
+                        className={sourceReviewItems.every((item) => reviewValues[item.itemId] === 'CONFIRMED') ? 'is-confirmed' : ''}
+                        onClick={() => setReviewItems(sourceReviewItems, 'CONFIRMED')}
+                        type="button"
+                      >
+                        {sourceReviewItems.every((item) => reviewValues[item.itemId] === 'CONFIRMED')
+                          ? '来源已统一确认'
+                          : '确认上述来源可信'}
+                      </button>
+                    </section>
+                  )}
                   <button
                     className="button button--primary evidence-review-submit"
-                    disabled={isConfirmingEvidence}
+                    disabled={isConfirmingEvidence || completedReviewCount !== reviewItems.length}
                     onClick={() => void handleConfirmEvidence()}
                     type="button"
                   >
                     {isConfirmingEvidence
                       ? <><LoaderCircle className="spin-icon" size={16} /> 服务端重新校验中…</>
-                      : <><Check size={16} /> 提交确认并重新校验</>}
+                      : completedReviewCount === reviewItems.length
+                        ? <><Check size={16} /> 提交并由服务端重新校验</>
+                        : <><Check size={16} /> 还需确认 {reviewItems.length - completedReviewCount} 项</>}
                   </button>
                 </section>
               )}
@@ -1663,19 +1857,26 @@ export function WorkspacePage() {
                 </strong>
               </article>
             </div>
+            <p className="plan-diff-change-count" role="status">
+              {changedExecutionTasks.length > 0
+                ? `实际调整 ${changedExecutionTasks.length} 个任务；请重点查看下方时间和休息安排。地点、费用不一定需要改变。`
+                : '此候选没有实际任务变化，请拒绝此旧候选并继续原计划。'}
+            </p>
 
             <div className="plan-diff-groups">
               {Object.entries(diffCategoryLabels).map(([category, categoryLabel]) => {
                 const categoryItems = planDiff.items.filter((item) => item.category === category)
+                const changedItems = categoryItems.filter((item) => item.changeType !== 'RETAINED')
+                const retainedItems = categoryItems.filter((item) => item.changeType === 'RETAINED')
                 return (
                   <section className="plan-diff-group" key={category}>
                     <header>
                       <h3>{categoryLabel}</h3>
-                      <span>{categoryItems.length} 项变化记录</span>
+                      <span>{changedItems.length} 项变更 · {retainedItems.length} 项保留</span>
                     </header>
                     {categoryItems.length > 0 ? (
                       <div className="plan-diff-list">
-                        {categoryItems.map((item) => (
+                        {changedItems.map((item) => (
                           <article
                             className={`plan-diff-row plan-diff-row--${item.changeType.toLowerCase()}`}
                             key={`${item.category}-${item.key}-${item.changeType}`}
@@ -1691,6 +1892,10 @@ export function WorkspacePage() {
                             </div>
                           </article>
                         ))}
+                        {retainedItems.length > 0 && <details className="plan-diff-retained">
+                          <summary>查看 {retainedItems.length} 项未变化的内容</summary>
+                          {retainedItems.map((item) => <p key={item.key}><strong>{item.label}</strong>：{formatDiffValue(item.after, item.category)}</p>)}
+                        </details>}
                       </div>
                     ) : (
                       <p className="plan-diff-empty">此类别没有变化。</p>
@@ -1709,7 +1914,7 @@ export function WorkspacePage() {
                 <button className="button button--ghost" disabled={isDecidingV2} onClick={() => void decidePlanV2('reject')} type="button">
                   <X size={17} /> 拒绝 V2，继续执行 V1
                 </button>
-                <button className="button button--primary" disabled={isDecidingV2} onClick={() => void decidePlanV2('accept')} type="button">
+                <button className="button button--primary" disabled={isDecidingV2 || changedExecutionTasks.length === 0} onClick={() => void decidePlanV2('accept')} type="button">
                   {isDecidingV2 ? <LoaderCircle className="spin-icon" size={17} /> : <Check size={17} />}
                   {isDecidingV2 ? '正在处理决策…' : '接受 V2 并继续执行'}
                 </button>
@@ -1840,9 +2045,29 @@ export function WorkspacePage() {
                 <div className="source-card__head">
                   <span><MessageSquareText size={18} /> 迟到 / 疲劳调整</span>
                 </div>
+                {adjustmentBlockReason && (
+                  <p className="adjustment-unavailable" role="status">{adjustmentBlockReason}</p>
+                )}
+                {candidatePlanV2 && (
+                  <button className="button button--soft" onClick={() => setView('diff')} type="button">查看已有 Plan V2</button>
+                )}
+                {!adjustmentBlockReason && <>
+                {hasAdjustableSuffix ? (
+                  <div className="adjustment-quick-actions">
+                    <span>直接选择常见情况</span>
+                    <div>
+                      <button disabled={isParsingAdjustment || isConfirmingAdjustment} onClick={() => prepareQuickAdjustment('LATE', 15)} type="button">迟到 15 分钟</button>
+                      <button disabled={isParsingAdjustment || isConfirmingAdjustment} onClick={() => prepareQuickAdjustment('LATE', 30)} type="button">迟到 30 分钟</button>
+                      <button disabled={isParsingAdjustment || isConfirmingAdjustment} onClick={() => prepareQuickAdjustment('FATIGUE', 'MILD')} type="button">有点累</button>
+                      <button disabled={isParsingAdjustment || isConfirmingAdjustment} onClick={() => prepareQuickAdjustment('FATIGUE', 'SEVERE')} type="button">需要明显减负</button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="adjustment-unavailable">当前已经是最后一个任务，没有后续安排需要生成 Plan V2。</p>
+                )}
                 <textarea
                   aria-label="说明迟到或疲劳情况"
-                  disabled={isParsingAdjustment || isConfirmingAdjustment || !organizerToken}
+                  disabled={isParsingAdjustment || isConfirmingAdjustment || !organizerToken || !hasAdjustableSuffix}
                   maxLength={160}
                   onChange={(event) => {
                     setAdjustmentText(event.target.value)
@@ -1858,6 +2083,7 @@ export function WorkspacePage() {
                     isParsingAdjustment ||
                     isConfirmingAdjustment ||
                     !organizerToken ||
+                    !hasAdjustableSuffix ||
                     !adjustmentText.trim()
                   }
                   onClick={() => void parseExecutionAdjustment()}
@@ -1866,26 +2092,29 @@ export function WorkspacePage() {
                   {isParsingAdjustment
                     ? <LoaderCircle className="spin-icon" size={15} />
                     : <Send size={15} />}
-                  {isParsingAdjustment ? '正在解析…' : '解析并进入确认'}
+                  {isParsingAdjustment ? '正在识别…' : '识别自定义描述'}
                 </button>
                 {!organizerToken && (
                   <p className="media-error">当前浏览器没有组织者凭证，只能查看行程，不能发起重规划。</p>
                 )}
-                <p>{S1_EVENT_REPLAN_ONLY_MESSAGE}；Sprint2 可由组织者确认迟到或疲劳后预览 V2。</p>
+                <p>{EXECUTION_REPLAN_HELP}；迟到或疲劳可在这里确认后立即生成 Plan V2 预览。</p>
+                <p>这里只支持真实的迟到或疲劳情况；“想先吃东西”等用餐顺序调整暂不支持，不要选择疲劳来代替。</p>
                 {adjustmentParse && (
-                  <div className="evidence-review-list" aria-live="polite">
+                  <div className="evidence-review-list adjustment-confirmation" aria-live="polite">
                     <p>
-                      识别来源：{adjustmentParse.recognition.source}
+                      确认当前情况
                       {adjustmentParse.recognition.degradedReason
-                        ? `（${adjustmentParse.recognition.degradedReason}，请使用固定选项确认）`
+                        ? '（智能识别暂不可用，已切换为固定选项）'
                         : ''}
                     </p>
                     {adjustmentParse.draft.clarificationQuestions.map((question) => (
                       <p key={question.questionKey}>{question.prompt}</p>
                     ))}
+                    {!adjustmentParse.draft.eventType && <p>尚未识别到迟到或疲劳。只有确实发生这些情况时，才填写下方选项。</p>}
                     <label htmlFor="execution-adjustment-type">调整类型</label>
                     <select
                       id="execution-adjustment-type"
+                      disabled={isParsingAdjustment || isConfirmingAdjustment}
                       onChange={(event) => {
                         setAdjustmentEventType(event.target.value as ExecutionAdjustmentType | '')
                         setPendingAdjustmentEvent(null)
@@ -1901,6 +2130,7 @@ export function WorkspacePage() {
                         迟到分钟数（1–240）
                         <input
                           id="execution-adjustment-late-minutes"
+                          disabled={isParsingAdjustment || isConfirmingAdjustment}
                           inputMode="numeric"
                           max="240"
                           min="1"
@@ -1918,6 +2148,7 @@ export function WorkspacePage() {
                         疲劳程度
                         <select
                           id="execution-adjustment-fatigue-level"
+                          disabled={isParsingAdjustment || isConfirmingAdjustment}
                           onChange={(event) => {
                             setAdjustmentFatigueLevel(event.target.value as FatigueLevel | '')
                             setPendingAdjustmentEvent(null)
@@ -1933,17 +2164,24 @@ export function WorkspacePage() {
                     )}
                     <button
                       className="button button--primary"
-                      disabled={isConfirmingAdjustment || !adjustmentEventType}
+                      disabled={
+                        isConfirmingAdjustment ||
+                        isParsingAdjustment ||
+                        Boolean(adjustmentBlockReason) ||
+                        !hasAdjustableSuffix ||
+                        !adjustmentDetailsComplete
+                      }
                       onClick={() => void confirmExecutionAdjustment()}
                       type="button"
                     >
                       {isConfirmingAdjustment
                         ? <LoaderCircle className="spin-icon" size={15} />
                         : <Check size={15} />}
-                      {isConfirmingAdjustment ? '正在生成候选 V2…' : '确认事件并预览 V2'}
+                      {isConfirmingAdjustment ? '正在重新计算后续安排…' : '确认并生成 Plan V2 预览'}
                     </button>
                   </div>
                 )}
+                </>}
                 {executionNotice && <p><CheckCircle2 size={14} /> {executionNotice}</p>}
                 {planLifecycleError && <p className="media-error">{planLifecycleError}</p>}
               </section>

@@ -1815,6 +1815,13 @@ class PlanningBoundaryService:
             if item.candidate_plan_id == selected_plan_id
         )
         assert assessment.modified_task_count is not None
+        if event_constraints is not None and assessment.modified_task_count == 0:
+            raise AppError(
+                code="REPLAN_ADJUSTMENT_NO_CHANGE",
+                message="当前安排已满足本次调整后的限制，没有实际任务变化；保留原计划，不签发空白 V2。",
+                http_status=422,
+                retryable=False,
+            )
         selected_request = candidate_requests[selected_plan_id]
         selected_satisfaction_loss = satisfaction_loss_by_plan_id[selected_plan_id]
         selection_validation = {
@@ -2078,6 +2085,16 @@ class PlanningBoundaryService:
                 current_readiness=self._readiness_binding(permit),
             )
             self._require_unexpired_permit(permit)
+            if decision is ExecutionAdjustmentDecision.ACCEPT:
+                candidate = self.plan_service.get_plan_version(trip_id, plan_id)
+                parent = self.plan_service.get_plan_version(trip_id, candidate.parent_id)
+                if candidate.days[0].tasks == parent.days[0].tasks:
+                    raise AppError(
+                        code="REPLAN_ADJUSTMENT_NO_CHANGE",
+                        message="此旧候选没有实际任务变化，不能接受；请拒绝它并继续原计划。",
+                        http_status=409,
+                        retryable=False,
+                    )
             return (
                 self.plan_service.accept_v2(trip_id, plan_id)
                 if decision is ExecutionAdjustmentDecision.ACCEPT
