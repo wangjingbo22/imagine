@@ -26,6 +26,7 @@ test('T012 keeps missing costs unknown and shows per-day allocation', async () =
   assert.match(page, /已生成计划合计/)
   assert.match(page, /已记录支出合计/)
   assert.match(page, /不包含酒店、跨城搜索预订或跨日自动重规划/)
+  assert.doesNotMatch(page, /查看预算账本|同行成员/)
 })
 
 test('parent and child organizer capabilities are sent separately', async () => {

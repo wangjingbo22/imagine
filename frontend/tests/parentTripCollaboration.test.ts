@@ -66,7 +66,7 @@ test('T010 strips the bearer invitation from the URL before redemption', async (
 })
 
 
-test('T010 exposes organizer roster and member-owned profile editing', async () => {
+test('T010 keeps member-owned profile editing outside the parent trip dashboard', async () => {
   const [organizerPage, memberPage] = await Promise.all([
     readFile(new URL('../src/pages/ParentTripPage.tsx', import.meta.url), 'utf8'),
     readFile(
@@ -74,9 +74,7 @@ test('T010 exposes organizer roster and member-owned profile editing', async () 
       'utf8',
     ),
   ])
-  assert.match(organizerPage, /createParentTripInvitation/)
-  assert.match(organizerPage, /visibleProfiles\.length/)
-  assert.match(organizerPage, /生成成员邀请/)
+  assert.doesNotMatch(organizerPage, /createParentTripInvitation|同行成员|查看预算账本/)
   assert.match(memberPage, /viewerParticipantId/)
   assert.match(memberPage, /updateParentTripMemberProfile/)
   assert.match(memberPage, /个人预算上限/)
