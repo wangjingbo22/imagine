@@ -10,6 +10,7 @@ import { WorkspacePage } from './pages/WorkspacePage'
 import { ParentTripPage } from './pages/ParentTripPage'
 import { AccountPage } from './pages/AccountPage'
 import { ParentTripMemberPage } from './pages/ParentTripMemberPage'
+import { BudgetLedgerPage } from './pages/BudgetLedgerPage'
 
 function MotionController() {
   const location = useLocation()
@@ -82,6 +83,7 @@ function App() {
         <Route path="/parent-trips/:parentTripId/member" element={<ParentTripMemberPage />} />
         <Route path="/parent-trips/:parentTripId" element={<ParentTripPage />} />
         <Route path="/account" element={<AccountPage />} />
+        <Route path="/budget-ledger" element={<BudgetLedgerPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
