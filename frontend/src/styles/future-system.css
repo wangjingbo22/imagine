@@ -51,6 +51,9 @@ body,
 .topbar__status { color: #315479; border-color: #d4e4f8; border-radius: 7px; background: #f7fbff; }
 .icon-button { color: #315479; border-radius: 7px; }
 .icon-button:hover { color: var(--future-blue); background: #edf5ff; }
+.topbar__model-link { min-width: 54px; min-height: 46px; display: grid; place-items: center; gap: 1px; color: #315479; border-radius: 7px; font-size: 10px; font-weight: 700; line-height: 1.1; }
+.topbar__model-link:hover { color: var(--future-blue); background: #edf5ff; }
+.topbar__model-link svg { width: 17px; height: 17px; }
 .avatar { border-radius: 9px; background: #0b3b83; }
 
 .button {
@@ -253,6 +256,7 @@ body,
 @media (max-width: 760px) {
   .topbar__inner { width: min(100% - 28px, 1320px); }
   .topbar__status { display: none; }
+  .topbar__model-link { min-width: 46px; font-size: 9px; }
   .planner-sidebar { border-bottom: 1px solid var(--future-line); background: #ffffff; }
   .planner-sidebar h1,
   .planner-sidebar strong,

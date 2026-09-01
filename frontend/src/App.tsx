@@ -12,6 +12,17 @@ import { AccountPage } from './pages/AccountPage'
 import { ParentTripMemberPage } from './pages/ParentTripMemberPage'
 import { BudgetLedgerPage } from './pages/BudgetLedgerPage'
 import { ModelSettingsPage } from './pages/ModelSettingsPage'
+import { useAccountSession } from './session/useAccountSession'
+
+function RequireAccount({ children }: { children: ReactNode }) {
+  const location = useLocation()
+  const { user, isInitializing } = useAccountSession()
+
+  if (isInitializing) return null
+  if (user) return children
+  const returnTo = `${location.pathname}${location.search}`
+  return <Navigate replace to={`/account?returnTo=${encodeURIComponent(returnTo)}`} />
+}
 
 function MotionController() {
   const location = useLocation()
@@ -71,22 +82,22 @@ function App() {
     <>
       <MotionController />
       <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/plan" element={<ConversationPlannerPage />} />
-        <Route path="/join" element={<MemberPageErrorBoundary><MemberConversationPage /></MemberPageErrorBoundary>} />
-        <Route path="/join/:token" element={<MemberPageErrorBoundary><MemberConversationPage /></MemberPageErrorBoundary>} />
-        <Route path="/recommendation/:tripId" element={<RecommendationPage />} />
-        <Route path="/generating" element={<AgentProcessPage />} />
-        <Route path="/workspace" element={<WorkspacePage />} />
-        <Route path="/parent-trips/new" element={<ParentTripPage />} />
-        <Route path="/parent-join" element={<ParentTripMemberPage />} />
-        <Route path="/parent-join/:token" element={<ParentTripMemberPage />} />
-        <Route path="/parent-trips/:parentTripId/member" element={<ParentTripMemberPage />} />
-        <Route path="/parent-trips/:parentTripId" element={<ParentTripPage />} />
+        <Route path="/" element={<RequireAccount><HomePage /></RequireAccount>} />
+        <Route path="/plan" element={<RequireAccount><ConversationPlannerPage /></RequireAccount>} />
+        <Route path="/join" element={<RequireAccount><MemberPageErrorBoundary><MemberConversationPage /></MemberPageErrorBoundary></RequireAccount>} />
+        <Route path="/join/:token" element={<RequireAccount><MemberPageErrorBoundary><MemberConversationPage /></MemberPageErrorBoundary></RequireAccount>} />
+        <Route path="/recommendation/:tripId" element={<RequireAccount><RecommendationPage /></RequireAccount>} />
+        <Route path="/generating" element={<RequireAccount><AgentProcessPage /></RequireAccount>} />
+        <Route path="/workspace" element={<RequireAccount><WorkspacePage /></RequireAccount>} />
+        <Route path="/parent-trips/new" element={<RequireAccount><ParentTripPage /></RequireAccount>} />
+        <Route path="/parent-join" element={<RequireAccount><ParentTripMemberPage /></RequireAccount>} />
+        <Route path="/parent-join/:token" element={<RequireAccount><ParentTripMemberPage /></RequireAccount>} />
+        <Route path="/parent-trips/:parentTripId/member" element={<RequireAccount><ParentTripMemberPage /></RequireAccount>} />
+        <Route path="/parent-trips/:parentTripId" element={<RequireAccount><ParentTripPage /></RequireAccount>} />
         <Route path="/account" element={<AccountPage />} />
-        <Route path="/model-settings" element={<ModelSettingsPage />} />
-        <Route path="/budget-ledger" element={<BudgetLedgerPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="/model-settings" element={<RequireAccount><ModelSettingsPage /></RequireAccount>} />
+        <Route path="/budget-ledger" element={<RequireAccount><BudgetLedgerPage /></RequireAccount>} />
+        <Route path="*" element={<Navigate to="/account" replace />} />
       </Routes>
     </>
   )

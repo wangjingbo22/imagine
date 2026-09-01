@@ -81,7 +81,7 @@ export function AppShell({
             <button className="icon-button" type="button" aria-label="帮助">
               <CircleHelp size={19} />
             </button>
-            <Link className="icon-button" to={modelSettingsPath} aria-label="模型设置" title="模型设置"><SlidersHorizontal size={18} /></Link>
+            <Link className="topbar__model-link" to={modelSettingsPath} aria-label="绑定模型" title="绑定模型"><SlidersHorizontal size={18} /><span>绑定模型</span></Link>
             <Link className="avatar" to={accountPath} aria-label={user ? `${user.displayName}的账户` : '账户'} title={user?.displayName ?? '账户'}>
               {user ? user.displayName.slice(0, 1).toUpperCase() : <UserRound size={16} />}
             </Link>

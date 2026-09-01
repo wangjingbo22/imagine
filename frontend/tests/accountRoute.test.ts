@@ -9,8 +9,13 @@ test('account page is reachable from the application router and shell', async ()
 
   assert.match(app, /<Route\s+path=["']\/account["']/)
   assert.match(app, /AccountPage/)
+  assert.match(app, /function RequireAccount/)
+  assert.match(app, /<RequireAccount><HomePage \/><\/RequireAccount>/)
+  assert.match(app, /<RequireAccount><ConversationPlannerPage \/><\/RequireAccount>/)
   assert.match(shell, /const accountPath =/)
   assert.match(shell, /to=\{accountPath\}/)
+  assert.match(shell, /className="topbar__model-link"/)
+  assert.match(shell, /绑定模型/)
 })
 
 test('account API uses the session cookie and the account contract paths', async () => {
@@ -132,14 +137,12 @@ test('an HTTP 200 body code 401 is not treated as an invalid account session', a
   assert.doesNotMatch(provider, /error\.code === 401/)
 })
 
-test('account return path is allowlisted before resuming an invitation', async () => {
-  const [page, returnPath] = await Promise.all([
-    readFile(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8'),
-    readFile(new URL('../src/services/accountReturnPath.ts', import.meta.url), 'utf8'),
-  ])
+test('account flow requires profile confirmation before model binding', async () => {
+  const page = await readFile(new URL('../src/pages/AccountPage.tsx', import.meta.url), 'utf8')
 
-  assert.match(returnPath, /returnTo === '\/parent-join'/)
-  assert.match(page, /navigate\(returnTo, \{ replace: true \}\)/)
+  assert.match(page, /完成画像后继续绑定模型/)
+  assert.match(page, /navigate\('\/model-settings', \{ replace: true \}\)/)
+  assert.doesNotMatch(page, /navigate\(returnTo/)
   assert.doesNotMatch(page, /window\.location\s*=/)
 })
 
