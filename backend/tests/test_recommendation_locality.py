@@ -48,3 +48,39 @@ async def test_provider_places_use_confirmed_start_instead_of_prefecture_center(
         "page": 1,
         "page_size": 25,
     }]
+
+
+@pytest.mark.asyncio
+async def test_hard_must_visit_uses_citywide_search_instead_of_nearby_radius() -> None:
+    """硬性必去地点不能因为离出发地较远而从候选白名单中消失。"""
+
+    citywide_calls: list[dict[str, object]] = []
+
+    class ProviderStub:
+        async def nearby_places(self, *_args: object, **_kwargs: object):
+            raise AssertionError("hard must-visit must not use radius-limited nearby search")
+
+        async def search_places(self, city_context: object, **kwargs: object):
+            citywide_calls.append({"city_context": city_context, **kwargs})
+            return SimpleNamespace(places=["天坛公园"])
+
+    city_context = SimpleNamespace(city_code="110000")
+    resolution = SimpleNamespace(cityContext=city_context)
+    center = GeoPoint(longitude=116.40, latitude=39.90)
+
+    places = await _provider_places_for_term(
+        ProviderStub(),
+        city_resolution=resolution,
+        center=center,
+        keywords="天坛",
+        citywide=True,
+    )
+
+    assert places == ["天坛公园"]
+    assert citywide_calls == [{
+        "city_context": city_context,
+        "keywords": "天坛",
+        "types": [],
+        "page": 1,
+        "page_size": 25,
+    }]

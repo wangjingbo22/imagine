@@ -80,7 +80,7 @@ class TrustedPlan(CollaborationModel):
     """The single, explainable winner exposed to the S2 recommendation page."""
 
     tasks: list[CandidatePlace] = Field(min_length=1, max_length=4)
-    member_scores: list[MemberScore] = Field(min_length=1, max_length=3)
+    member_scores: list[MemberScore] = Field(min_length=1, max_length=20)
     lowest_member_score: int = Field(ge=0, le=100)
     care_points: list[str] = Field(default_factory=list)
     compromises: list[str] = Field(default_factory=list)

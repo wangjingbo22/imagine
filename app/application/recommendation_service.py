@@ -766,11 +766,37 @@ def _place_matches_label(place: Place, label: str) -> bool:
     )
 
 
+_NON_VISIT_PLACE_TERMS = (
+    "住宿服务", "宾馆酒店", "经济型连锁酒店", "酒店", "宾馆", "旅馆",
+    "民宿", "客栈", "公寓酒店", "招待所", "停车场", "加油站",
+)
+
+
+def _is_non_visit_place(name: str, category: str | None) -> bool:
+    """识别高德候选中明显不应成为游览任务的生活服务地点。
+
+    判断同时读取名称和高德分类，覆盖酒店品牌名和“住宿服务”这类分类标签。
+    明确被用户设为必去的地点会在调用处豁免，尊重特殊的集合点或住宿需求。
+    """
+    haystack = _normalized_text(f"{name} {category or ''}")
+    return any(term in haystack for term in _NON_VISIT_PLACE_TERMS)
+
+
+def _candidate_matches_label(place: CandidatePlace, label: str) -> bool:
+    """以规范化名称或 Provider ID 判断候选是否满足一条必去约束。"""
+    expected = _normalized_text(label)
+    if not expected:
+        return False
+    name = _normalized_text(place.name)
+    place_id = _normalized_text(place.place_id)
+    return expected == place_id or expected in name or name in expected
+
+
 def project_collaboration_recommendation_trip(
     revision: TripDraftRevisionView,
     city_context: CityContext,
 ) -> Trip:
-    """Project a READY 1–3 member revision without writing planning state."""
+    """Project a READY multi-member revision without writing planning state."""
 
     shared = revision.understanding.trip
     required_shared = {
@@ -974,10 +1000,10 @@ class TrustedRecommendationService:
                 target.append(preference.value)
 
         required = _stable_unique_text(must_visit, limit=9)
-        if len(required) > 8:
+        if len(required) > 3:
             raise RecommendationOrchestrationError(
                 "TOO_MANY_HARD_MUST_VISIT_PLACES",
-                "硬性必去地点超过 8 个，无法签发 6–8 个可信候选",
+                "单日方案最多安排 3 个游览地点，请减少硬性必去地点或拆分到多日行程。",
             )
         avoided = _stable_unique_text(avoid_places, limit=24)
         interest_words = tuple(_normalized_text(item) for item in interests)
@@ -995,6 +1021,13 @@ class TrustedRecommendationService:
             if place.provenance.sourceStatus not in trusted_statuses:
                 continue
             if any(_place_matches_label(place, label) for label in avoided):
+                continue
+            # 非游览地点默认不进入 FactRef 白名单；若用户明确把它设为必去，
+            # 则保留该真实地点，避免过滤器覆盖用户的硬性意图。
+            is_required = any(
+                _place_matches_label(place, label) for label in required
+            )
+            if not is_required and _is_non_visit_place(place.name, place.category):
                 continue
             amount = place.priceReference.amountCents
             if amount is not None and amount > budget_limit:
@@ -1063,6 +1096,9 @@ class TrustedRecommendationService:
             place = fact.place
             if place.placeId in seen or place.name.casefold() in avoided:
                 continue
+            is_required = any(_place_matches_label(place, label) for label in must_visit)
+            if not is_required and _is_non_visit_place(place.name, place.category):
+                continue
             seen.add(place.placeId)
             selected.append(CandidatePlace(
                 fact_ref_id=fact.fact_ref_id,
@@ -1129,6 +1165,38 @@ class TrustedRecommendationService:
         if not ordered:
             return bundle
 
+        # 先从所有成员收集硬性必去地点，再构造可行组合。它们不是评分项：
+        # 任意缺失都会在计划生成前失败，绝不会生成后再用扣分掩盖遗漏。
+        required_labels = _stable_unique_text(
+            (
+                label
+                for member in members
+                for label in member.must_visit
+            ),
+            limit=8,
+        )
+        required_candidates: list[CandidatePlace] = []
+        for label in required_labels:
+            match = next(
+                (candidate for candidate in bundle.candidates if _candidate_matches_label(candidate, label)),
+                None,
+            )
+            if match is None:
+                raise RecommendationOrchestrationError(
+                    "HARD_MUST_VISIT_FACT_MISSING",
+                    f"可信候选中缺少硬性必去地点：{label}",
+                )
+            if all(item.place_id != match.place_id for item in required_candidates):
+                required_candidates.append(match)
+        if len(required_candidates) > 3:
+            raise RecommendationOrchestrationError(
+                "TOO_MANY_HARD_MUST_VISIT_PLACES",
+                "单日方案最多安排 3 个游览地点，请减少硬性必去地点或拆分到多日行程。",
+            )
+        for required_candidate in required_candidates:
+            if all(item.place_id != required_candidate.place_id for item in ordered):
+                ordered.append(required_candidate)
+
         # The recommendation contains only intermediate places.  Keep the
         # proposal contract at two-to-three items so T011 can append the one
         # independently verified return task and still produce three-to-four
@@ -1138,8 +1206,19 @@ class TrustedRecommendationService:
         # minimum member score desc, average score desc, known price asc, then
         # a stable candidate-id tie break.
         target_size = min(3, len(ordered))
-        possible_sets = combinations(ordered, target_size)
+        required_ids = {item.place_id for item in required_candidates}
+        # 只枚举包含全部必去候选的组合，公平评分只能在这些可行组合之间选择。
+        possible_sets = (
+            tasks
+            for tasks in combinations(ordered, target_size)
+            if required_ids <= {task.place_id for task in tasks}
+        )
         scored_sets = [(list(tasks), TrustedRecommendationService._score_members(tasks, members), facts_by_id) for tasks in possible_sets]
+        if not scored_sets:
+            raise RecommendationOrchestrationError(
+                "NO_HARD_CONSTRAINT_PLAN",
+                "没有同时包含全部硬性必去地点的可用方案。",
+            )
         tasks, scores, _ = min(
             scored_sets,
             key=lambda entry: TrustedRecommendationService._fairness_sort_key(entry[0], entry[1], facts_by_id),

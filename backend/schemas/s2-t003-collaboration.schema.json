@@ -90,13 +90,13 @@
           "additionalProperties": false,
           "properties": {
             "confirmedCount": {
-              "maximum": 3,
+              "maximum": 20,
               "minimum": 0,
               "title": "Confirmedcount",
               "type": "integer"
             },
             "expectedCount": {
-              "maximum": 3,
+              "maximum": 20,
               "minimum": 1,
               "title": "Expectedcount",
               "type": "integer"
@@ -213,7 +213,7 @@
               "title": "Confirmedrevision"
             },
             "memberKey": {
-              "pattern": "^member-[1-3]$",
+              "pattern": "^member-(?:[1-9]|1[0-9]|20)$",
               "title": "Memberkey",
               "type": "string"
             },
@@ -601,13 +601,13 @@
       "additionalProperties": false,
       "properties": {
         "confirmedCount": {
-          "maximum": 3,
+          "maximum": 20,
           "minimum": 0,
           "title": "Confirmedcount",
           "type": "integer"
         },
         "expectedCount": {
-          "maximum": 3,
+          "maximum": 20,
           "minimum": 1,
           "title": "Expectedcount",
           "type": "integer"
@@ -1144,7 +1144,7 @@
               "type": "array"
             },
             "memberKey": {
-              "pattern": "^member-[1-3]$",
+              "pattern": "^member-(?:[1-9]|1[0-9]|20)$",
               "title": "Memberkey",
               "type": "string"
             },
@@ -1611,7 +1611,7 @@
           "title": "Confirmedrevision"
         },
         "memberKey": {
-          "pattern": "^member-[1-3]$",
+          "pattern": "^member-(?:[1-9]|1[0-9]|20)$",
           "title": "Memberkey",
           "type": "string"
         },

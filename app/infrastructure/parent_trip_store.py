@@ -14,7 +14,11 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4, uuid5
 
-from app.domain.parent_trip import ParentTripCreateRequest
+from app.domain.parent_trip import (
+    MAX_PARENT_TRIP_DAYS,
+    MAX_PARENT_TRIP_PARTICIPANTS,
+    ParentTripCreateRequest,
+)
 
 
 PARENT_ORGANIZER_NAMESPACE = UUID("83af3f62-c026-4fc5-9794-ecbc92c88044")
@@ -43,9 +47,44 @@ class SqliteParentTripRepository:
         with closing(self._connect()) as connection:
             connection.execute("""CREATE TABLE IF NOT EXISTS parent_trips (
                 parent_trip_id TEXT PRIMARY KEY, title TEXT NOT NULL, city_name TEXT NOT NULL,
-                start_date TEXT NOT NULL, day_count INTEGER NOT NULL CHECK(day_count BETWEEN 2 AND 3),
+                start_date TEXT NOT NULL, day_count INTEGER NOT NULL CHECK(day_count BETWEEN 2 AND 30),
                 organizer_token_hash TEXT NOT NULL, created_at TEXT NOT NULL
             )""")
+            # 旧版本把 2–3 天写进了 SQLite CHECK 约束。仅修改 Pydantic 无法让
+            # 已存在的本地数据库接受更多天数，因此启动时检查旧表定义并迁移。
+            parent_schema_row = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='parent_trips'"
+            ).fetchone()
+            parent_schema = str(parent_schema_row[0]) if parent_schema_row else ""
+            if "BETWEEN 2 AND 3" in parent_schema.upper():
+                # SQLite 不能直接删除 CHECK。这里在关闭外键校验的短事务中重建
+                # 父表，并完整复制主键、凭证哈希和已有行程；子表名称与数据不变。
+                connection.execute("PRAGMA foreign_keys=OFF")
+                connection.execute("PRAGMA legacy_alter_table=ON")
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    connection.execute("ALTER TABLE parent_trips RENAME TO parent_trips_legacy_days")
+                    connection.execute(f"""CREATE TABLE parent_trips (
+                        parent_trip_id TEXT PRIMARY KEY, title TEXT NOT NULL, city_name TEXT NOT NULL,
+                        start_date TEXT NOT NULL, day_count INTEGER NOT NULL
+                            CHECK(day_count BETWEEN 2 AND {MAX_PARENT_TRIP_DAYS}),
+                        organizer_token_hash TEXT NOT NULL, created_at TEXT NOT NULL
+                    )""")
+                    connection.execute("""INSERT INTO parent_trips
+                        (parent_trip_id, title, city_name, start_date, day_count,
+                         organizer_token_hash, created_at)
+                        SELECT parent_trip_id, title, city_name, start_date, day_count,
+                               organizer_token_hash, created_at
+                        FROM parent_trips_legacy_days""")
+                    connection.execute("DROP TABLE parent_trips_legacy_days")
+                    connection.execute("COMMIT")
+                except Exception:
+                    if connection.in_transaction:
+                        connection.execute("ROLLBACK")
+                    raise
+                finally:
+                    connection.execute("PRAGMA legacy_alter_table=OFF")
+                    connection.execute("PRAGMA foreign_keys=ON")
             connection.execute("""CREATE TABLE IF NOT EXISTS parent_trip_days (
                 parent_trip_id TEXT NOT NULL, day_index INTEGER NOT NULL,
                 travel_date TEXT NOT NULL, budget_cents INTEGER NOT NULL,
@@ -353,6 +392,42 @@ class SqliteParentTripRepository:
                     connection.execute("ROLLBACK")
                 raise
 
+    def update_day_budget(
+        self,
+        parent_trip_id: UUID,
+        day_index: int,
+        budget_cents: int,
+        token: str,
+    ) -> None:
+        """原子更新一天的分配预算并推进协作同步版本。
+
+        相同金额是幂等操作，不产生无意义版本；真正变化时成员轮询可通过新的
+        sync version 及时看到预算调整。
+        """
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._authorize_organizer(connection, parent_trip_id, token)
+                row = connection.execute(
+                    "SELECT budget_cents FROM parent_trip_days "
+                    "WHERE parent_trip_id=? AND day_index=?",
+                    (str(parent_trip_id), day_index),
+                ).fetchone()
+                if row is None:
+                    raise ParentTripStoreError("PARENT_TRIP_DAY_NOT_FOUND")
+                if int(row["budget_cents"]) != budget_cents:
+                    connection.execute(
+                        "UPDATE parent_trip_days SET budget_cents=? "
+                        "WHERE parent_trip_id=? AND day_index=?",
+                        (budget_cents, str(parent_trip_id), day_index),
+                    )
+                    self._bump_sync(connection, parent_trip_id)
+                connection.execute("COMMIT")
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+
     def create_invitation(
         self,
         *,
@@ -397,7 +472,7 @@ class SqliteParentTripRepository:
                     "SELECT COUNT(*) FROM parent_trip_members WHERE parent_trip_id=?",
                     (str(parent_trip_id),),
                 ).fetchone()[0])
-                if count >= 3:
+                if count >= MAX_PARENT_TRIP_PARTICIPANTS:
                     raise ParentTripStoreError("PARENT_TRIP_MEMBER_LIMIT")
 
                 participant_id = uuid4()

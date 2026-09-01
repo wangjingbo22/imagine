@@ -3627,3 +3627,36 @@ body,
     flex-direction: column;
   }
 }
+
+/*
+ * 多日预算编辑器和成员六问表单的视觉层。
+ * 所有输入控件保持至少 44px 的可点击高度；桌面端使用分栏减少滚动，
+ * 760px 以下自动改为单列，避免再次出现截图中的窄小原生 textarea。
+ */
+.parent-trip-card__lead { margin: -8px 0 4px; color: #687a74; line-height: 1.7; }
+.parent-trip-card label small { color: #73847d; font-size: 12px; font-weight: 500; line-height: 1.55; }
+.parent-day-budget-editor { display: grid; gap: 8px; padding: 14px; border: 1px solid #d8e5df; border-radius: 14px; background: #f7fbf8; }
+.parent-day-budget-editor > label { color: #52685d; font-size: 12px; font-weight: 800; }
+.parent-day-budget-editor > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.parent-day-budget-editor input { width: 100%; min-width: 0; min-height: 44px; padding: 0 12px; color: #173c2d; font: inherit; font-weight: 800; border: 1px solid #c9d9d2; border-radius: 10px; background: #fff; }
+.member-question-card { padding: 24px; border-color: #d9e5df; border-radius: 22px; background: #fff; box-shadow: 0 14px 36px rgba(25, 64, 47, .07); }
+.member-answer-card { margin-top: 18px; padding: 16px; border: 1px solid #d8e5df; border-radius: 16px; background: #f8fbf9; }
+.member-answer-card--goal { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: start; gap: 12px; }
+.member-answer-card--goal > svg { width: 38px; height: 38px; padding: 9px; color: #247251; border-radius: 12px; background: #e7f5ec; }
+.member-answer-textarea { width: 100%; min-height: 112px; padding: 14px 16px; resize: vertical; color: #1f342a; font: inherit; line-height: 1.7; border: 1px solid #d1dfd8; border-radius: 13px; outline: 0; background: #fff; }
+.member-answer-textarea:focus, .member-preference-grid input:focus, .member-limits-grid input:focus { border-color: #398565; box-shadow: 0 0 0 4px rgba(57, 133, 101, .12); }
+.member-preference-grid, .member-limits-grid { margin-top: 20px; display: grid; gap: 12px; }
+.member-preference-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.member-limits-grid { grid-template-columns: minmax(180px, .7fr) minmax(0, 1.3fr); }
+.member-preference-grid label, .member-limits-grid label { display: flex; min-width: 0; padding: 16px; flex-direction: column; gap: 10px; border: 1px solid #dbe7e1; border-radius: 16px; background: #f8fbf9; }
+.member-preference-grid label > span, .member-limits-grid label > span { display: flex; align-items: center; gap: 6px; color: #365647; font-size: 12px; font-weight: 800; }
+.member-preference-grid input, .member-limits-grid input { width: 100%; min-width: 0; min-height: 46px; padding: 0 12px; color: #1f342a; font: inherit; border: 1px solid #d1dfd8; border-radius: 11px; outline: 0; background: #fff; }
+.member-preference-grid small { color: #75867d; font-size: 10px; line-height: 1.5; }
+.member-limits-grid .member-answer-textarea { min-height: 92px; }
+.trusted-plan__scores > div { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+
+@media (max-width: 760px) {
+  .member-preference-grid, .member-limits-grid { grid-template-columns: 1fr; }
+  .member-question-card { padding: 18px; }
+  .parent-day-budget-editor > div { grid-template-columns: 1fr; }
+}

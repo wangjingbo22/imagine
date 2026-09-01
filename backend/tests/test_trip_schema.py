@@ -373,7 +373,8 @@ def test_create_day_trip_schema_matches_snapshot_and_published_schema():
     assert json.loads(published_path.read_text(encoding="utf-8")) == json.loads(expected)
     schema = json.loads(expected)
     assert schema["properties"]["status"]["const"] == "DRAFT"
-    assert schema["properties"]["participants"]["maxItems"] == 3
+    # 发布的 JSON Schema 必须真实公开扩展后的 20 人上限。
+    assert schema["properties"]["participants"]["maxItems"] == 20
     assert schema["properties"]["days"]["maxItems"] == 1
 
 
@@ -395,7 +396,8 @@ def test_legacy_validator_rejects_the_group_fixture():
         ("SINGLE", 3, "mode_participant_mismatch"),
         ("GROUP", 0, "too_short"),
         ("GROUP", 1, "mode_participant_mismatch"),
-        ("GROUP", 4, "too_long"),
+        # 二十人以内现在是合法多人行程；二十一人仍必须在合约边界失败。
+        ("GROUP", 21, "too_long"),
     ],
 )
 def test_create_day_trip_enforces_mode_and_participant_matrix(

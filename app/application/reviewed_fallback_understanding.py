@@ -14,7 +14,8 @@ _TRIP_RE = re.compile(
     r"可用时间：(?P<start>\d{2}:\d{2})到(?P<end>\d{2}:\d{2})"
 )
 _ROUTE_RE = re.compile(
-    r"从(?P<start>.+?)出发；结束地：(?P<end>.+?)；共享预算：(?P<budget>\d+(?:\.\d{1,2})?)"
+    r"从(?P<start>.+?)出发；结束地：(?P<end>.+?)；"
+    r"(?:共享预算|本次行程总预算|同行行程总预算)：(?P<budget>\d+(?:\.\d{1,2})?)"
 )
 _NICKNAME_RE = re.compile(r"组织者昵称：(?P<nickname>[^；]+)")
 _PERSONAL_BUDGET_RE = re.compile(r"组织者个人预算上限：(?P<budget>\d+(?:\.\d{1,2})?)元")

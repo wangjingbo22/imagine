@@ -385,7 +385,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "The unified one-day DRAFT entry for one to three participants.",
+  "description": "The unified one-day DRAFT entry for one to twenty participants.",
   "properties": {
     "cityContext": {
       "$ref": "#/$defs/CityContext"
@@ -416,7 +416,7 @@
       "items": {
         "$ref": "#/$defs/Participant"
       },
-      "maxItems": 3,
+      "maxItems": 20,
       "minItems": 1,
       "title": "Participants",
       "type": "array"

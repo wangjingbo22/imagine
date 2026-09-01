@@ -100,6 +100,28 @@ def _reviewed_member_submission() -> ConversationSubmission:
     )
 
 
+@pytest.mark.parametrize("budget_label", ["本次行程总预算", "同行行程总预算"])
+def test_reviewed_fallback_accepts_contextual_trip_budget_labels(
+    budget_label: str,
+) -> None:
+    request = _reviewed_request(participant_count=1)
+    request.answers[2].answer = (
+        f"从北京站出发；结束地：北京站；{budget_label}：500"
+    )
+
+    proposal = reviewed_fallback_proposal(request)
+
+    assert proposal.trip.budget_cents == 50_000
+
+
+def test_reviewed_fallback_keeps_all_members_beyond_the_old_three_person_limit() -> None:
+    # 降级整理同样不能把大团队静默裁剪成三人，否则后续邀请数量会与表单不一致。
+    proposal = reviewed_fallback_proposal(_reviewed_request(participant_count=12))
+
+    assert len(proposal.participants) == 12
+    assert proposal.participants[-1].member_key == "member-12"
+
+
 def _result(
     *,
     proposal: TripUnderstandingProposal | None = None,

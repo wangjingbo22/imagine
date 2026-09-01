@@ -84,7 +84,7 @@ export function ConflictReviewPanel({ state, busy = false, onResolve }: Conflict
     {!ready && waitingMembers.length > 0 && <div className="conflict-review__waiting-members">
       {waitingMembers.map((participant) => <article key={participant.participantId}>
         <UserRound size={17} aria-hidden="true" />
-        <div><strong>{participant.memberKey === 'member-2' ? '成员 1' : participant.memberKey === 'member-3' ? '成员 2' : participant.memberKey}</strong><small>{participant.accessStatus === 'NOT_INVITED' ? '等待组织者发送邀请' : participant.accessStatus === 'INVITED' ? '邀请已发送，等待打开' : '等待本人填写并确认'}</small></div>
+        <div><strong>{participant.role === 'MEMBER' ? `成员 ${Math.max(1, Number(participant.memberKey.split('-')[1]) - 1)}` : '组织者'}</strong><small>{participant.accessStatus === 'NOT_INVITED' ? '等待组织者发送邀请' : participant.accessStatus === 'INVITED' ? '邀请已发送，等待打开' : '等待本人填写并确认'}</small></div>
       </article>)}
     </div>}
     {!ready && actionableIssues.map((issue) => <IssueCard

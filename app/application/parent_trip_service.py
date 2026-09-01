@@ -12,6 +12,7 @@ from app.domain.parent_trip import (
     ParentTrip,
     ParentTripCreateRequest,
     ParentTripDay,
+    ParentTripDayBudgetUpdate,
     ParentTripInvitationCreated,
     ParentTripInvitationRedeemed,
     ParentTripMemberProfile,
@@ -65,7 +66,7 @@ class ParentTripService:
             "PARENT_TRIP_DAY_IMMUTABLE": "该日期已经绑定子行程，不能覆盖。",
             "CHILD_TRIP_ALREADY_LINKED": "该单日行程已经绑定到其他日期。",
             "PARENT_TRIP_VERSION_CONFLICT": "父行程协作版本已更新，请刷新后重试。",
-            "PARENT_TRIP_MEMBER_LIMIT": "父行程最多包含组织者和两名成员。",
+            "PARENT_TRIP_MEMBER_LIMIT": "父行程最多支持 20 位同行成员（含组织者）。",
             "PARENT_IDEMPOTENCY_KEY_REUSED": "幂等键已用于不同的父行程邀请请求。",
             "PARENT_INVITATION_UNAVAILABLE": "父行程邀请不存在或已失效。",
             "PARENT_INVITATION_EXPIRED": "父行程邀请已过期。",
@@ -123,6 +124,44 @@ class ParentTripService:
                     False,
                 )
             self.repository.link(parent_id, day_index, child_id, parent_token)
+            return self.get(parent_id, parent_token)
+        except ParentTripStoreError as error:
+            raise self._error(error) from error
+
+    def update_day_budget(
+        self,
+        parent_id: UUID,
+        day_index: int,
+        request: ParentTripDayBudgetUpdate,
+        parent_token: str,
+    ) -> ParentTrip:
+        """修改每日预算，同时保护已经绑定的子行程。
+
+        已创建单日 Trip 的预算属于确认事实，父行程不能把当天预算降到它以下；
+        提高预算或修改尚未创建的日期则可以立即生效。
+        """
+        try:
+            _, days = self.repository.authorized_rows(parent_id, parent_token)
+            if day_index < 0 or day_index >= len(days):
+                raise ParentTripStoreError("PARENT_TRIP_DAY_NOT_FOUND")
+            child_id_value = days[day_index]["child_trip_id"]
+            if child_id_value:
+                # 读取子行程当前修订，而不是相信浏览器传入的数据，避免绕过预算约束。
+                revision = self.revisions.get_current(UUID(str(child_id_value)))
+                child_budget = revision.understanding.trip.budget_cents
+                if child_budget is not None and request.budget_cents < child_budget:
+                    raise AppError(
+                        "PARENT_DAY_BUDGET_BELOW_CHILD",
+                        "新预算不能低于已经创建的当日行程预算。",
+                        422,
+                        False,
+                    )
+            self.repository.update_day_budget(
+                parent_id,
+                day_index,
+                request.budget_cents,
+                parent_token,
+            )
             return self.get(parent_id, parent_token)
         except ParentTripStoreError as error:
             raise self._error(error) from error

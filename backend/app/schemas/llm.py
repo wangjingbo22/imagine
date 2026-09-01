@@ -85,7 +85,8 @@ class ConfirmedTripSummary(ContractModel):
     """A redacted, read-only intent summary supplied by the server."""
 
     city_code: CityCode
-    participant_count: Annotated[int, Field(ge=1, le=3)]
+    # 只向模型暴露人数摘要，不暴露成员隐私；范围与协作合约保持一致。
+    participant_count: Annotated[int, Field(ge=1, le=20)]
     interest_tags: tuple[ShortText, ...] = Field(max_length=12)
     must_visit_labels: tuple[ShortText, ...] = Field(max_length=8)
     avoid_labels: tuple[ShortText, ...] = Field(max_length=8)

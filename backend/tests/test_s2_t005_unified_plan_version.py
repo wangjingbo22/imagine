@@ -98,8 +98,9 @@ def test_plan_review_snapshot_admits_unified_participant_matrix(
 
 @pytest.mark.parametrize(
     ("mode", "participant_count"),
-    [("SINGLE", 2), ("GROUP", 1), ("GROUP", 4)],
-    ids=["single-two", "group-one", "group-four"],
+    # 四人及更大的常见团队现在有效；超过 20 人仍在统一合约边界被拒绝。
+    [("SINGLE", 2), ("GROUP", 1), ("GROUP", 21)],
+    ids=["single-two", "group-one", "group-twenty-one"],
 )
 def test_plan_review_snapshot_rejects_invalid_participant_matrix(
     mode: str,

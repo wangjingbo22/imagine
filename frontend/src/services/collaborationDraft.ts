@@ -128,7 +128,7 @@ export function collaborationPlanningDraft(
   const understanding = revision.understanding
   if (
     understanding.participants.length < 1 ||
-    understanding.participants.length > 3 ||
+    understanding.participants.length > 20 ||
     understanding.missingFields.length > 0 ||
     understanding.ambiguities.length > 0 ||
     understanding.confirmationQuestions.length > 0
