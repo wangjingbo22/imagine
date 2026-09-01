@@ -101,7 +101,6 @@ type WorkspaceView = 'plan' | 'execute' | 'diff' | 'summary'
 const views: Array<{ value: WorkspaceView; label: string }> = [
   { value: 'plan', label: '计划工作台' },
   { value: 'execute', label: '执行旅程' },
-  { value: 'diff', label: 'V1/V2 变更对比' },
   { value: 'summary', label: '旅行总结' },
 ]
 
