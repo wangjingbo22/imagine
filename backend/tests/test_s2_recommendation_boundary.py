@@ -37,6 +37,58 @@ def test_facts_are_filtered_and_invalid_llm_ranking_falls_back() -> None:
     assert [item.place_id for item in result.recommendations] == ["a", "b"]
 
 
+def test_non_sightseeing_lodging_is_not_a_recommendation_candidate() -> None:
+    # 酒店是真实高德地点，但不是游览任务；真实来源不等于适合推荐。
+    service = TrustedRecommendationService()
+    candidates = service.issue_candidates(
+        [
+            _fact("hotel", "汉庭酒店(北京天安门店)", category="住宿服务;宾馆酒店"),
+            _fact("palace", "故宫博物院", category="风景名胜;世界遗产"),
+        ],
+        interests=["历史文化"],
+        must_visit=[],
+        avoid_places=[],
+    )
+
+    assert [item.place_id for item in candidates] == ["palace"]
+
+
+def test_hard_must_visit_is_forced_into_final_plan_not_scored_after_omission() -> None:
+    # 即使模型排序只返回其他地点，确定性组合也必须补回并保留硬性必去项。
+    service = TrustedRecommendationService()
+    facts = [
+        _fact("must", "故宫博物院"),
+        _fact("a", "国家博物馆"),
+        _fact("b", "天坛公园"),
+        _fact("c", "景山公园"),
+    ]
+    candidates = service.issue_candidates(
+        facts,
+        interests=["历史文化"],
+        must_visit=["故宫"],
+        avoid_places=[],
+    )
+    ranking = service.rank(
+        candidates,
+        LlmRanking(recommendations=[
+            CandidateRecommendation(placeId="a", reason="文化体验"),
+            CandidateRecommendation(placeId="b", reason="城市体验"),
+            CandidateRecommendation(placeId="c", reason="公园体验"),
+        ]),
+    )
+
+    result = service.choose_single_plan(
+        ranking,
+        facts,
+        [MemberPreference(participant_id="member", interests=(), must_visit=("故宫",))],
+    )
+
+    assert result.trusted_plan is not None
+    assert "must" in {task.place_id for task in result.trusted_plan.tasks}
+    assert result.trusted_plan.member_scores[0].score == 100
+    assert "FAIR.HARD.MUST_VISIT_MISSING" not in result.trusted_plan.member_scores[0].penalty_rule_ids
+
+
 def test_valid_llm_ranking_is_only_allowed_place_ids_and_reasons() -> None:
     service = TrustedRecommendationService()
     candidates = service.issue_candidates([_fact("a", "故宫"), _fact("b", "国博")], interests=[], must_visit=[], avoid_places=[])

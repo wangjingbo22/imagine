@@ -9,6 +9,12 @@ from pydantic import Field, UUID4, model_validator
 from app.domain.collaboration import CollaborationModel
 
 
+# 这些上限是产品容量边界，不是界面默认值。集中定义可以确保请求模型、
+# 返回模型与存储层使用同一约束，避免只放开前端导致服务端校验失败。
+MAX_PARENT_TRIP_DAYS = 30
+MAX_PARENT_TRIP_PARTICIPANTS = 20
+
+
 class ParentTripCreateRequest(CollaborationModel):
     schema_version: Literal["1.0"]
     parent_trip_id: UUID4
@@ -16,12 +22,12 @@ class ParentTripCreateRequest(CollaborationModel):
     city_name: str = Field(min_length=1, max_length=80)
     start_date: date
     day_budget_cents: list[Annotated[int, Field(ge=0, le=100_000_000)]] = Field(
-        min_length=2, max_length=3
+        min_length=2, max_length=MAX_PARENT_TRIP_DAYS
     )
 
 
 class ParentTripDay(CollaborationModel):
-    day_index: int = Field(ge=0, le=2)
+    day_index: int = Field(ge=0, lt=MAX_PARENT_TRIP_DAYS)
     date: date
     budget_cents: int = Field(ge=0)
     child_trip_id: UUID4 | None = None
@@ -43,12 +49,21 @@ class ParentTrip(CollaborationModel):
     total_budget_cents: int = Field(ge=0)
     planned_cost_cents: int | None = Field(default=None, ge=0)
     actual_spent_cents: int | None = Field(default=None, ge=0)
-    days: list[ParentTripDay] = Field(min_length=2, max_length=3)
+    days: list[ParentTripDay] = Field(min_length=2, max_length=MAX_PARENT_TRIP_DAYS)
 
 
 class ParentTripDayLinkRequest(CollaborationModel):
     schema_version: Literal["1.0"]
     child_trip_id: UUID4
+
+
+class ParentTripDayBudgetUpdate(CollaborationModel):
+    """组织者修改某一天预算时的最小写入合约。
+
+    金额继续使用整数分，杜绝人民币小数在浏览器与服务端之间往返时产生精度误差。
+    """
+    schema_version: Literal["1.0"]
+    budget_cents: int = Field(ge=0, le=100_000_000)
 
 
 class ParentTripInvitationCreateRequest(CollaborationModel):
@@ -116,7 +131,10 @@ class ParentTripSyncView(CollaborationModel):
     sync_version: int = Field(ge=1)
     viewer_role: Literal["ORGANIZER", "MEMBER"]
     viewer_participant_id: UUID4
-    visible_profiles: list[ParentTripMemberProfile] = Field(min_length=1, max_length=3)
+    visible_profiles: list[ParentTripMemberProfile] = Field(
+        min_length=1,
+        max_length=MAX_PARENT_TRIP_PARTICIPANTS,
+    )
     poll_after_seconds: Literal[5] = 5
     changed_at: datetime
 
@@ -126,6 +144,7 @@ __all__ = [
     "ParentTripCreateRequest",
     "ParentTripDay",
     "ParentTripDayLinkRequest",
+    "ParentTripDayBudgetUpdate",
     "ParentTripInvitationCreateRequest",
     "ParentTripInvitationCreated",
     "ParentTripInvitationRedeemRequest",

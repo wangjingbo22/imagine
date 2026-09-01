@@ -39,6 +39,24 @@ export async function linkParentTripDay(input: { parentTripId: string; dayIndex:
   })).data
 }
 
+export async function updateParentTripDayBudget(input: {
+  parentTripId: string
+  dayIndex: number
+  budgetCents: number
+  parentToken: string
+}): Promise<ParentTrip> {
+  // 预算写操作只发送父行程能力凭证；子行程的 organizer token 不参与，
+  // 从权限边界上避免成员或单日页面越权修改其他日期。
+  return (await request<ParentTrip>(
+    `/api/v3/parent-trips/${input.parentTripId}/days/${input.dayIndex}/budget`,
+    {
+      method: 'PUT',
+      headers: organizerHeaders(input.parentToken),
+      body: JSON.stringify({ schemaVersion: '1.0', budgetCents: input.budgetCents }),
+    },
+  )).data
+}
+
 export async function getParentTripSync(input: {
   parentTripId: string
   parentToken?: string

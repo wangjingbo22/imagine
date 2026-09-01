@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-test('T012 exposes a 2-3 day parent route and reuses the single-day planner', async () => {
+test('T012 exposes an expanded multi-day parent route and reuses the single-day planner', async () => {
   const [app, page, planner] = await Promise.all([
     readFile(new URL('../src/App.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/pages/ParentTripPage.tsx', import.meta.url), 'utf8'),
@@ -11,7 +11,10 @@ test('T012 exposes a 2-3 day parent route and reuses the single-day planner', as
   assert.match(app, /\/parent-trips\/new/)
   assert.match(app, /\/parent-trips\/:parentTripId/)
   assert.match(page, /dayCount: 2/)
-  assert.match(page, /<option value=\{3\}>3 天<\/option>/)
+  assert.match(page, /max=\{MAX_DAY_COUNT\}/)
+  assert.match(page, /多日行程总预算/)
+  assert.match(page, /MAX_DAY_COUNT = 30/)
+  assert.match(page, /saveDayBudget/)
   assert.match(page, /\/plan\?parentTripId=/)
   assert.match(planner, /linkParentTripDay/)
 })

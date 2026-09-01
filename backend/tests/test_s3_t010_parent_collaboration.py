@@ -173,17 +173,6 @@ async def test_three_people_poll_with_isolated_profiles_and_version_guard(
         )
         assert second_invite.status_code == 200, second_invite.text
         second_data = second_invite.json()["data"]
-        limit = await invite(
-            client,
-            parent_id=parent_id,
-            organizer_token=organizer_token,
-            expected_version=3,
-            idempotency_key="invite-member-three-003",
-        )
-        assert limit.status_code == 409
-        assert limit.json()["code"] == "PARENT_TRIP_MEMBER_LIMIT"
-        assert limit.headers["cache-control"] == "no-store"
-
         first_token = str(first_data["invitationUrl"]).rsplit("/", 1)[-1]
         second_token = str(second_data["invitationUrl"]).rsplit("/", 1)[-1]
         unauthenticated = await client.post(

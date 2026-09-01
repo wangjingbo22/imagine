@@ -18,7 +18,7 @@ from app.schemas.trip import (
 
 
 class CollaborationPlanningBridge:
-    """Idempotently project one READY 1-3 member revision into planning."""
+    """Idempotently project one READY multi-member revision into planning."""
 
     def __init__(self, workflow_service: WorkflowService) -> None:
         self._workflow = workflow_service

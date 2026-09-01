@@ -47,7 +47,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .topbar__nav, .topbar__back, .brand-mark, .topbar__status { display: flex; align-items: center; }
 .brand-mark { gap: 10px; font-size: 17px; font-weight: 700; letter-spacing: -0.03em; }
 .brand-mark__icon { width: 34px; height: 34px; display: grid; place-items: center; color: white; background: linear-gradient(145deg, #1d6b52, #0d4735); border-radius: 12px; box-shadow: 0 9px 20px rgba(29, 107, 82, 0.22); }
-.topbar__back { min-height: 44px; gap: 12px; color: var(--muted); }
+/*
+ * 返回入口现在是语义正确的 button，而不再是写死到首页的链接。
+ * 清除浏览器按钮默认边框和底色，使视觉效果与原顶部导航完全一致。
+ */
+.topbar__back { min-height: 44px; padding: 0; gap: 12px; border: 0; color: var(--muted); font: inherit; background: transparent; cursor: pointer; }
 .topbar__nav { gap: 12px; }
 .topbar__status { gap: 8px; padding: 8px 12px; color: var(--muted); font-size: 13px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.62); }
 .status-dot { width: 7px; height: 7px; display: inline-block; border-radius: 50%; background: #35a873; box-shadow: 0 0 0 4px rgba(53,168,115,.12); }

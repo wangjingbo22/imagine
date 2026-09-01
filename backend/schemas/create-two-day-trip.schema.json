@@ -416,7 +416,7 @@
       "items": {
         "$ref": "#/$defs/Participant"
       },
-      "maxItems": 3,
+      "maxItems": 20,
       "minItems": 1,
       "title": "Participants",
       "type": "array"

@@ -196,7 +196,8 @@ class Trip(ContractModel):
     end_date: date
     currency: Literal["CNY"]
     total_budget_cents: Annotated[int, Field(ge=0)]
-    participants: list[Participant] = Field(min_length=1, max_length=3)
+    # 单日规划仍是一个 Trip，但协作人数已扩展到 20；所有成员约束都会进入规划边界。
+    participants: list[Participant] = Field(min_length=1, max_length=20)
     days: list[TripDayInput] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -208,20 +209,20 @@ class Trip(ContractModel):
                 "SINGLE trips must contain exactly one participant",
                 {"public_path": "participants"},
             )
-        if self.mode is TripMode.GROUP and not 2 <= participant_count <= 3:
+        if self.mode is TripMode.GROUP and not 2 <= participant_count <= 20:
             raise PydanticCustomError(
                 "mode_participant_mismatch",
-                "GROUP trips must contain two or three participants",
+                "GROUP trips must contain between two and twenty participants",
                 {"public_path": "participants"},
             )
         return self
 
 
 class CreateDayTrip(Trip):
-    """The unified one-day DRAFT entry for one to three participants."""
+    """The unified one-day DRAFT entry for one to twenty participants."""
 
     status: Literal["DRAFT"]
-    participants: list[Participant] = Field(min_length=1, max_length=3)
+    participants: list[Participant] = Field(min_length=1, max_length=20)
     days: list[TripDayInput] = Field(min_length=1, max_length=1)
 
 
@@ -415,7 +416,7 @@ class PlanReviewTripSnapshot(Trip):
     """A single-day Trip snapshot admitted to Plan review."""
 
     status: Literal[TripStatus.PLAN_REVIEW]
-    participants: list[Participant] = Field(min_length=1, max_length=3)
+    participants: list[Participant] = Field(min_length=1, max_length=20)
     days: list[TripDayInput] = Field(min_length=1, max_length=1)
 
     @model_validator(mode="after")

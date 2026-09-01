@@ -118,7 +118,7 @@ export function HomePage() {
           <div className="mode-grid">
             <Link className="mode-card mode-card--active" data-reveal="card" to="/parent-trips/new">
               <div className="mode-card__visual multiday-visual"><CalendarDays size={42} /><span className="day-sheet day-sheet--one">D1</span><span className="day-sheet day-sheet--two">D2</span><span className="day-sheet day-sheet--three">D3</span></div>
-              <div className="mode-card__content"><span className="mode-tag">Sprint 3</span><h3>同城多日行程</h3><p>创建 2–3 天父行程，逐日进入成熟的单日规划并汇总预算。</p><span className="mode-link">创建多日行程 <ChevronRight size={17}/></span></div>
+              <div className="mode-card__content"><span className="mode-tag">Sprint 3</span><h3>同城多日行程</h3><p>创建 2–30 天父行程，逐日进入成熟的单日规划并汇总预算。</p><span className="mode-link">创建多日行程 <ChevronRight size={17}/></span></div>
             </Link>
             <Link className="mode-card mode-card--active" data-reveal="card" to="/plan">
               <div className="mode-card__visual solo-visual">
@@ -143,7 +143,7 @@ export function HomePage() {
               <div className="mode-card__content">
                 <span className="mode-tag mode-tag--neutral">Sprint 2</span>
                 <h3>和朋友一起</h3>
-                <p>协调 2—3 人的兴趣、预算与体力差异，让每一次妥协都有清晰理由。</p>
+                <p>协调最多 20 人的兴趣、预算与体力差异，让每一次妥协都有清晰理由。</p>
                 <span className="mode-link">创建多人行程 <ChevronRight size={17} /></span>
               </div>
             </Link>

@@ -51,7 +51,7 @@ export type TripUnderstandingTrip = {
 }
 
 export type ParticipantUnderstanding = {
-  memberKey: `member-${1 | 2 | 3}`
+  memberKey: `member-${number}`
   nickname: string | null
   budgetCapCents: number | null
   interests: string[]
@@ -66,19 +66,19 @@ export type TripUnderstandingProposal = {
   participants: ParticipantUnderstanding[]
   fieldEvidence: Array<{
     fieldPath: string
-    memberKey: `member-${1 | 2 | 3}` | null
+    memberKey: `member-${number}` | null
     sourceType: 'USER_TEXT' | 'EXPLICIT_FIELD'
     sourceText: string
   }>
   missingFields: Array<{
     fieldPath: string
-    memberKey: `member-${1 | 2 | 3}` | null
+    memberKey: `member-${number}` | null
     code: 'MISSING'
     questionKey: string
   }>
   ambiguities: Array<{
     fieldPath: string
-    memberKey: `member-${1 | 2 | 3}` | null
+    memberKey: `member-${number}` | null
     code: 'AMBIGUOUS'
     reason: string
     candidates: string[]
@@ -86,7 +86,7 @@ export type TripUnderstandingProposal = {
   }>
   confirmationQuestions: Array<{
     fieldPath: string
-    memberKey: `member-${1 | 2 | 3}` | null
+    memberKey: `member-${number}` | null
     questionKey: string
     prompt: string
     choices: string[]
@@ -99,7 +99,7 @@ export type TripDraftRevision = {
   revision: number
   tripId: string
   understanding: TripUnderstandingProposal
-  memberBindings: Partial<Record<`member-${1 | 2 | 3}`, string>>
+  memberBindings: Partial<Record<`member-${number}`, string>>
   sourceDigest: string
   createdAt: string
 }
@@ -189,7 +189,7 @@ export type CollaborationIssue = {
 
 export type ParticipantProgress = {
   participantId: string
-  memberKey: `member-${1 | 2 | 3}`
+  memberKey: `member-${number}`
   role: 'ORGANIZER' | 'MEMBER'
   accessStatus: ParticipantAccessStatus
   confirmationStatus: ConfirmationStatus

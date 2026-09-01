@@ -7,6 +7,7 @@ from app.core.errors import AppError
 from app.domain.models import ApiResponse
 from app.domain.parent_trip import (
     ParentTripCreateRequest,
+    ParentTripDayBudgetUpdate,
     ParentTripDayLinkRequest,
     ParentTripInvitationCreateRequest,
     ParentTripMemberProfileUpdate,
@@ -113,6 +114,27 @@ def link(
             payload.child_trip_id,
             organizer_token(x_parent_trip_token),
             x_organizer_token,
+        )
+    )
+
+
+@router.put("/api/v3/parent-trips/{parent_trip_id}/days/{day_index}/budget")
+def update_day_budget(
+    parent_trip_id: UUID,
+    day_index: int,
+    payload: ParentTripDayBudgetUpdate,
+    response: Response,
+    x_parent_trip_token: str | None = Header(None),
+    current: ParentTripService = Depends(service),
+) -> ApiResponse:
+    """仅允许持有父行程组织者凭证的客户端修改指定日期预算。"""
+    no_store(response)
+    return ApiResponse(
+        data=current.update_day_budget(
+            parent_trip_id,
+            day_index,
+            payload,
+            organizer_token(x_parent_trip_token),
         )
     )
 

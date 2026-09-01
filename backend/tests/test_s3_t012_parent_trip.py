@@ -8,7 +8,7 @@ import httpx
 
 from app.application.parent_trip_service import ParentTripService
 from app.core.errors import AppError
-from app.domain.parent_trip import ParentTripCreateRequest
+from app.domain.parent_trip import ParentTripCreateRequest, ParentTripDayBudgetUpdate
 from app.infrastructure.parent_trip_store import ParentTripStoreError, SqliteParentTripRepository
 from app.core.config import Settings
 from app.main import create_app
@@ -66,6 +66,23 @@ def test_parent_trip_rejects_a_start_date_before_today(tmp_path: Path):
 
     assert caught.value.code == "PARENT_TRIP_DATE_IN_PAST"
     assert caught.value.http_status == 422
+
+
+def test_parent_supports_many_days_and_each_day_budget_can_be_updated(tmp_path: Path):
+    current, _, _ = service(tmp_path)
+    token = "many-day-parent-token" * 3
+    value = current.create(request(7), token)
+
+    assert len(value.days) == 7
+    updated = current.update_day_budget(
+        value.parent_trip_id,
+        4,
+        ParentTripDayBudgetUpdate(schemaVersion="1.0", budgetCents=88_800),
+        token,
+    )
+
+    assert updated.days[4].budget_cents == 88_800
+    assert updated.total_budget_cents == 6 * 50_000 + 88_800
 
 
 def test_child_must_match_city_date_and_budget_and_cannot_be_overwritten(tmp_path: Path):
@@ -154,6 +171,15 @@ async def test_parent_trip_http_contract_round_trips_without_revealing_token(tmp
         assert body["totalBudgetCents"] == 70_000
         assert body["plannedCostCents"] is None
         assert "token" not in created.text.lower()
+        # 每日预算通过组织者专用接口修改，返回值立即重算父行程总预算。
+        budget_update = await client.put(
+            f"/api/v3/parent-trips/{parent_id}/days/1/budget",
+            headers={"X-Parent-Trip-Token": token},
+            json={"schemaVersion": "1.0", "budgetCents": 55_000},
+        )
+        assert budget_update.status_code == 200, budget_update.text
+        assert budget_update.json()["data"]["days"][1]["budgetCents"] == 55_000
+        assert budget_update.json()["data"]["totalBudgetCents"] == 85_000
         forbidden = await client.get(f"/api/v3/parent-trips/{parent_id}",
             headers={"X-Parent-Trip-Token": "wrong-token-0123456789abcdef000"})
         assert forbidden.status_code == 403

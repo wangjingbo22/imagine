@@ -94,8 +94,27 @@ async def _provider_places_for_term(
     city_resolution: object,
     center: GeoPoint,
     keywords: str,
+    citywide: bool = False,
 ) -> list[Place]:
+    """按搜索用途选择高德检索范围。
+
+    普通兴趣词仍以已确认起点为中心做附近检索，保证推荐地点不会离出发地过远；
+    硬性必去地点则使用全城关键词检索，因为硬约束不能仅因它位于起点 25 公里外
+    就被候选阶段漏掉。两条路径都只接收 Provider 返回的真实地点，不自行造点。
+    """
+
     city_context = city_resolution.cityContext
+    search_places = getattr(provider, "search_places", None)
+    if citywide and callable(search_places):
+        result = await search_places(
+            city_context,
+            keywords=keywords,
+            types=[],
+            page=1,
+            page_size=25,
+        )
+        return result.places
+
     nearby_places = getattr(provider, "nearby_places", None)
     if callable(nearby_places):
         result = await nearby_places(
@@ -350,12 +369,20 @@ async def recommendations(trip_id: UUID, request: Request) -> ApiResponse:
             address=shared.end_location_text or "",
         )
         provider_places = []
+        # 硬性必去标签使用全城精确搜索；兴趣和兜底“景点”仍使用起点附近搜索。
+        # 这样既保证“天坛”等必去地点不会因搜索半径丢失，也避免普通推荐无限扩散。
+        required_search_terms = {
+            value.strip().casefold()
+            for value in must_visit
+            if value.strip()
+        }
         for keywords in _provider_search_terms(must_visit, interests):
             provider_places.extend(await _provider_places_for_term(
                 request.app.state.location_service,
                 city_resolution=city,
                 center=start_fact.location,
                 keywords=keywords,
+                citywide=keywords.strip().casefold() in required_search_terms,
             ))
             try:
                 TrustedRecommendationService.pre_filter_provider_places(
@@ -450,7 +477,7 @@ async def collaboration_planning_trip(
     request: Request,
     response: Response,
 ) -> ApiResponse:
-    """Return the server-materialized Trip for a READY 1-3 member flow.
+    """Return the server-materialized Trip for a READY multi-member flow.
 
     The browser must not rebuild or reconfirm a collaboration-owned Trip.  The
     same readiness lease used by recommendation/planning binds this response to

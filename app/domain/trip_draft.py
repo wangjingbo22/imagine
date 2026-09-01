@@ -135,7 +135,7 @@ class UnderstandingContractModel(BaseModel):
     )
 
 
-MemberKey = Annotated[str, Field(pattern=r"^member-[1-3]$")]
+MemberKey = Annotated[str, Field(pattern=r"^member-(?:[1-9]|1[0-9]|20)$")]
 _TIME_PATTERN = r"^([01]\d|2[0-3]):[0-5]\d$"
 TimeText = Annotated[str, Field(pattern=_TIME_PATTERN)]
 Text40 = Annotated[str, Field(min_length=1, max_length=40)]
@@ -226,7 +226,7 @@ class TripUnderstandingExplicitFields(UnderstandingContractModel):
     start_location_text: Text120 | None
     end_location_text: Text120 | None
     budget_cents: int | None = Field(ge=0)
-    participants: list[ExplicitParticipantHint] = Field(min_length=0, max_length=3)
+    participants: list[ExplicitParticipantHint] = Field(min_length=0, max_length=20)
 
     @model_validator(mode="after")
     def validate_member_key_sequence(self) -> "TripUnderstandingExplicitFields":
@@ -420,13 +420,13 @@ def _normalized_values_are_unique(values: Sequence[str]) -> bool:
 class TripUnderstandingProposal(UnderstandingContractModel):
     schema_version: Literal["1.0"]
     trip: TripUnderstandingTrip
-    participants: list[ParticipantUnderstanding] = Field(min_length=1, max_length=3)
-    field_evidence: list[FieldEvidence] = Field(min_length=0, max_length=100)
-    missing_fields: list[MissingField] = Field(min_length=0, max_length=50)
-    ambiguities: list[Ambiguity] = Field(min_length=0, max_length=50)
+    participants: list[ParticipantUnderstanding] = Field(min_length=1, max_length=20)
+    field_evidence: list[FieldEvidence] = Field(min_length=0, max_length=500)
+    missing_fields: list[MissingField] = Field(min_length=0, max_length=200)
+    ambiguities: list[Ambiguity] = Field(min_length=0, max_length=200)
     confirmation_questions: list[ConfirmationQuestion] = Field(
         min_length=0,
-        max_length=50,
+        max_length=200,
     )
 
     @model_validator(mode="after")

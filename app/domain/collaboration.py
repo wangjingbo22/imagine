@@ -28,6 +28,9 @@ from app.domain.trip_draft import (
 QUESTION_IDS = (
     "trip", "party", "endpoints_budget", "preferences", "assistance", "confirm",
 )
+# 单次协作最多 20 人。这个边界保护邀请创建、冲突合并和公平评分，
+# 同时显著高于原来的三人限制，可覆盖常见家庭、朋友和小团队出行。
+MAX_PARTICIPANT_COUNT = 20
 
 JsonValue = TypeAliasType(
     "JsonValue",
@@ -132,17 +135,19 @@ class ConversationSubmission(CollaborationModel):
 
     @property
     def explicit_participant_count(self) -> int | None:
+        """只从第 2 问开头的明确人数短语读取 1–20 人。
+
+        数字形式支持完整范围；一、二、两、三继续兼容既有自然语言答案。
+        负数、零和超过容量上限的数字不会被当作有效协作人数。
+        """
         text = self.answers[1].answer
         match = re.search(
-            r"(?<!\d)(?P<count>[123一二两三])\s*(?:个)?人(?:出行|同行)?",
+            r"(?<!\d)(?P<count>20|1\d|[1-9]|[一二两三])\s*(?:个)?人(?:出行|同行)?",
             text,
         )
         if match is not None:
-            return {
-                "3": 3, "三": 3,
-                "2": 2, "二": 2, "两": 2,
-                "1": 1, "一": 1,
-            }[match.group("count")]
+            value = match.group("count")
+            return {"一": 1, "二": 2, "两": 2, "三": 3}.get(value, int(value) if value.isdigit() else 1)
         return None
 
     @property
@@ -225,7 +230,7 @@ class CollaborationIssue(CollaborationModel):
 
 class ParticipantProgress(CollaborationModel):
     participant_id: UUID
-    member_key: str = Field(pattern=r"^member-[1-3]$")
+    member_key: str = Field(pattern=r"^member-(?:[1-9]|1[0-9]|20)$")
     role: Literal["ORGANIZER", "MEMBER"]
     access_status: ParticipantAccessStatus
     confirmation_status: ParticipantConfirmationStatus
@@ -233,8 +238,8 @@ class ParticipantProgress(CollaborationModel):
 
 
 class CollaborationProgress(CollaborationModel):
-    expected_count: int = Field(ge=1, le=3)
-    confirmed_count: int = Field(ge=0, le=3)
+    expected_count: int = Field(ge=1, le=MAX_PARTICIPANT_COUNT)
+    confirmed_count: int = Field(ge=0, le=MAX_PARTICIPANT_COUNT)
     open_issue_count: int = Field(ge=0)
 
 

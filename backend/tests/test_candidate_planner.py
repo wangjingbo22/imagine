@@ -101,7 +101,8 @@ def test_candidate_plan_request_accepts_the_mode_participant_matrix(
         ("SINGLE", 3),
         ("GROUP", 0),
         ("GROUP", 1),
-        ("GROUP", 4),
+        # 规划器和 Trip Schema 使用相同的 20 人容量边界。
+        ("GROUP", 21),
     ],
     ids=[
         "single-zero",
@@ -109,7 +110,7 @@ def test_candidate_plan_request_accepts_the_mode_participant_matrix(
         "single-three",
         "group-zero",
         "group-one",
-        "group-four",
+        "group-twenty-one",
     ],
 )
 def test_candidate_plan_request_rejects_invalid_mode_participant_matrix(

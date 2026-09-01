@@ -47,6 +47,12 @@ export function MemberConversationPage() {
   const [view, setView] = useState<MemberSessionView | null>(null)
   const [description, setDescription] = useState('')
   const [answers, setAnswers] = useState<string[]>(Array(questions.length).fill(''))
+  // 把原来一整段难编辑的自然语言拆成三个明确字段。提交时仍会重新组装成
+  // 固定六问协议所需的答案文本，因此不会改变既有服务端接口。
+  const [preferenceFields, setPreferenceFields] = useState({ interests: '', mustVisit: '', avoidPlaces: '' })
+  const [memberBudget, setMemberBudget] = useState('')
+  const [careNeeds, setCareNeeds] = useState('')
+  const [finalConfirmation, setFinalConfirmation] = useState('我已查看共同信息，并确认这里填写的是我本人的需求。')
   const [step, setStep] = useState(0)
   const [reviewing, setReviewing] = useState(false)
   const [fallback, setFallback] = useState<FixedQuestionFallbackResponse | null>(null)
@@ -89,14 +95,24 @@ export function MemberConversationPage() {
         setView(current)
         const shared = current.sharedTrip
         const participant = current.participant
+        const nextPreferences = {
+          interests: participant.interests.join('、'),
+          mustVisit: participant.mustVisit.join('、'),
+          avoidPlaces: participant.avoidPlaces.join('、'),
+        }
+        const nextBudget = participant.budgetCapCents === null ? '' : String(participant.budgetCapCents / 100)
+        const nextCare = careSummary(current)
+        setPreferenceFields(nextPreferences)
+        setMemberBudget(nextBudget)
+        setCareNeeds(nextCare)
         setDescription(`参加组织者创建的${shared.cityName ?? ''}行程，并独立确认我的个人偏好与关怀限制。`)
         setAnswers([
           `城市：${shared.cityName ?? ''}；日期：${shared.travelDate ?? ''}；时间：${shared.startTime ?? ''}到${shared.endTime ?? ''}`,
           '同行信息由组织者管理；我是通过成员邀请链接加入的成员。',
           `从${shared.startLocationText ?? ''}出发；结束地：${shared.endLocationText ?? ''}；共享预算：${shared.budgetCents === null ? '' : `${shared.budgetCents / 100}元`}`,
-          `兴趣：${participant.interests.join('、')}；必去：${participant.mustVisit.join('、')}；避开：${participant.avoidPlaces.join('、')}`,
-          `个人预算上限：${participant.budgetCapCents === null ? '未设置' : `${participant.budgetCapCents / 100}元`}；${careSummary(current)}`,
-          '我已查看共同信息，并确认这里填写的是我本人的需求。',
+          `兴趣：${nextPreferences.interests}；必去：${nextPreferences.mustVisit}；避开：${nextPreferences.avoidPlaces}`,
+          `个人预算上限：${nextBudget ? `${nextBudget}元` : '未设置'}；${nextCare}`,
+          finalConfirmation,
         ])
       } catch (caught) {
         if (active) setError(caught instanceof Error ? caught.message : '邀请链接无效。')
@@ -117,8 +133,30 @@ export function MemberConversationPage() {
   const reviewedFallbackCount = reviewedFallbackAnswers.filter(Boolean).length
   const fallbackReviewComplete = reviewedFallbackCount === questions.length
 
-  function updateAnswer(value: string) {
-    setAnswers((items) => items.map((item, index) => index === step ? value : item))
+  function updatePreferences(field: keyof typeof preferenceFields, value: string) {
+    // 每次输入都同步生成第 4 问的协议文本，让“下一步”和最终提交始终读取最新值。
+    setPreferenceFields((current) => {
+      const next = { ...current, [field]: value }
+      setAnswers((items) => items.map((item, index) => index === 3
+        ? `兴趣：${next.interests}；必去：${next.mustVisit}；避开：${next.avoidPlaces}`
+        : item))
+      return next
+    })
+  }
+
+  function updateMemberLimits(budget: string, care: string) {
+    // 空预算明确序列化为“未设置”，避免后端把空字符串误判为格式错误。
+    setMemberBudget(budget)
+    setCareNeeds(care)
+    setAnswers((items) => items.map((item, index) => index === 4
+      ? `个人预算上限：${budget.trim() ? `${budget}元` : '未设置'}；${care.trim() || '没有额外关怀限制。'}`
+      : item))
+  }
+
+  function updateConfirmation(value: string) {
+    // 第 6 问保留自由补充能力，但使用完整尺寸的输入卡而不是浏览器默认小文本框。
+    setFinalConfirmation(value)
+    setAnswers((items) => items.map((item, index) => index === 5 ? value : item))
   }
 
   async function submit(reviewedFallback = false) {
@@ -204,13 +242,13 @@ export function MemberConversationPage() {
     {fallback && <section className="fallback-review-card member-fallback-review"><div className="fallback-review-card__head"><span><Sparkles size={18} /></span><div><strong>成员固定问题核对</strong><p>智能整理不可用时，请逐项确认；6 / 6 后会使用你核对过的答案生成成员草稿。</p></div></div><ol className="fallback-review-list">{fallback.fallback.items.map((item, index) => <li key={item.questionId} className={reviewedFallbackAnswers[index] ? 'is-reviewed' : ''}><div className="fallback-review-item__content"><span>问题 {index + 1}</span><strong>{questions[index][1]}</strong><p>{item.answer}</p></div><div className="fallback-review-item__actions"><button className="button button--soft" type="button" onClick={() => editFallbackAnswer(index)}>修改此项</button><label><input type="checkbox" checked={reviewedFallbackAnswers[index] ?? false} onChange={() => toggleFallbackReview(index)} /><span><Check size={15} />答案准确</span></label></div></li>)}</ol><div className="fallback-review-footer"><div><p role="status" aria-live="polite">已核对 {reviewedFallbackCount} / {questions.length} 项。</p>{fallbackReviewNotice && <p className="fallback-review-notice" role="alert">{fallbackReviewNotice}</p>}</div><button className="button button--primary" type="button" disabled={loading} onClick={() => void retryReviewedFallback()}>{loading ? '正在生成成员草稿…' : fallbackReviewComplete ? '六项已核对，生成成员草稿' : `先勾选剩余 ${questions.length - reviewedFallbackCount} 项`} <ArrowRight size={18} /></button></div></section>}
     {!fallback && !reviewing && view.confirmationStatus !== 'CONFIRMED' && <>
       <label className="field-label" htmlFor="member-goal">先说说你对这趟旅行的期待</label>
-      <textarea id="member-goal" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="例如：我更喜欢慢节奏，也不想走太久。" />
-      <section className="draft-confirmation"><div className="draft-confirmation__heading"><span><Sparkles size={18} /></span><div><strong>问题 {step + 1} / 6</strong><p>{questions[step][1]}</p></div></div>
+      <div className="member-answer-card member-answer-card--goal"><Sparkles size={20} /><textarea id="member-goal" className="member-answer-textarea" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="例如：我更喜欢慢节奏，也不想走太久。" /></div>
+      <section className="draft-confirmation member-question-card"><div className="draft-confirmation__heading"><span><Sparkles size={18} /></span><div><strong>问题 {step + 1} / 6</strong><p>{questions[step][1]}</p></div></div>
         {step < 3 ? <div className="shared-trip-card__grid" role="group" aria-label="组织者已确认的共享行程，只读">
           {step === 0 && <><article><MapPin size={15} /><span>目的城市</span><strong>{view.sharedTrip.cityName || '待组织者补充'}</strong></article><article><CalendarDays size={15} /><span>出行日期</span><strong>{view.sharedTrip.travelDate || '待组织者补充'}</strong></article><article><Clock3 size={15} /><span>可用时间</span><strong>{view.sharedTrip.startTime && view.sharedTrip.endTime ? `${view.sharedTrip.startTime} — ${view.sharedTrip.endTime}` : '待组织者补充'}</strong></article></>}
           {step === 1 && <article><UsersRound size={15} /><span>成员权限</span><strong>同行人数与组织者由创建者管理</strong></article>}
           {step === 2 && <><article><MapPin size={15} /><span>起终点</span><strong>{view.sharedTrip.startLocationText || '待补充'} → {view.sharedTrip.endLocationText || '待补充'}</strong></article><article><WalletCards size={15} /><span>共享预算</span><strong>{view.sharedTrip.budgetCents === null ? '待补充' : `¥${view.sharedTrip.budgetCents / 100}`}</strong></article></>}
-        </div> : <textarea value={answers[step]} onChange={(event) => updateAnswer(event.target.value)} placeholder="请输入你的回答" />}
+        </div> : step === 3 ? <div className="member-preference-grid"><label><span>兴趣偏好</span><input value={preferenceFields.interests} onChange={(event) => updatePreferences('interests', event.target.value)} placeholder="例如：历史文化、美食" /><small>多个内容可用顿号分隔</small></label><label><span>硬性必去地点</span><input value={preferenceFields.mustVisit} onChange={(event) => updatePreferences('mustVisit', event.target.value)} placeholder="例如：故宫、天坛" /><small>生成方案时必须全部纳入</small></label><label><span>希望避开的地点</span><input value={preferenceFields.avoidPlaces} onChange={(event) => updatePreferences('avoidPlaces', event.target.value)} placeholder="例如：酒吧、拥挤商场" /><small>这些地点不会进入候选</small></label></div> : step === 4 ? <div className="member-limits-grid"><label><span><WalletCards size={16} />个人预算上限（元，可不填）</span><input type="number" min="0" inputMode="decimal" value={memberBudget} onChange={(event) => updateMemberLimits(event.target.value, careNeeds)} placeholder="例如：500" /></label><label><span>步行、换乘、休息或其他关怀需求</span><textarea className="member-answer-textarea" value={careNeeds} onChange={(event) => updateMemberLimits(memberBudget, event.target.value)} placeholder="例如：连续步行不超过 800 米，每 60 分钟休息一次" /></label></div> : <div className="member-answer-card"><textarea className="member-answer-textarea" value={finalConfirmation} onChange={(event) => updateConfirmation(event.target.value)} placeholder="请确认信息，或补充不能妥协的限制" /></div>}
         {step < 3 && <p className="field-help" role="status">这是组织者确认的共同安排。成员会话只能核对，不能改写共享事实。</p>}
         <div className="planner-actions"><button className="button button--ghost" type="button" disabled={step === 0 || loading} onClick={() => setStep((value) => value - 1)}>上一个问题</button>{step < 5 ? <button className="button button--primary" type="button" disabled={!currentStepReady || loading} onClick={() => setStep((value) => value + 1)}>下一个问题 <ArrowRight size={18} /></button> : <button className="button button--primary" type="button" disabled={!ready || loading} onClick={() => void submit()}>整理并查看确认 <ArrowRight size={18} /></button>}</div>
       </section>

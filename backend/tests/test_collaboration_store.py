@@ -92,6 +92,7 @@ def test_fixed_six_questions_must_be_complete_and_ordered() -> None:
         ("2个人出行；组织者昵称：张三", 2),
         ("三人同行；组织者昵称：小二", 3),
         ("1个人出行；组织者昵称：两两", 1),
+        ("12个人出行；组织者昵称：领队", 12),
     ],
 )
 def test_party_count_comes_from_the_party_phrase_not_the_nickname(
