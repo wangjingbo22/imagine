@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,10 +13,15 @@ import pytest
 from app.api.model_access import require_account_model_credentials
 from app.application.plan_service import PlanVersionService
 from app.application.workflow_service import WorkflowService
+from app.application.amap_service import AmapLocationService
+from app.core.errors import AppError
+from app.domain.models import CityContext, TravelMode
+from app.infrastructure.cache import SqliteProviderCache
 from app.infrastructure.plan_store import SqlitePlanVersionRepository
 from app.infrastructure.workflow_store import SqliteWorkflowRepository
 from app.main import create_app
 from app.schemas.trip import CreateSingleDayTrip
+from app.schemas.trip import GeoPoint, ProviderConfig
 from backend.tests.plan_support import UnusedLocationService
 
 
@@ -82,6 +88,58 @@ def _assert_preview_left_no_planning_state(database_path: Path) -> None:
         assert connection.execute(
             "SELECT COUNT(*) FROM candidate_plan_reviews"
         ).fetchone() == (0,)
+
+
+class _FailingRouteClient:
+    async def plan_route(self, **_: Any) -> dict[str, Any]:
+        raise AppError("PROVIDER_TIMEOUT", "provider timed out", 503, True)
+
+
+@pytest.mark.asyncio
+async def test_route_error_does_not_fall_back_to_matching_verified_cache(tmp_path: Path) -> None:
+    cache = SqliteProviderCache(tmp_path / "route_cache.sqlite3")
+    city = CityContext(
+        country_code="CN",
+        city_code="310000",
+        city_name="Shanghai",
+        center=GeoPoint(longitude=121.4737, latitude=31.2304),
+        provider_config=ProviderConfig(provider="AMAP", coordinate_system="GCJ02"),
+    )
+    origin = GeoPoint(longitude=121.4737, latitude=31.2304)
+    destination = GeoPoint(longitude=121.4900, latitude=31.2350)
+    parameters = {
+        "cityCode": city.city_code,
+        "origin": origin.model_dump(),
+        "destination": destination.model_dump(),
+        "mode": TravelMode.DRIVING.value,
+        "strategy": None,
+    }
+    cache.put(
+        provider="AMAP",
+        operation="route_driving",
+        city_code=city.city_code,
+        parameters=parameters,
+        payload={"route": {"paths": [{"distance": "1000", "duration": "600"}]}},
+        ttl_seconds=1_800,
+        fetched_at=datetime.now(UTC),
+    )
+    service = AmapLocationService(
+        client=_FailingRouteClient(),  # type: ignore[arg-type]
+        cache=cache,
+        place_ttl_seconds=86_400,
+        route_ttl_seconds=1_800,
+    )
+
+    with pytest.raises(AppError) as captured:
+        await service.plan_route(
+            city,
+            origin=origin,
+            destination=destination,
+            mode=TravelMode.DRIVING,
+            strategy=None,
+        )
+
+    assert captured.value.code == "PROVIDER_TIMEOUT"
 
 
 @pytest.mark.asyncio

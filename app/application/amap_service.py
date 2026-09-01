@@ -56,6 +56,7 @@ class AmapLocationService:
         parameters: dict[str, Any],
         ttl_seconds: int,
         online_call: Callable[[], Awaitable[dict[str, Any]]],
+        allow_cache_fallback: bool = True,
     ) -> FetchResult:
         try:
             payload = await online_call()
@@ -78,6 +79,8 @@ class AmapLocationService:
                 ),
             )
         except AppError as online_error:
+            if not allow_cache_fallback:
+                raise online_error
             cached = self.cache.get(
                 provider="AMAP",
                 operation=operation,
@@ -349,6 +352,7 @@ class AmapLocationService:
             city_code=city.city_code,
             parameters=parameters,
             ttl_seconds=self.route_ttl_seconds,
+            allow_cache_fallback=False,
             online_call=lambda: self.client.plan_route(
                 city_code=city.city_code,
                 origin=origin,

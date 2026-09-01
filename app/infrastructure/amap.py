@@ -35,7 +35,13 @@ class AmapClient:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def _get(self, path: str, parameters: dict[str, Any]) -> dict[str, Any]:
+    async def _get(
+        self,
+        path: str,
+        parameters: dict[str, Any],
+        *,
+        retry_attempts: int | None = None,
+    ) -> dict[str, Any]:
         if not self.api_key:
             raise AppError(
                 "AMAP_KEY_MISSING",
@@ -48,7 +54,8 @@ class AmapClient:
             "key": self.api_key,
             "output": "JSON",
         }
-        for attempt in range(self._retry_attempts):
+        attempts = self._retry_attempts if retry_attempts is None else max(1, retry_attempts)
+        for attempt in range(attempts):
             try:
                 response = await self._client.get(path, params=request_parameters)
                 response.raise_for_status()
@@ -60,7 +67,7 @@ class AmapClient:
                     503,
                     True,
                 )
-                if attempt == self._retry_attempts - 1:
+                if attempt == attempts - 1:
                     raise error from exc
             except httpx.HTTPStatusError as exc:
                 error = AppError(
@@ -76,7 +83,7 @@ class AmapClient:
                     503,
                     504,
                 }
-                if not retryable_status or attempt == self._retry_attempts - 1:
+                if not retryable_status or attempt == attempts - 1:
                     raise error from exc
             except httpx.RequestError as exc:
                 error = AppError(
@@ -85,7 +92,7 @@ class AmapClient:
                     503,
                     True,
                 )
-                if attempt == self._retry_attempts - 1:
+                if attempt == attempts - 1:
                     raise error from exc
             except ValueError as exc:
                 raise AppError(
@@ -111,7 +118,7 @@ class AmapClient:
                     )
                 if provider_error is None:
                     return payload
-                if not provider_error.retryable or attempt == self._retry_attempts - 1:
+                if not provider_error.retryable or attempt == attempts - 1:
                     raise provider_error
 
             await asyncio.sleep(self._retry_backoff_seconds * (2**attempt))
@@ -225,13 +232,15 @@ class AmapClient:
 
         if mode is TravelMode.TRANSIT:
             parameters["city"] = city_code
-            return await self._get("/v3/direction/transit/integrated", parameters)
+            return await self._get(
+                "/v3/direction/transit/integrated", parameters, retry_attempts=1
+            )
         if mode is TravelMode.WALKING:
-            return await self._get("/v3/direction/walking", parameters)
+            return await self._get("/v3/direction/walking", parameters, retry_attempts=1)
         if mode is TravelMode.DRIVING:
-            return await self._get("/v3/direction/driving", parameters)
+            return await self._get("/v3/direction/driving", parameters, retry_attempts=1)
         if mode is TravelMode.BICYCLING:
-            return await self._get("/v4/direction/bicycling", parameters)
+            return await self._get("/v4/direction/bicycling", parameters, retry_attempts=1)
         raise AppError("INVALID_ROUTE_MODE", "不支持的路线方式", 422, False)
 
 
