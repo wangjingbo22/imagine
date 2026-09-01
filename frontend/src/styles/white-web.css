@@ -758,6 +758,10 @@ body,
   color: var(--web-blue);
 }
 
+.map-card__toolbar button {
+  min-height: 44px;
+}
+
 .map-canvas {
   background:
     linear-gradient(27deg, transparent 48%, rgba(37, 99, 235, 0.055) 49%, rgba(37, 99, 235, 0.055) 51%, transparent 52%),
@@ -2228,7 +2232,7 @@ body,
 }
 
 .adjustment-quick-actions button {
-  min-height: 31px;
+  min-height: 44px;
   padding: 0 7px;
   color: var(--web-blue);
   font-size: 8px;
