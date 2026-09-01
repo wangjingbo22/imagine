@@ -492,7 +492,7 @@ export function PlannerPage() {
               <small>当前版本规划单日行程</small>
             </label>
             <div className="input-card">
-              <span><Clock3 size={18} /> 可用时间</span>
+              <span><Clock3 size={18} /> 出行时间</span>
               <div className="time-input-row">
                 <input aria-invalid={Boolean(scheduleError)} aria-label="开始时间" min={startTimeMin} type="time" value={startTime} onFocus={() => setTemporalNow(new Date())} onChange={(event) => setStartTime(event.target.value)} />
                 <span>至</span>

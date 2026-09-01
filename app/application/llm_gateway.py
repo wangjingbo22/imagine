@@ -575,7 +575,7 @@ def _organizer_trip_understanding_proposal(
     ]
     trip_budget = _fixed_question_budget_cents(
         request.raw_conversation,
-        r"(?:共享预算|本次行程总预算|同行行程总预算)\s*[:：]\s*(\d+(?:\.\d{1,2})?)",
+        r"(?:共享预算|单人预算|本次行程总预算|同行行程总预算)\s*[:：]\s*(\d+(?:\.\d{1,2})?)",
     )
     if trip_budget is not None:
         trip["budgetCents"] = trip_budget
@@ -696,7 +696,7 @@ def _organizer_source_text(
     value: object,
 ) -> str:
     if field_path == "trip.budgetCents":
-        pattern = r"(?:共享预算|本次行程总预算|同行行程总预算)\s*[:：]\s*(\d+(?:\.\d{1,2})?)"
+        pattern = r"(?:共享预算|单人预算|本次行程总预算|同行行程总预算)\s*[:：]\s*(\d+(?:\.\d{1,2})?)"
     elif field_path.endswith(".budgetCapCents"):
         pattern = r"(?:组织者)?个人预算上限\s*[:：]\s*(\d+(?:\.\d{1,2})?)"
     else:

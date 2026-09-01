@@ -120,9 +120,9 @@ class ConversationSubmission(CollaborationModel):
     @property
     def transcript(self) -> str:
         headings = (
-            "行程基础（目标、城市、日期、可用时间）",
+            "行程基础（目标、城市、日期、出行时间）",
             "同行信息（人数、组织者）",
-            "出发地、结束地与共享费用",
+            "出发地、结束地与行程预算",
             "个人偏好（兴趣与地点限制）",
             "个人限制（预算、步行、换乘、休息、关怀）",
             "最终确认与不可妥协限制",

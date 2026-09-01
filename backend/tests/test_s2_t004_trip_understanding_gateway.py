@@ -384,7 +384,10 @@ async def test_organizer_trip_uses_one_compact_call_and_maps_to_unified_proposal
 
 
 @pytest.mark.asyncio
-async def test_organizer_fixed_question_budgets_and_evidence_are_server_grounded() -> None:
+@pytest.mark.parametrize("budget_label", ["共享预算", "单人预算"])
+async def test_organizer_fixed_question_budgets_and_evidence_are_server_grounded(
+    budget_label: str,
+) -> None:
     request = TripUnderstandingRequest.model_validate_json(
         json.dumps(
             {
@@ -392,8 +395,8 @@ async def test_organizer_fixed_question_budgets_and_evidence_are_server_grounded
                 "scope": "FULL_TRIP",
                 "referenceDate": "2026-08-26",
                 "rawConversation": (
-                    "目的城市：北京；出行日期：2026-09-06；可用时间：09:00到18:00；"
-                    "从北京站出发；结束地：北京站；共享预算：900；"
+                    "目的城市：北京；出行日期：2026-09-06；出行时间：09:00到18:00；"
+                    f"从北京站出发；结束地：北京站；{budget_label}：900；"
                     "组织者昵称：测试用户；组织者个人预算上限：500元；"
                     "关怀模式：ORDINARY"
                 ),

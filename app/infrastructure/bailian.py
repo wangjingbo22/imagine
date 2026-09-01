@@ -37,7 +37,7 @@ budgetCents, interests, mustVisit, avoidPlaces。
 7. 只输出 JSON，不要 Markdown、解释或额外字段。
 8. 输入会按【】分段：cityName、travelDate、startTime、endTime 只能来自
 【行程基础】或【用户初始描述】；startLocationText、endLocationText、budgetCents
-只能来自【出发地、结束地与共享费用】或【用户初始描述】；interests、mustVisit、avoidPlaces
+只能来自【出发地、结束地与行程预算】或【用户初始描述】；interests、mustVisit、avoidPlaces
 只能来自【个人偏好】或【最终确认与不可妥协限制】。不要把段落标题、下一段文本或
 “偏好/喜欢吃”等文字拼接进地点。没有明确的起点或终点必须填 null。
 """
@@ -120,10 +120,11 @@ JSON Schema 的对象。不要解释、不要输出 Markdown、不要展示思�
 
 {_ORGANIZER_TRIP_SCHEMA}
 
-这是已经填写完整的六问表单，只做信息抽取，不生成攻略，也不要生成缺失项、歧义或追问。
+这是已经填写完整的固定问卷，只做信息抽取，不生成攻略，也不要生成缺失项、歧义或追问。
 提取规则：
-- trip 的城市、日期、起止时间只来自【行程基础】；起点、终点、行程总预算只来自
-  【出发地、结束地与行程费用】。预算转换为人民币分整数，例如 900 元返回 90000。
+- trip 的城市、日期、起止时间只来自【行程基础】；起点、终点和行程总预算只来自
+  【出发地、结束地与行程预算】。多人读取“同行行程总预算”或“共享预算”，单人读取
+  “本次行程总预算”或“单人预算”；预算转换为人民币分整数，例如 900 元返回 90000。
 - participants 数量严格等于【同行信息】的人数，memberKey 必须从 member-1 起连续编号，
   最多支持 member-20。第一位是组织者；尚未填写个人资料的受邀成员保留 null、[] 和 null careDraft，
   不得编造昵称、预算、偏好或关怀需求。

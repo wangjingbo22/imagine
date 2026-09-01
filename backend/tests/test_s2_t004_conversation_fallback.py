@@ -69,15 +69,17 @@ def _request(
 
 
 def _reviewed_request(*, participant_count: int = 2) -> OrganizerConversationRequest:
+    time_label = "出行时间" if participant_count == 1 else "可用时间"
+    budget_label = "单人预算" if participant_count == 1 else "共享预算"
     return OrganizerConversationRequest(
         schemaVersion="1.0",
         referenceDate="2026-08-31",
         naturalLanguageRequest="想在北京轻松玩一天，参观历史景点并品尝北京特色美食。",
         reviewedFallback=True,
         answers=[
-            {"questionId": "trip", "answer": "目的城市：北京；出行日期：2026-09-06；可用时间：09:00到18:00"},
+            {"questionId": "trip", "answer": f"目的城市：北京；出行日期：2026-09-06；{time_label}：09:00到18:00"},
             {"questionId": "party", "answer": f"{participant_count}个人出行；组织者昵称：测试用户"},
-            {"questionId": "endpoints_budget", "answer": "从北京站出发；结束地：北京站；共享预算：500"},
+            {"questionId": "endpoints_budget", "answer": f"从北京站出发；结束地：北京站；{budget_label}：500"},
             {"questionId": "preferences", "answer": "喜欢历史文化和美食，必去故宫和天坛，不去酒吧。"},
             {"questionId": "assistance", "answer": "组织者个人预算上限：500元；关怀模式：ORDINARY（普通出行（无额外关怀限制））。"},
             {"questionId": "confirm", "answer": "确认；没有其他不可妥协限制。"},
@@ -283,6 +285,17 @@ async def test_reviewed_fixed_answers_create_deterministic_group_revision_when_m
     assert stored["recognition_source"] == "REVIEWED_FIXED_QUESTIONS"
     assert stored["degraded_reason"] == "LLM_UNAVAILABLE"
     assert stored["llm_call_count"] == 2
+
+
+def test_reviewed_single_answers_accept_travel_time_and_single_budget() -> None:
+    proposal = reviewed_fallback_proposal(_reviewed_request(participant_count=1))
+
+    assert proposal.trip.start_time == "09:00"
+    assert proposal.trip.end_time == "18:00"
+    assert proposal.trip.budget_cents == 50_000
+    assert len(proposal.participants) == 1
+    evidence = {item.field_path: item.source_text for item in proposal.field_evidence}
+    assert evidence["trip.budgetCents"] == "500"
 
 
 @pytest.mark.asyncio

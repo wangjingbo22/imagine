@@ -201,7 +201,8 @@ test('organizer page serially rolls the collaboration version and prepares READY
   assert.match(page, /function applyGroupOrganizerTestPreset\(\)/)
   assert.match(page, /setEntryMode\('group'\)/)
   assert.match(page, /setPartyCount\(2\)/)
-  assert.match(page, /updateParty\(mode === 'single' \? 1 : 2\)/)
+  assert.match(page, /updateParty\(1, '旅行者'\)/)
+  assert.match(page, /updateParty\(2, ''\)/)
   assert.match(page, /填入北京多人组织者模板/)
 })
 
@@ -226,19 +227,19 @@ test('home group card opens the planner directly in multiplayer creation mode', 
   assert.match(planner, /opensGroupCreation \? 'group' : null/)
 })
 
-test('fixed-question fallback requires an explicit six-answer review and a fresh retry key', async () => {
+test('fixed-question fallback requires an explicit visible-answer review and a fresh retry key', async () => {
   const page = await readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8')
-  assert.match(page, /reviewedFallbackCount === questions\.length/)
-  assert.match(page, /六项已核对，重新智能整理/)
+  assert.match(page, /reviewedFallbackCount === visibleQuestionCount/)
+  assert.match(page, /全部已核对，重新智能整理/)
   assert.match(page, /还需勾选 \$\{remaining\} 项“答案准确”/)
   assert.match(page, /fallback-review-list li:not\(\.is-reviewed\) input/)
-  assert.match(page, /先勾选剩余 \$\{questions\.length - reviewedFallbackCount\} 项/)
+  assert.match(page, /先勾选剩余 \$\{visibleQuestionCount - reviewedFallbackCount\} 项/)
   assert.doesNotMatch(page, /disabled=\{!fallbackReviewComplete \|\| loading\}/)
   assert.match(page, /conversationKey\.current = null\s+await analyze\(true\)/)
   assert.match(page, /reviewedFallback: preserveReviewedFallback/)
   assert.match(page, /在确认资料前仍不会调用 Provider 或规划/)
   assert.match(page, /智能整理服务暂不可用/)
-  assert.match(page, /已保留 6 \/ 6 核对结果/)
+  assert.match(page, /已保留 \$\{visibleQuestionCount\} \/ \$\{visibleQuestionCount\} 核对结果/)
   assert.match(page, /再次尝试智能整理/)
 })
 
@@ -250,7 +251,7 @@ test('reviewed fallback revision renders authoritative degradation without model
   assert.match(domain, /source: 'MODEL_PROPOSAL' \| 'REVIEWED_FIXED_QUESTIONS'/)
   assert.match(domain, /degradedReason: string \| null/)
   assert.match(page, /result\.recognition\.source === 'REVIEWED_FIXED_QUESTIONS'/)
-  assert.match(page, /本次百炼未成功，草稿来自已核对的六项回答/)
+  assert.match(page, /本次百炼未成功，草稿来自已核对的 \$\{visibleQuestionCount\} 项回答/)
   assert.match(page, /result\.recognition\.degradedReason/)
   assert.doesNotMatch(page, /百炼成功/)
 })
