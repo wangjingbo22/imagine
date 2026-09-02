@@ -259,7 +259,7 @@ export function ConversationPlannerPage() {
     : step === 2
       ? Boolean(routeFields.start.trim() && routeFields.end.trim() && (entryMode === 'single' || routeFields.budget.trim()))
       : step === 4
-        ? Boolean(usesInheritedDailyBudget || personalBudget.trim())
+        ? Boolean(personalBudget.trim())
       : Boolean(answers[step].trim())
   const revision = result?.revision ?? null
   const preview = useMemo(() => revision?.understanding.trip, [revision])
@@ -311,7 +311,14 @@ export function ConversationPlannerPage() {
         ? restored.step
         : (restoredVisibleIndexes[0] ?? 0)
       setDescription(restored.description)
-      setAnswers([...restored.answers])
+      const restoredAnswers = [...restored.answers]
+      if (isParentDay && restoredMode === 'single' && inheritedDailyBudget && !restoredAnswers[4]?.trim()) {
+        restoredAnswers[4] = organizerAssistanceAnswer(
+          restored.assistanceMode,
+          restored.personalBudget || inheritedDailyBudget,
+        )
+      }
+      setAnswers(restoredAnswers)
       setTripFields(restored.tripFields)
       setCustomTimeWindow(restored.customTimeWindow)
       setTimeDraft(restored.customTimeWindow ?? {
@@ -321,7 +328,9 @@ export function ConversationPlannerPage() {
       setRouteFields(restored.routeFields)
       setOrganizerNickname(restored.organizerNickname)
       setPartyCount(restored.partyCount)
-      setPersonalBudget(restored.personalBudget)
+      setPersonalBudget(restored.personalBudget || (
+        isParentDay && restoredMode === 'single' ? inheritedDailyBudget : ''
+      ))
       setAssistanceMode(restored.assistanceMode)
       setEntryMode(restoredMode)
       setQuestionnaireStarted(restored.questionnaireStarted)
@@ -884,6 +893,7 @@ export function ConversationPlannerPage() {
           {!questionnaireStarted && <div className="goal-start-actions"><span className={description.trim() ? 'is-ready' : ''} role="status">{description.trim() ? `${isParentDay ? '今天的' : '总体'}期待已填写，可以开始。` : `请先填写${isParentDay ? '今天的期待' : '总体期待'}。`}</span><button aria-controls="trip-questionnaire" className="button button--primary" disabled={!description.trim()} type="button" onClick={startQuestionnaire}>开始回答 {visibleQuestionCount} 个问题 <ArrowRight size={18} /></button></div>}
           {questionnaireStarted && <section className="question-bubble" id="trip-questionnaire"><div className="question-bubble__meta"><span>问题 {visibleStepIndex + 1} / {visibleQuestionCount}</span><span>{Math.round(((visibleStepIndex + 1) / visibleQuestionCount) * 100)}%</span></div><h3>{currentQuestionLabel}</h3>
             {step === 0 ? <><div className="question-field-cards question-field-cards--trip"><label><span><MapPin size={16} />目的城市</span><input value={tripFields.city} onChange={(event) => updateTripField('city', event.target.value)} /></label><label><span><CalendarDays size={16} />出发日期</span><input aria-invalid={Boolean(scheduleError)} disabled={Boolean(parentTripId)} min={today} type="date" value={tripFields.startDate} onFocus={() => setTemporalNow(new Date())} onChange={(event) => updateTripField('startDate', event.target.value)} />{parentTripId && <small>由多日行程统一设置</small>}</label><label><span><CalendarDays size={16} />结束日期</span><input aria-invalid={Boolean(scheduleError)} disabled={Boolean(parentTripId)} min={tripFields.startDate || today} type="date" value={tripFields.endDate} onFocus={() => setTemporalNow(new Date())} onChange={(event) => updateTripField('endDate', event.target.value)} />{parentTripId && <small>当前为单日子行程</small>}</label></div><p className="default-planning-window"><Clock3 size={16} /><span>{canContinueAsMultiDay ? `共 ${dayCount} 天，将进入多日行程并逐日规划。` : planningTimeWindow ? `系统默认按 ${planningTimeWindow.startTime}–${planningTimeWindow.endTime} 规划，整理完成后仍可调整。` : '今天的默认规划时间已经结束。'}</span></p>{scheduleError && <p className="form-error" role="alert">{scheduleError}</p>}</> : step === 1 ? <div className="question-field-cards"><label><span>组织者昵称</span><input value={organizerNickname} onChange={(event) => updateOrganizerName(event.target.value)} placeholder="例如：小明" /></label><label><span>同行人数</span><input type="number" min="2" max={MAX_PARTICIPANT_COUNT} step="1" inputMode="numeric" value={partyCount} onChange={(event) => updateParty(Number(event.target.value))} /><small>自定义填写，支持 2–20 人</small></label></div> : step === 2 ? <div className="question-field-cards question-field-cards--route"><label><span><MapPin size={16} />出发地</span><input value={routeFields.start} onChange={(event) => updateRouteField('start', event.target.value)} /></label><label><span><MapPin size={16} />结束地</span><input value={routeFields.end} onChange={(event) => updateRouteField('end', event.target.value)} /></label>{(entryMode === 'group' || Boolean(parentTripId)) && <label><span><WalletCards size={16} />{parentTripId ? '当日预算（多日行程已分配）' : '同行行程总预算'}</span><input type="number" min="0" inputMode="decimal" value={routeFields.budget} readOnly={Boolean(parentTripId)} onChange={(event) => updateRouteField('budget', event.target.value)} />{parentTripId && <small>自动沿用多日行程预算，无需重复填写</small>}</label>}</div> : step === 4 ? <div className={`question-field-cards question-field-cards--assistance${usesInheritedDailyBudget ? ' question-field-cards--single-field' : ''}`}>{!usesInheritedDailyBudget && <label className="budget-limit-field"><span><WalletCards size={16} />个人预算上限（元）</span><input inputMode="numeric" value={personalBudget} onChange={(event) => { setPersonalBudget(event.target.value); updateAssistance(assistanceMode, event.target.value) }} placeholder="例如：500" /></label>}<label className="care-mode-field"><span><HeartHandshake size={16} />关怀模式</span><div className="care-mode-select"><select value={assistanceMode} onChange={(event) => updateAssistance(event.target.value)}><option value="ORDINARY">普通出行</option><option value="PARENT_CHILD">亲子出行</option><option value="LOW_STAMINA">低体力出行</option><option value="MOBILITY_ASSISTANCE_BETA">行动辅助</option></select><ChevronDown aria-hidden="true" size={18} /></div></label></div> : <textarea className="conversation-textarea conversation-textarea--answer" value={answers[step]} onChange={(event) => updateAnswer(event.target.value)} placeholder="用自然语言回答即可，不用填表。" />}
+            {step === 4 && usesInheritedDailyBudget && <div className="question-field-cards question-field-cards--assistance"><label className="budget-limit-field"><span><WalletCards size={16} />个人预算上限（元）</span><input inputMode="numeric" value={personalBudget} onChange={(event) => { setPersonalBudget(event.target.value); updateAssistance(assistanceMode, event.target.value) }} placeholder="例如：500" /><small>已按多日行程预算预填，可按当天实际情况修改。</small></label></div>}
             <div className="planner-actions"><button className="button button--ghost" type="button" disabled={visibleStepIndex === 0} onClick={() => moveQuestion(-1)}>上一个问题</button>{!isLastQuestion ? <button className="button button--primary" type="button" disabled={!currentStepReady} onClick={() => moveQuestion(1)}>{step === 0 && canContinueAsMultiDay ? '继续创建多日行程' : '下一个问题'} <ArrowRight size={18} /></button> : <button className="button button--primary" type="button" disabled={!isReady || loading} onClick={() => void analyze()}>{loading ? '正在整理需求…' : '完成问答并智能整理'} <ArrowRight size={18} /></button>}</div>
           </section>}
         </section>}

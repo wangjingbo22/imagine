@@ -1,9 +1,8 @@
-import { AlertCircle, Map, Maximize2, X } from 'lucide-react'
+import { Map, Maximize2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { GeoPoint, ProviderRoute, TravelMode } from '../domain/trip'
 import {
-  getAmapJsApiConfig,
   loadAmapJsApi,
   type AMapMapInstance,
   type AMapNamespace,
@@ -11,7 +10,6 @@ import {
   type AMapPosition,
 } from '../lib/amapJsApi'
 import type { LocationEvidence } from '../services/amapPlan'
-import { userFacingErrorMessage } from '../utils/userFacingError'
 
 interface RouteOverviewProps {
   cityName: string
@@ -144,16 +142,12 @@ function AmapRouteCanvas({
   expanded = false,
 }: RouteOverviewProps & { expanded?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [mapError, setMapError] = useState('')
-  const config = getAmapJsApiConfig()
 
   useEffect(() => {
     const container = containerRef.current
     if (!container || !evidence || evidence.routes.length === 0) return
     let disposed = false
     let map: AMapMapInstance | null = null
-    setMapError('')
-
     void loadAmapJsApi()
       .then((amap) => {
         if (disposed) return
@@ -170,11 +164,9 @@ function AmapRouteCanvas({
         populateMap(amap, map, evidence, startLocationText || '行程起点')
         window.setTimeout(() => map?.resize(), 0)
       })
-      .catch((error: unknown) => {
-        if (!disposed) {
-          setMapError(error instanceof Error ? error.message : '高德地图加载失败')
-        }
-      })
+      // A transient provider/network failure should not obscure route facts.
+      // A later route refresh or remount retries loading the JS API.
+      .catch(() => undefined)
 
     return () => {
       disposed = true
@@ -192,21 +184,9 @@ function AmapRouteCanvas({
     )
   }
 
-  const missingConfig = !config.key || !config.securityJsCode
-  const message = missingConfig
-    ? '地图暂时无法加载，请联系维护人员检查地图配置。'
-    : userFacingErrorMessage(mapError, '地图暂时无法加载，请稍后重试。')
-
   return (
     <div className={`real-route-map${expanded ? ' real-route-map--expanded' : ''}`}>
       <div aria-label={`${cityName}高德路线地图`} className="real-route-map__container" ref={containerRef} />
-      {message && (
-        <div className="real-route-map__error" role="alert">
-          <AlertCircle size={22} />
-          <strong>{missingConfig ? '高德底图尚未配置' : '高德底图加载失败'}</strong>
-          <span>{message}</span>
-        </div>
-      )}
       <div className="real-route-map__city">{cityName} · 高德地图</div>
       <div className="real-route-map__legend" aria-label="分段路线">
         {evidence.routes.map((route, index) => (
