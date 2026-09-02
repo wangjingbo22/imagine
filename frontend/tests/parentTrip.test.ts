@@ -71,6 +71,11 @@ test('parent context survives recommendation and workspace navigation', async ()
   assert.match(workspace, /返回多日行程规划/)
 })
 
+test('a child trip using its inherited daily budget does not require a hidden personal budget', async () => {
+  const planner = await readFile(new URL('../src/pages/ConversationPlannerPage.tsx', import.meta.url), 'utf8')
+  assert.match(planner, /step === 4\s*\? Boolean\(usesInheritedDailyBudget \|\| personalBudget\.trim\(\)\)/)
+})
+
 test('multi-day travel mode is preserved outside the simplified parent dashboard', async () => {
   const [parentPage, planner] = await Promise.all([
     readFile(new URL('../src/pages/ParentTripPage.tsx', import.meta.url), 'utf8'),

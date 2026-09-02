@@ -259,7 +259,7 @@ export function ConversationPlannerPage() {
     : step === 2
       ? Boolean(routeFields.start.trim() && routeFields.end.trim() && (entryMode === 'single' || routeFields.budget.trim()))
       : step === 4
-        ? Boolean(personalBudget.trim())
+        ? Boolean(usesInheritedDailyBudget || personalBudget.trim())
       : Boolean(answers[step].trim())
   const revision = result?.revision ?? null
   const preview = useMemo(() => revision?.understanding.trip, [revision])
